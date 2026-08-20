@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### T17 final integration
+
+- Consolidated Gates A-E as implemented and bounded-test verified. Gate F is
+  structurally implemented but remains scientifically pending until real
+  nOuter 4 phase-E evidence and future approved campaign evidence exist.
+- Recorded the synchronized final contracts: Work Case schema 3, solver
+  schema 15, Validation Lab schema 11 and application/backend API 26.
+- Kept the final recommendation deliberately conservative: native WSL,
+  existing canonical data, no campaign expansion, no Docker/GPU promotion and
+  no convergence claim from incomplete evidence.
+- Passed a bounded 43-test integration regression spanning Gates A-F plus the
+  Git publication and Docker strategy safeguards.
+
 ### T16 DEV-DOCKER: experimental-only decision
 
 - Audited the existing OpenFOAM 14 Dockerfile and Compose prototype without

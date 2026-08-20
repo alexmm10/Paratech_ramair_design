@@ -279,6 +279,16 @@ runtime has no usable Docker server and container MPI/ABI performance has not
 been demonstrated. Production continues on native WSL/OpenFOAM 14; promotion
 requires explicit approval and a bounded identical-numerics benchmark.
 
+### Final integration state
+
+T17 closes the software restructuring with Work Case schema 3, solver schema
+15, Validation Lab schema 11 and API 26. Gates A-E are implemented and covered
+by bounded evidence. Gate F is intentionally open at the scientific level:
+nOuter 4 is running phase E and no full convergence campaign has been launched.
+Do not infer acceptance or independence until those real data pass the stored
+settling, cycle, PSD/coherence, GCI and matched-physical-time criteria. See
+`FINAL_INTEGRATION_REPORT.md` for the handoff summary.
+
 ### Canonical URANS identity
 
 Exactly one mutable production case exists for each structured key:
