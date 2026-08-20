@@ -211,6 +211,20 @@ ladder progressively before crossing space or confirming 16 degrees. All
 accepted comparisons require the same physical time, signal-based settling,
 at least ten cycles and Welch PSD/coherence evidence including `W=1/St`.
 
+The adaptive decision layer advances only from stored, approved evidence.
+Pair comparisons require identical physical collection time, demonstrated
+settling, continuous signals, uniform samples and ten or more relevant cycles;
+all configured mean/RMS/frequency/PSD thresholds must pass. Three compatible
+grids can publish observed order, extrapolated scalar and fine/medium GCI with
+an asymptotic-range check.
+
+For Open campaigns the complete 3x6 URANS matrix remains visible as deferred
+capacity. Expansion is held until fixed-geometry Coarse/Medium/Fine RANS
+diagnostics cover stagnation, lip separation, reattachment, internal pressure,
+recirculation and wake. Divergence or unbounded inlet backflow requires review;
+the diagnostic gate is prohibited from changing geometry, moving the inlet,
+replacing a mesh or launching the URANS matrix.
+
 ### Canonical URANS identity
 
 Exactly one mutable production case exists for each structured key:

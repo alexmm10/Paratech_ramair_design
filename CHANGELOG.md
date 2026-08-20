@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### CONV-CLOSED / CONV-OPEN: adaptive evidence gates
+
+- Added pairwise acceptance that rejects unequal physical windows, fewer than
+  ten cycles, missing settling/continuous signals or incomplete mean, RMS,
+  frequency and PSD evidence. Nyquist alone cannot declare convergence.
+- Added a persisted three-grid GCI calculation with observed order,
+  extrapolated value, convergence type and asymptotic-range check.
+- Closed campaigns unlock the optimized or Cummings sequence one case at a
+  time at 16 degrees before allowing 8-degree confirmation.
+- Open campaigns expose all 3x6 URANS combinations as deferred capacity while
+  requiring fixed-geometry Coarse/Medium/Fine RANS diagnostics, progressive
+  Medium temporal evidence, a matched-deltaT spatial crossing and only then
+  16-degree confirmation.
+- Added an Open divergence gate for stagnation, lip separation, reattachment,
+  internal pressure, recirculation and wake evidence. It holds expansion
+  without changing geometry, inlet placement or an active mesh.
+
 ### CONV-LAB / POST-CONVERGENCE: schema 11 campaign structure
 
 - Migrated Validation Lab from schema 10 to schema 11 through an atomic,

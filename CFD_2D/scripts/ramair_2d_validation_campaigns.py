@@ -231,6 +231,19 @@ def _case_record(
         "deltaT_s": dt_s,
         "deltaT_star": dt_star,
     }
+    dependencies = [
+        {
+            "role": "mesh",
+            "entity_id": str(mesh["id"]),
+            "revision_id": str(mesh.get("mesh_hash") or ""),
+        },
+    ]
+    if dt_star is not None:
+        dependencies.append({
+            "role": "rans_checkpoint",
+            "entity_id": str(mesh["id"]),
+            "revision_id": "RESOLVE_COMPATIBLE_REVIEWED_CHECKPOINT",
+        })
     return {
         "case_key": _sha256_json(scientific),
         "label": label,
@@ -240,18 +253,7 @@ def _case_record(
         "geometry_reference": str(mesh.get("geometry_package") or ""),
         "mesh_reference": str(mesh.get("mesh_package") or ""),
         "mesh_revision": str(mesh.get("mesh_hash") or ""),
-        "dependencies": [
-            {
-                "role": "mesh",
-                "entity_id": str(mesh["id"]),
-                "revision_id": str(mesh.get("mesh_hash") or ""),
-            },
-            {
-                "role": "rans_checkpoint",
-                "entity_id": str(mesh["id"]),
-                "revision_id": "RESOLVE_COMPATIBLE_REVIEWED_CHECKPOINT",
-            },
-        ],
+        "dependencies": dependencies,
         "settling": {
             "mode": "physical_signal_windows",
             "excluded_from_statistics": True,
@@ -341,9 +343,15 @@ def build_campaign(
                     reason="RANS_DIAGNOSTICS_PRECEDE_URANS",
                     existing=existing,
                 ))
-            levels = MESH_LEVELS if strategy == "full_capacity" else ("medium",)
-            for level in levels:
+            # Keep the complete 3x6 capacity visible in both strategies.  The
+            # progressive strategy only unlocks Medium first; Coarse/Fine are
+            # explicit deferred spatial-crossing records, never hidden work.
+            for level in MESH_LEVELS:
                 for index, dt_star in enumerate(OPEN_DT_STAR):
+                    if strategy == "progressive_medium_first" and level != "medium":
+                        reason = "AWAIT_MEDIUM_TEMPORAL_CONVERGENCE"
+                    else:
+                        reason = "AWAIT_RANS_DIAGNOSTICS_AND_PREVIOUS_TIMESTEP"
                     cases.append(_case_record(
                         topology=topology,
                         label=f"a{angle:g}-{level}-T{index + 1}",
@@ -353,7 +361,7 @@ def build_campaign(
                         tc_s=tc_s,
                         collection_time_star=float(contract["screening_collection_time_star"]),
                         state="DEFERRED",
-                        reason="AWAIT_RANS_DIAGNOSTICS_AND_PREVIOUS_TIMESTEP",
+                        reason=reason,
                         existing=existing,
                     ))
     campaign = {

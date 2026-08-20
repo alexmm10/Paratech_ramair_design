@@ -138,9 +138,9 @@ def test_open_campaign_defers_urans_until_fixed_geometry_rans_diagnostics(
         strategy="progressive_medium_first",
         angles_deg=[8.0],
     )
-    assert len(campaign["cases"]) == 9
+    assert len(campaign["cases"]) == 21
     assert sum(row["kind"] == "RANS_DIAGNOSTIC" for row in campaign["cases"]) == 3
-    assert sum(row["state"] == "DEFERRED" for row in campaign["cases"]) == 6
+    assert sum(row["state"] == "DEFERRED" for row in campaign["cases"]) == 18
     assert campaign["methodology"]["geometry_must_remain_fixed"] is True
     assert campaign["methodology"]["minimum_cycles"] == 10
 
