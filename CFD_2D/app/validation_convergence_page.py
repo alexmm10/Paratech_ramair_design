@@ -25,6 +25,7 @@ from workflow_backend import (
     save_validation_study_config,
     validation_monitor_snapshot,
     validation_live_execution,
+    validation_campaign_command,
     validation_urans_case_snapshot,
     validation_urans_queue_command,
     validation_smoke_command,
@@ -2552,6 +2553,75 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
                     )
 
     if section == "Convergencia malla-tiempo":
+        selected_topology = (
+            "open"
+            if top_section == "Convergencia espacio-tiempo"
+            and subsection == "Abierto"
+            else "closed"
+        )
+        st.markdown("### Campaña progresiva schema 11")
+        st.caption(
+            "Este plan solo escribe manifiestos pequeños: indexa casos ya "
+            "ejecutados y bases RANS sin copiarlos ni lanzar OpenFOAM. La "
+            "matriz completa de 18 combinaciones por ángulo queda como "
+            "capacidad, no como ejecución automática."
+        )
+        campaign_engine = dict(config.get("campaign_engine") or {})
+        topology_policy = dict(campaign_engine.get(selected_topology) or {})
+        angle_order = list(topology_policy.get("angle_order_deg") or (
+            [16.0, 8.0] if selected_topology == "closed" else [8.0, 16.0]
+        ))
+        default_strategy = str(topology_policy.get("default_strategy") or (
+            "optimized" if selected_topology == "closed" else "progressive_medium_first"
+        ))
+        strategy_options = (
+            ["optimized", "cummings", "full_capacity"]
+            if selected_topology == "closed"
+            else ["progressive_medium_first", "full_capacity"]
+        )
+        campaign_columns = st.columns(2)
+        strategy = campaign_columns[0].selectbox(
+            "Estrategia",
+            strategy_options,
+            index=(
+                strategy_options.index(default_strategy)
+                if default_strategy in strategy_options else 0
+            ),
+            key=f"validation-campaign-strategy-{selected_topology}",
+        )
+        selected_angles = campaign_columns[1].multiselect(
+            "Ángulos y orden científico",
+            angle_order,
+            default=angle_order,
+            key=f"validation-campaign-angles-{selected_topology}",
+        )
+        if st.button(
+            "Crear o actualizar el manifiesto de campaña",
+            disabled=not selected_angles,
+            key=f"validation-campaign-write-{selected_topology}",
+        ):
+            start_job(
+                f"validation_campaign_{selected_topology}",
+                validation_campaign_command(
+                    root,
+                    topology=selected_topology,
+                    strategy=strategy,
+                    angles_deg=selected_angles,
+                    write=True,
+                ),
+            )
+        campaign_id = (
+            f"{selected_topology}_{strategy}_alpha_"
+            + "_".join(
+                ("m" if float(value) < 0 else "p")
+                + f"{abs(float(value)):g}".replace(".", "p")
+                for value in selected_angles
+            )
+        )
+        _json_panel(
+            active / "campaigns" / campaign_id / "campaign_manifest.json",
+            "Manifiesto de campaña, dependencias y decisiones",
+        )
         if st.button(
             "Actualizar comparación con ejecuciones URANS aceptadas",
             key="validation-space-time-update",
@@ -2568,12 +2638,6 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
                     str(root),
                 ],
             )
-        selected_topology = (
-            "open"
-            if top_section == "Convergencia espacio-tiempo"
-            and subsection == "Abierto"
-            else "closed"
-        )
         _json_panel(
             active
             / "convergence/urans_space_time"

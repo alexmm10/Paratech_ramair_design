@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### CONV-LAB / POST-CONVERGENCE: schema 11 campaign structure
+
+- Migrated Validation Lab from schema 10 to schema 11 through an atomic,
+  metadata-only update with the original configuration backed up and a
+  preservation report. Existing meshes, RANS bases, URANS cases, PIMPLE
+  studies and postprocess products remain in their canonical locations.
+- Added an extensible campaign engine with exact closed/open temporal ladders,
+  immutable review history, explicit dependencies and progressive execution
+  policy. Existing cases are indexed instead of copied; the 18-case matrix per
+  angle is capacity and is never launched automatically.
+- Encoded joint space-time acceptance, physical settling, at least ten cycles,
+  Welch PSD/coherence and `W=1/St`. Closed defaults to 16 degrees before 8;
+  Open defaults to RANS diagnostics and a fixed-geometry Medium ladder at 8
+  degrees before any spatial crossing or 16-degree confirmation.
+- Added the campaign planner to the non-technical Validation Lab UI and bumped
+  the synchronized application/backend contract to API 26.
+
 ### POST-GENERAL: portable ParaView views and auditable final window
 
 - Added deterministic selection of the final continuous `forceCoeffs` segment,

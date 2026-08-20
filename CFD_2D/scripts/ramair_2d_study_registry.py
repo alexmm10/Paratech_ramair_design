@@ -26,7 +26,7 @@ from ramair_2d_urans_contract import RUN_STATUSES as URANS_RUN_STATUSES
 
 STUDY_ID = "closed_open_M0p15_Re1p9e6_alpha8"
 RESULTS_CASE_NAME = "RamAir_closed_open_mesh_convergence_M0p15_Re1p9e6"
-STUDY_CONFIG_SCHEMA_VERSION = 10
+STUDY_CONFIG_SCHEMA_VERSION = 11
 ACTIVE_RELATIVE = Path("CFD_2D/validation_studies") / STUDY_ID
 STATE_RELATIVE = Path("CFD_2D/app_state/validation_convergence_workspace.json")
 RESULTS_STUDY_RELATIVE = Path("Convergence Studies") / STUDY_ID
@@ -278,10 +278,11 @@ def default_study_config() -> dict[str, Any]:
         "schema_version": STUDY_CONFIG_SCHEMA_VERSION,
         "study_id": STUDY_ID,
         "title": "Validation & Convergence Lab",
-        "purpose": "Joint closed/open spatial-temporal convergence at one common condition.",
+        "purpose": "Joint closed/open spatial-temporal convergence with progressive campaigns.",
         "operating_condition": condition,
         "study_angle_deg": 8.0,
-        "angle_locked": True,
+        "study_angles_deg": [8.0, 16.0],
+        "angle_locked": False,
         "not_a_polar": True,
         "validation_study": {
             "enabled": True,
@@ -416,7 +417,8 @@ def default_study_config() -> dict[str, Any]:
         },
         "pimple_outer_study": {
             "topology": "closed",
-            "mesh_level": "coarse",
+            "mesh_level": "medium",
+            "dt_s": 1.25e-4,
             "outer_correctors": [2, 3, 4],
             "settling_tc": 5.0,
             "sampling_tc": 20.0,
@@ -472,6 +474,42 @@ def default_study_config() -> dict[str, Any]:
             "overlap_fraction": 0.5,
             "minimum_cycles": 10,
             "preferred_cycles": 20,
+            "cross_spectra": True,
+            "coherence": True,
+            "wave_number_definition": "W=1/St",
+        },
+        "campaign_engine": {
+            "schema_version": 1,
+            "execution_policy": "progressive",
+            "supported_angles_deg": [8.0, 16.0],
+            "mesh_levels": ["coarse", "medium", "fine"],
+            "full_matrix_per_angle": 18,
+            "automatic_full_matrix": False,
+            "same_physical_time_required": True,
+            "minimum_cycles": 10,
+            "accepted_runs_only": True,
+            "preserve_existing_runs": True,
+            "preserve_rans_bases": True,
+            "closed": {
+                "angle_order_deg": [16.0, 8.0],
+                "dt_star_ladder": [
+                    0.01, 0.005, 0.0025, 0.00125, 0.000625, 0.0003125
+                ],
+                "default_strategy": "optimized",
+                "screening_time_star": 50.0,
+                "final_time_star": 100.0,
+            },
+            "open": {
+                "angle_order_deg": [8.0, 16.0],
+                "dt_star_ladder": [
+                    0.02, 0.01, 0.005, 0.0025, 0.00125, 0.000625
+                ],
+                "default_strategy": "progressive_medium_first",
+                "screening_time_star": 100.0,
+                "low_frequency_extension_time_star": 200.0,
+                "geometry_fixed": True,
+                "rans_diagnostics_first": True,
+            },
         },
         "safety": {
             "dry_run_default": True,
@@ -499,6 +537,7 @@ def migrate_study_config(data: dict[str, Any]) -> dict[str, Any]:
         "purpose",
         "operating_condition",
         "study_angle_deg",
+        "study_angles_deg",
         "angle_locked",
         "not_a_polar",
     ):
@@ -646,7 +685,13 @@ def migrate_study_config(data: dict[str, Any]) -> dict[str, Any]:
     validation["retained_snapshots"] = int(urans["retained_snapshots"])
     migrated["validation_study"] = validation
 
-    for section in ("pimple_outer_study", "storage", "postprocess", "temporal_packages"):
+    for section in (
+        "pimple_outer_study",
+        "storage",
+        "postprocess",
+        "temporal_packages",
+        "campaign_engine",
+    ):
         values = dict(migrated.get(section) or {})
         for key, value in defaults[section].items():
             values.setdefault(key, value)
@@ -667,6 +712,45 @@ def migrate_study_config(data: dict[str, Any]) -> dict[str, Any]:
     return migrated
 
 
+def persist_study_config_migration(
+    config_path: Path,
+    current: dict[str, Any],
+    migrated: dict[str, Any],
+) -> Path:
+    """Persist a metadata-only schema migration with one immutable backup."""
+    config_path = Path(config_path)
+    source_schema = int((current or {}).get("schema_version", 0) or 0)
+    target_schema = int((migrated or {}).get("schema_version", 0) or 0)
+    if source_schema >= target_schema:
+        return config_path
+    digest = sha256_json(current)[:12]
+    migration_root = config_path.parent / "configs/migrations"
+    backup = migration_root / f"study_config_schema{source_schema}_{digest}.json"
+    if not backup.is_file():
+        write_json_atomic(backup, current)
+    report = {
+        "schema_version": 1,
+        "operation": f"VALIDATION_LAB_SCHEMA{source_schema}_TO_SCHEMA{target_schema}",
+        "source_schema_version": source_schema,
+        "target_schema_version": target_schema,
+        "backup": str(backup),
+        "metadata_only": True,
+        "preserved": [
+            "meshes",
+            "RANS checkpoints and bases",
+            "canonical URANS runs",
+            "PIMPLE nOuter studies",
+            "postprocess products",
+        ],
+        "generated_at": utc_stamp(),
+    }
+    write_json_atomic(
+        migration_root / f"schema{target_schema}_migration_report.json",
+        report,
+    )
+    return write_json_atomic(config_path, migrated)
+
+
 def ensure_logical_workspace_layout(active: Path) -> dict[str, Any]:
     """Create the light logical layout without moving any heavy run data."""
     directories = (
@@ -676,6 +760,7 @@ def ensure_logical_workspace_layout(active: Path) -> dict[str, Any]:
         "configs/resolved_batches",
         "configs/resolved_runs",
         "configs/migrations",
+        "campaigns",
         "meshes",
         "rans",
         "urans",
@@ -1020,7 +1105,9 @@ def initialize_study(project_root: Path, *, refresh_hashes: bool = False) -> dic
         current_config = read_json(config_path, {}) or {}
         migrated_config = migrate_study_config(current_config)
         if migrated_config != current_config:
-            write_json_atomic(config_path, migrated_config)
+            persist_study_config_migration(
+                config_path, current_config, migrated_config
+            )
     if not matrix_path.is_file():
         write_json_atomic(matrix_path, default_run_matrix(registry))
     else:
@@ -1093,7 +1180,9 @@ def load_study(project_root: Path) -> dict[str, Any]:
     current_config = read_json(config_path, {}) or {}
     migrated_config = migrate_study_config(current_config)
     if migrated_config != current_config:
-        write_json_atomic(config_path, migrated_config)
+        persist_study_config_migration(
+            config_path, current_config, migrated_config
+        )
     matrix_path = active / "run_matrix.json"
     current_matrix = read_json(matrix_path, {}) or {}
     synchronized_matrix = synchronize_run_matrix_solver_controls(

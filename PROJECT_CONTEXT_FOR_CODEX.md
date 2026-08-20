@@ -1,8 +1,8 @@
 # RamAir Project Context for Codex
 
 Context version: 2026-08-20
-Application backend API: 25
-Validation Lab schema: 10  
+Application backend API: 26
+Validation Lab schema: 11
 Solver configuration schema: 15
 Work Case manifest schema: 3
 Active workspace schema: 4
@@ -43,7 +43,7 @@ future work and must not be inferred from diagnostic placeholders.
 - `Generate_RamAir_Canopy_MAIN.CATScript`: CATIA V5 model generation.
 - `run_ramair_cfd2d_app.py`: official Windows-to-WSL application launcher.
 - `CFD_2D/app/ramair_cfd2d_app.py`: Streamlit shell.
-- `CFD_2D/app/workflow_backend.py`: API 25 orchestration boundary.
+- `CFD_2D/app/workflow_backend.py`: API 26 orchestration boundary.
 - `CFD_2D/app/validation_convergence_page.py`: isolated Validation Lab UI.
 
 The UI orchestrates. Geometry, meshing, solver and postprocess algorithms live
@@ -189,12 +189,27 @@ face zone must first be converted into boundary faces, but applying it here
 would duplicate a wall that the mesh already owns. Force integration includes
 both wall patches.
 
-## 6. Validation Lab schema 10
+## 6. Validation Lab schema 11
 
 The study ID is `closed_open_M0p15_Re1p9e6_alpha8`. It owns six mesh IDs:
 `closed_coarse`, `closed_medium`, `closed_fine`, `open_coarse`,
 `open_medium` and `open_fine`. Geometry, meshes and compatible RANS checkpoints
 are preserved independently from URANS cases.
+
+Schema 11 adds metadata-only campaign manifests under `campaigns/`. A campaign
+stores the exact geometry/mesh dependencies, RANS checkpoint requirement,
+temporal ladder, angles, settling and collection windows, acceptance rules,
+case states and immutable approval revisions. Existing runs are indexed at
+their canonical paths and are never copied. The full 3x6 matrix is available
+for planning but cannot be started automatically.
+
+Closed planning defaults to the optimized `C1/C2/M1/M2/F1/F2` sequence at 16
+degrees, followed by confirmation at 8 degrees. The alternative Cummings
+sequence remains explicit. Open planning freezes geometry, requires Coarse /
+Medium / Fine RANS diagnostics at 8 degrees, then advances the Medium temporal
+ladder progressively before crossing space or confirming 16 degrees. All
+accepted comparisons require the same physical time, signal-based settling,
+at least ten cycles and Welch PSD/coherence evidence including `W=1/St`.
 
 ### Canonical URANS identity
 

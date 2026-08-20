@@ -227,7 +227,7 @@ required = {
 missing = sorted(required.difference(dir(workflow_backend)))
 if missing:
     raise SystemExit("MISSING application/backend API: " + ", ".join(missing))
-if workflow_backend.BACKEND_API_VERSION != 25:
+if workflow_backend.BACKEND_API_VERSION != 26:
     raise SystemExit(
         "MISSING compatible workflow backend: expected API 25, "
         f"found {workflow_backend.BACKEND_API_VERSION}"

@@ -66,7 +66,7 @@ from ramair_2d_urans_cases import (  # noqa: E402
 )
 
 
-BACKEND_API_VERSION = 25
+BACKEND_API_VERSION = 26
 SOLVER_CONFIG_SCHEMA_VERSION = 15
 
 
@@ -1531,6 +1531,43 @@ def validation_study_command(
     return command
 
 
+def validation_campaign_command(
+    project_root: Path,
+    *,
+    topology: str,
+    strategy: str,
+    angles_deg: Iterable[float],
+    write: bool = True,
+) -> list[str]:
+    """Build a metadata-only schema-11 campaign planning command."""
+    allowed = {
+        "closed": {"optimized", "cummings", "full_capacity"},
+        "open": {"progressive_medium_first", "full_capacity"},
+    }
+    if topology not in allowed:
+        raise ValueError("Campaign topology must be closed or open")
+    if strategy not in allowed[topology]:
+        raise ValueError(f"Unsupported {topology} campaign strategy: {strategy}")
+    angles = [float(value) for value in angles_deg]
+    if not angles:
+        raise ValueError("Select at least one campaign angle")
+    command = python_command(
+        project_root,
+        "CFD_2D/scripts/ramair_2d_validation_campaigns.py",
+        "--project-root",
+        project_root,
+        "--topology",
+        topology,
+        "--strategy",
+        strategy,
+    )
+    for value in angles:
+        command += ["--angle", str(value)]
+    if write:
+        command.append("--write")
+    return command
+
+
 def validation_smoke_command(
     project_root: Path,
     *,
@@ -1674,11 +1711,22 @@ def save_validation_study_config(
 ) -> Path:
     """Atomically save only the laboratory-owned configuration."""
     config = _migrate_validation_study_config(config)
-    if float(config.get("study_angle_deg", 8.0)) != 8.0:
-        raise ValueError("The first validation campaign is locked to alpha=8 deg")
+    campaign_engine = dict(config.get("campaign_engine") or {})
+    supported_angles = {
+        float(value)
+        for value in campaign_engine.get("supported_angles_deg", [8.0, 16.0])
+    }
+    study_angle = float(config.get("study_angle_deg", 8.0))
+    if study_angle not in supported_angles:
+        raise ValueError(
+            f"Unsupported validation angle {study_angle:g}; "
+            f"available values are {sorted(supported_angles)}"
+        )
     validation = config.get("validation_study") or {}
-    if float(validation.get("alpha_deg", 8.0)) != 8.0:
-        raise ValueError("validation_study.alpha_deg is locked to 8 deg")
+    if float(validation.get("alpha_deg", study_angle)) != study_angle:
+        raise ValueError(
+            "validation_study.alpha_deg must match the selected study angle"
+        )
     if validation.get("time_policy") != "fixed_staged":
         raise ValueError("The validation laboratory requires time_policy=fixed_staged")
     if list(validation.get("startup_factors") or []) != [0.25, 0.5, 1.0]:

@@ -43,7 +43,7 @@ from mesh_configuration import (
 )
 
 
-EXPECTED_BACKEND_API_VERSION = 25
+EXPECTED_BACKEND_API_VERSION = 26
 _REQUIRED_BACKEND_SYMBOLS = {
     "BACKEND_API_VERSION",
     "batch_postprocess_command",
@@ -71,6 +71,7 @@ _REQUIRED_BACKEND_SYMBOLS = {
     "start_application_idle_watchdog",
     "touch_application_heartbeat",
     "validation_publish_command",
+    "validation_campaign_command",
     "validation_study_command",
     "validation_study_snapshot",
     "save_validation_study_config",
@@ -148,6 +149,7 @@ from workflow_backend import (
     xfoil_check_command,
     sweep_runner_command,
     validation_publish_command,
+    validation_campaign_command,
     validation_study_command,
     validation_study_snapshot,
     save_validation_study_config,
