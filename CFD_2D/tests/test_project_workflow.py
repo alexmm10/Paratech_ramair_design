@@ -1148,6 +1148,10 @@ def test_case_writer_does_not_create_empty_polymesh(generated_project: Path) -> 
     assert "constraints" not in (case_dir / "system" / "fvConstraints").read_text(encoding="utf-8")
     assert (case_dir / "system" / "fvSchemes").read_text(encoding="utf-8").find("wallDist") >= 0
     assert json.loads((case_dir / "case_config.json").read_text(encoding="utf-8"))["mesh_status"] == "MESH_NOT_CONVERTED"
+    applied = json.loads((case_dir / "applied_solver_configuration.json").read_text(encoding="utf-8"))
+    assert applied["solver_config_schema_version"] == 15
+    assert applied["physical_override_allowed"] is False
+    assert applied["scalar_histories_retained_independently_of_purgeWrite"] is True
     summary = json.loads((case_dir / "case_input_summary.json").read_text(encoding="utf-8"))
     assert summary["velocity_source"] == "reynolds"
     assert "reference_area_m2" in summary

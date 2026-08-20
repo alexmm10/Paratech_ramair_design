@@ -236,6 +236,7 @@ def vec(v):
 
 @dataclass
 class OpenFOAMCaseConfig:
+    config_schema_version: int = 15
     solver: str = "foamRun"
     solver_module: str = "incompressibleFluid"
     turbulence_model: str = "SpalartAllmaras"
@@ -260,7 +261,7 @@ class OpenFOAMCaseConfig:
     geometry_topology: str = "closed_external_airfoil"
     numerics_profile: str = "closed_external_airfoil"
     ddt_scheme: str = "Euler"
-    n_outer_correctors: int | None = 15
+    n_outer_correctors: int | None = 10
     n_correctors: int = 2
     n_non_orthogonal_correctors: int | None = 1
     outer_corrector_residual_control: dict[str, Any] = field(default_factory=dict)
@@ -276,13 +277,14 @@ class OpenFOAMCaseConfig:
     field_write_interval_s: float | None = None
     field_write_control: str = "adjustableRunTime"
     field_write_interval_steps: int = 200
+    field_write_step_equivalent: int = 2000
     average_from_fraction: float = 0.6
     maxCo: float = 50.0
     purgeWrite: int = 24
     CofR_x_c: float = 0.25
     farfield_boundary_condition: str = "freestream"
     steady_initialization_enabled: bool = False
-    steady_max_iterations: int = 1200
+    steady_max_iterations: int = 20000
     steady_write_interval_iterations: int = 50
     steady_residual_p: float | None = 1.0e-5
     steady_residual_U: float | None = 1.0e-5
@@ -297,7 +299,10 @@ class OpenFOAMCaseConfig:
 
     @property
     def deltaT(self) -> float:
-        return self.deltaT_star * self.chord_m / max(self.velocity_m_s, 1e-12)
+        requested = self.deltaT_star
+        if self.time_step_mode != "fixed":
+            requested = min(requested, self.maxDeltaT_star)
+        return requested * self.chord_m / max(self.velocity_m_s, 1e-12)
     @property
     def maxDeltaT(self) -> float:
         return self.maxDeltaT_star * self.chord_m / max(self.velocity_m_s, 1e-12)
@@ -306,6 +311,9 @@ class OpenFOAMCaseConfig:
         return self.endTime_star * self.chord_m / max(self.velocity_m_s, 1e-12)
     @property
     def field_write_interval(self) -> float:
+        if self.field_write_step_equivalent > 0:
+            step = self.deltaT if self.time_step_mode == "fixed" else self.maxDeltaT
+            return step * self.field_write_step_equivalent
         if self.field_write_interval_s is not None:
             return self.field_write_interval_s
         return self.field_write_interval_star * self.chord_m / max(self.velocity_m_s, 1e-12)
@@ -397,7 +405,7 @@ def format_optional(value: int | float | None, spec: str = ".6g") -> str:
 def load_physical(
     case_root: Path,
     alpha: float,
-    reynolds: float,
+    reynolds: float | None = None,
     variant: str | None = None,
 ) -> OpenFOAMCaseConfig:
     phys = read_json(cfd_inputs_root(case_root) / "case_package" / "physical_config.json", {})
@@ -420,7 +428,12 @@ def load_physical(
     chord = float(variant_manifest.get("chord_m", merged_phys.get("chord_m", 1.0)))
     rho = float(merged_phys.get("rho", merged_phys.get("rho_kg_m3", 1.225)))
     mu = float(merged_phys.get("mu", merged_phys.get("mu_pa_s", 1.81e-5)))
-    Re = float(reynolds or merged_phys.get("reynolds", 4e6))
+    Re = float(merged_phys.get("reynolds", 4e6))
+    if reynolds is not None and not math.isclose(float(reynolds), Re, rel_tol=1.0e-12, abs_tol=0.0):
+        raise ValueError(
+            "--reynolds no longer overrides the CFD Case. Update case_package/physical_config.json "
+            f"instead (CFD Case Re={Re:.12g}, requested override={float(reynolds):.12g})."
+        )
     speed_of_sound = float(merged_phys.get("speed_of_sound_m_s", 340.294))
     mach_input = float(merged_phys["mach"]) if "mach" in merged_phys else None
     u_re = Re * mu / (rho * chord)
@@ -486,18 +499,38 @@ def load_physical(
             "time_step_mode must be adaptive_courant, adaptive_physics_limited or fixed; "
             f"received {time_step_mode!r}"
         )
-    outer_control = solver.get("outer_corrector_residual_control", {})
-    if not isinstance(outer_control, dict):
+    outer_control_raw = solver.get("outer_corrector_residual_control", {})
+    if not isinstance(outer_control_raw, dict):
         raise ValueError("outer_corrector_residual_control must be a JSON object")
+    raw_fields = outer_control_raw.get("fields")
+    fields: dict[str, dict[str, float]] = {}
+    if isinstance(raw_fields, dict):
+        for field_name, field_values in raw_fields.items():
+            if field_name not in {"U", "p", "nuTilda"} or not isinstance(field_values, dict):
+                raise ValueError(f"Unsupported outer residual field: {field_name!r}")
+            fields[field_name] = {
+                "tolerance": float(field_values.get("tolerance", 1.0e-4)),
+                "relTol": float(field_values.get("relTol", 0.0)),
+            }
+    else:
+        legacy_rel_tol = float(outer_control_raw.get("relative_tolerance", 0.0))
+        legacy_fields = (
+            ("U", "p")
+            if geometry_topology == "open_internal_cavity"
+            else ("U", "nuTilda")
+        )
+        for field_name in legacy_fields:
+            fields[field_name] = {
+                "tolerance": float(outer_control_raw.get(f"{field_name}_tolerance", 1.0e-4)),
+                "relTol": legacy_rel_tol,
+            }
     outer_control = {
-        "enabled": bool(outer_control.get("enabled", True)),
-        "U_tolerance": float(outer_control.get("U_tolerance", 1.0e-4)),
-        "nuTilda_tolerance": float(outer_control.get("nuTilda_tolerance", 1.0e-4)),
-        "relative_tolerance": float(outer_control.get("relative_tolerance", 0.0)),
+        "enabled": bool(outer_control_raw.get("enabled", True)),
+        "fields": fields,
     }
-    if any(outer_control[key] <= 0 for key in ("U_tolerance", "nuTilda_tolerance")):
+    if not fields or any(values["tolerance"] <= 0 for values in fields.values()):
         raise ValueError("Outer-corrector absolute tolerances must be positive")
-    if outer_control["relative_tolerance"] < 0:
+    if any(values["relTol"] < 0 for values in fields.values()):
         raise ValueError("Outer-corrector relative tolerance cannot be negative")
     validation_fixed_subiterations = bool(
         (raw_solver.get("validation_study") or {}).get("enabled", False)
@@ -553,7 +586,7 @@ def load_physical(
         geometry_topology=geometry_topology,
         numerics_profile=numerics_profile,
         ddt_scheme=ddt_scheme,
-        n_outer_correctors=optional_int(solver, "n_outer_correctors", 15, minimum=1),
+        n_outer_correctors=optional_int(solver, "n_outer_correctors", 10, minimum=1),
         n_correctors=max(1, int(solver.get("n_correctors", 2))),
         n_non_orthogonal_correctors=optional_int(
             solver, "n_non_orthogonal_correctors", 1, minimum=0
@@ -577,17 +610,18 @@ def load_physical(
         ),
         field_write_control=field_write_control,
         field_write_interval_steps=max(1, int(solver.get("field_write_interval_steps", 200))),
+        field_write_step_equivalent=max(1, int(solver.get("field_write_step_equivalent", 2000))),
         average_from_fraction=float(solver.get("average_from_fraction", 0.6)),
         maxCo=float(
             solver.get(
                 "maxCo",
-                20.0 if geometry_topology == "open_connected_cavity" else 50.0,
+                25.0 if geometry_topology == "open_internal_cavity" else 50.0,
             )
         ),
         purgeWrite=max(0, int(solver.get("purgeWrite", 24))),
         farfield_boundary_condition=farfield_boundary_condition,
         steady_initialization_enabled=bool(solver.get("steady_initialization_enabled", False)),
-        steady_max_iterations=max(10, int(solver.get("steady_max_iterations", 1200))),
+        steady_max_iterations=max(10, int(solver.get("steady_max_iterations", 20000))),
         steady_write_interval_iterations=max(1, int(solver.get("steady_write_interval_iterations", 50))),
         steady_residual_p=optional_float(steady_residual_control, "p", 1.0e-5),
         steady_residual_U=optional_float(steady_residual_control, "U", 1.0e-5),
@@ -890,7 +924,7 @@ def write_system(case_dir: Path, cfg: OpenFOAMCaseConfig, patches: list[dict[str
     force_patch_list = " ".join(wall_patches) if wall_patches else "airfoil_wall"
     (case_dir / "system").mkdir(parents=True, exist_ok=True)
     field_write_interval = (
-        cfg.field_write_interval_steps
+        cfg.field_write_step_equivalent
         if cfg.field_write_control == "timeStep"
         else cfg.field_write_interval
     )
@@ -1062,22 +1096,21 @@ relaxationFactors
     outer_control = cfg.outer_corrector_residual_control
     outer_residual_control = ""
     if bool(outer_control.get("enabled")) and not cfg.validation_fixed_subiterations:
-        rel_tol = float(outer_control.get("relative_tolerance", 0.0))
-        outer_residual_control = (
-            "    outerCorrectorResidualControl\n"
-            "    {\n"
-            "        U\n"
-            "        {\n"
-            f"            tolerance {float(outer_control['U_tolerance']):.10g};\n"
-            f"            relTol {rel_tol:.10g};\n"
-            "        }\n"
-            "        nuTilda\n"
-            "        {\n"
-            f"            tolerance {float(outer_control['nuTilda_tolerance']):.10g};\n"
-            f"            relTol {rel_tol:.10g};\n"
-            "        }\n"
-            "    }"
-        )
+        field_blocks: list[str] = []
+        for field_name, values in dict(outer_control.get("fields") or {}).items():
+            field_blocks.extend([
+                f"        {field_name}",
+                "        {",
+                f"            tolerance {float(values['tolerance']):.10g};",
+                f"            relTol {float(values['relTol']):.10g};",
+                "        }",
+            ])
+        outer_residual_control = "\n".join([
+            "    outerCorrectorResidualControl",
+            "    {",
+            *field_blocks,
+            "    }",
+        ])
     fv_solution = (
         fv_solution
         .replace("__PIMPLE_CONTROLS__", pimple_controls)
@@ -1180,6 +1213,15 @@ def case_input_summary(cfg: OpenFOAMCaseConfig, mesh_root: Path, poly_src: Path 
             "non_orthogonal": cfg.n_non_orthogonal_correctors,
         },
         "outer_corrector_residual_control": cfg.outer_corrector_residual_control,
+        "transport_correction": {
+            "transportCorrectionFinal": cfg.transport_correction_final,
+            "effective_behavior": (
+                "transport/turbulence corrected only on the final outer corrector"
+                if cfg.transport_correction_final
+                else "transport/turbulence corrected on every outer corrector"
+            ),
+            "openfoam14_source_keyword_verified": True,
+        },
         "validation_fixed_subiterations": cfg.validation_fixed_subiterations,
         "open_airfoil_wall_topology_audit": wall_topology_audit,
         "optional_steady_initialization": {
@@ -1236,12 +1278,20 @@ def case_input_summary(cfg: OpenFOAMCaseConfig, mesh_root: Path, poly_src: Path 
         "endTime_s": cfg.endTime,
         "field_write_interval_s": cfg.field_write_interval if cfg.field_write_control != "timeStep" else None,
         "field_write_interval_source": (
-            "explicit_physical_seconds"
-            if cfg.field_write_interval_s is not None
-            else "derived_from_convective_interval"
+            f"approximately_{cfg.field_write_step_equivalent}_requested_physical_steps"
+            if cfg.field_write_step_equivalent > 0
+            else (
+                "explicit_physical_seconds"
+                if cfg.field_write_interval_s is not None
+                else "derived_from_convective_interval"
+            )
         ),
         "field_write_control": cfg.field_write_control,
         "field_write_interval_steps": cfg.field_write_interval_steps,
+        "effective_field_write_interval_steps": (
+            cfg.field_write_step_equivalent if cfg.field_write_control == "timeStep" else None
+        ),
+        "field_write_step_equivalent": cfg.field_write_step_equivalent,
         "deltaT_star": cfg.deltaT_star,
         "maxDeltaT_star": cfg.maxDeltaT_star,
         "endTime_star": cfg.endTime_star,
@@ -1263,6 +1313,12 @@ def case_input_summary(cfg: OpenFOAMCaseConfig, mesh_root: Path, poly_src: Path 
         },
         "derived_fields_at_each_volume_write": ["Cp", "Co", "yPlus", "wallShearStress", "vorticity"],
         "scalar_histories_each_iteration": ["forceCoeffs", "residuals", "Courant/deltaT in solver log"],
+        "purge_write_scope": "volume fields only; function-object scalar histories are retained",
+        "physical_input_ownership": {
+            "reynolds_mach_fluid": "CFD_2D/CFD_2D_inputs/case_package/physical_config.json",
+            "chord": "selected CFD Case variant manifest",
+            "solver_override_allowed": False,
+        },
         "mesh_root": str(mesh_root),
         "converted_polyMesh_source": str(poly_src) if poly_src else None,
         "patches": [{**p, "role": patch_role(p["name"], p["type"])} for p in patches],
@@ -1356,10 +1412,10 @@ def write_case_input_summary(case_dir: Path, cfg: OpenFOAMCaseConfig, mesh_root:
         ),
         f"- endTime: {cfg.endTime:.6g} s (endTime*: {cfg.endTime_star:.6g})",
         (
-            f"- Volume-field writes: every {cfg.field_write_interval_steps} time steps"
+            f"- Volume-field writes: every {cfg.field_write_step_equivalent} time steps"
             if cfg.field_write_control == "timeStep"
             else f"- Volume-field writes: every {cfg.field_write_interval:.6g} s "
-                 f"(source: {'explicit seconds' if cfg.field_write_interval_s is not None else 'derived from field_write_interval*'})"
+                 f"(approximately {cfg.field_write_step_equivalent} requested physical steps)"
         ),
         (
             f"- maxCo: {cfg.maxCo:.6g}"
@@ -1421,7 +1477,7 @@ def write_case(
     case_root: Path,
     variant: str,
     alpha: float,
-    reynolds: float,
+    reynolds: float | None = None,
     require_approval: bool = True,
     overwrite: bool = False,
     require_converted_polymesh: bool = False,
@@ -1468,7 +1524,29 @@ def write_case(
     write_0(case_dir, cfg, boundary_patches)
     write_constant(case_dir, cfg)
     write_system(case_dir, cfg, boundary_patches)
-    write_json(case_dir / "case_config.json", asdict(cfg) | {"variant": variant, "alpha_deg": alpha, "mesh_root": str(mesh_root), "mesh_status": mesh_status, "converted_polyMesh_source": str(poly_src) if poly_src else None, "boundary_patches": boundary_patches})
+    applied_config = asdict(cfg) | {
+        "variant": variant,
+        "alpha_deg": alpha,
+        "mesh_root": str(mesh_root),
+        "mesh_status": mesh_status,
+        "converted_polyMesh_source": str(poly_src) if poly_src else None,
+        "boundary_patches": boundary_patches,
+    }
+    write_json(case_dir / "case_config.json", applied_config)
+    write_json(case_dir / "applied_solver_configuration.json", {
+        "schema_version": 1,
+        "solver_config_schema_version": cfg.config_schema_version,
+        "physical_source": "CFD Case (physical_config.json + selected variant manifest)",
+        "physical_override_allowed": False,
+        "effective_configuration": applied_config,
+        "transportCorrectionFinal_semantics": (
+            "final outer corrector only"
+            if cfg.transport_correction_final
+            else "every outer corrector"
+        ),
+        "field_write_equivalence_steps": cfg.field_write_step_equivalent,
+        "scalar_histories_retained_independently_of_purgeWrite": True,
+    })
     write_case_input_summary(case_dir, cfg, mesh_root, poly_src, boundary_patches)
     if poly_src is None:
         readme_mesh = "No `constant/polyMesh` folder was created because no converted mesh was found. Run `ramair_2d_mesh_builder.py --write-openfoam-mesh --check-mesh` on a system with OpenFOAM tools, then rewrite the case or pass `--require-converted-polymesh` to enforce this."
@@ -1489,7 +1567,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--variant", required=True)
     p.add_argument("--alpha", type=float, default=None, help="Write one angle of attack.")
     p.add_argument("--alphas", type=float, nargs="+", default=None, help="Write several angle cases sequentially; no solver is executed.")
-    p.add_argument("--reynolds", type=float, default=4e6)
+    p.add_argument(
+        "--reynolds",
+        type=float,
+        default=None,
+        help="Deprecated compatibility check only; CFD Case physical_config.json is authoritative.",
+    )
     p.add_argument("--mesh-approved-required", action="store_true", default=True)
     p.add_argument("--no-mesh-approved-required", action="store_false", dest="mesh_approved_required")
     p.add_argument("--write-case", action="store_true")

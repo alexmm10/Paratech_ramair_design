@@ -669,6 +669,7 @@ FIELD_LABELS = {
     "time_step_mode": "Control del paso temporal",
     "deltaT_star": "Paso inicial deltaT*",
     "maxDeltaT_star": "Limite maximo deltaT*",
+    "field_write_step_equivalent": "Pasos fisicos aprox. entre campos",
     "endTime_star": "Duracion objetivo t*",
     "target_min_strouhal": "Strouhal minimo de interes",
     "target_max_strouhal": "Strouhal maximo de interes",
@@ -878,6 +879,7 @@ SOLVER_DESCRIPTIONS = {
     "transport_correction_final": "Si esta desactivado, actualiza el modelo de transporte/turbulencia en cada corrector externo; mejora la coherencia del criterio residual con un coste moderado.",
     "U_tolerance": "Residual absoluto de U que permite terminar antes el bucle externo PIMPLE.",
     "nuTilda_tolerance": "Residual absoluto de Spalart-Allmaras que permite terminar antes el bucle externo PIMPLE.",
+    "p_tolerance": "Residual absoluto de presion que permite terminar antes el bucle externo PIMPLE del perfil abierto.",
     "relative_tolerance": "Reduccion relativa exigida dentro del timestep. Cero obliga a alcanzar la tolerancia absoluta.",
     "deltaT_star": "Paso temporal adimensional deltaT* = deltaT U/c. Es el valor inicial en modo variable y el valor impuesto en modo constante.",
     "maxDeltaT_star": "Techo fisico adimensional del paso temporal, elegido por resolucion espectral e independencia temporal. Es la restriccion normal del modo adaptativo.",
@@ -887,6 +889,7 @@ SOLVER_DESCRIPTIONS = {
     "field_write_interval_star": "Intervalo adimensional entre campos 3D: Delta(t*)=Delta(t)U/c. 0.25 da 20 snapshots por periodo si St=0.2; no cambia el deltaT del solver.",
     "field_write_interval_s": "Intervalo fisico real [s] entre snapshots 3D cuando se usa adjustableRunTime. Si tiene valor, prevalece sobre field_write_interval_star.",
     "field_write_interval_steps": "Alternativa usada solo con timeStep: iteraciones entre snapshots 3D. Coeficientes y residuos se guardan en cada iteracion.",
+    "field_write_step_equivalent": "Cadencia de campos volumetricos expresada como numero aproximado de pasos al techo fisico solicitado. Fuerzas, residuos y Courant se conservan continuamente.",
     "purgeWrite": "Numero maximo de snapshots 3D conservados. Con 24 y Delta(t*)=0.25 se retienen seis tiempos convectivos; cero conserva todo y puede consumir mucho espacio.",
     "average_from_fraction": "Fraccion inicial del historial de fuerzas ignorada al promediar; 0.6 usa el ultimo 40%. No modifica el solver.",
     "farfield_boundary_condition": "freestream usa freestreamVelocity/freestreamPressure y permite entrada/salida segun el flujo local en un contorno circular. fixed_velocity_fallback conserva el fallback legado.",
@@ -1216,13 +1219,48 @@ def render_temporal_accuracy_editor(
     return edited
 
 
+def render_outer_residual_control(
+    control: dict[str, Any],
+    prefix: str,
+    field_names: tuple[str, ...],
+) -> dict[str, Any]:
+    """Render the exact OpenFOAM outerCorrectorResidualControl fields."""
+    output = {"enabled": bool(control.get("enabled", True)), "fields": {}}
+    output["enabled"] = st.toggle(
+        "Salida temprana por residuos",
+        value=output["enabled"],
+        key=revisioned_widget_key(f"{prefix}.enabled"),
+        help="El valor indicado es un maximo; el bucle puede terminar antes al cumplir todos los campos.",
+    )
+    source_fields = control.get("fields") if isinstance(control.get("fields"), dict) else {}
+    for field_name in field_names:
+        values = source_fields.get(field_name) if isinstance(source_fields.get(field_name), dict) else {}
+        cols = st.columns(2)
+        tolerance = cols[0].number_input(
+            f"{field_name}: tolerancia absoluta",
+            value=float(values.get("tolerance", 1.0e-4)),
+            format="%.6g",
+            min_value=1.0e-16,
+            key=revisioned_widget_key(f"{prefix}.{field_name}.tolerance"),
+        )
+        rel_tol = cols[1].number_input(
+            f"{field_name}: relTol",
+            value=float(values.get("relTol", 0.0)),
+            format="%.6g",
+            min_value=0.0,
+            key=revisioned_widget_key(f"{prefix}.{field_name}.relTol"),
+        )
+        output["fields"][field_name] = {"tolerance": float(tolerance), "relTol": float(rel_tol)}
+    return output
+
+
 def solver_config_editor() -> dict[str, Any]:
-    """Render one common solver profile plus explicit open-cavity overrides."""
+    """Render parallel closed/open OpenFOAM controls with one physical source."""
     data = load_config(ROOT, "solver")
-    st.subheader("Configuracion numerica y del solver")
+    st.subheader("Configuracion OpenFOAM")
     st.caption(
-        "Los valores comunes gobiernan todos los perfiles. El perfil abierto solo sustituye "
-        "los controles que necesita hacer mas restrictivos; no existe una copia duplicada para el perfil cerrado."
+        "Closed y Open se comparan en paralelo. Reynolds, Mach, fluido y cuerda pertenecen al CFD Case; "
+        "esta pagina solo configura numerica, ejecucion y escritura."
     )
     transfer_columns = st.columns(2)
     transfer_columns[0].download_button(
@@ -1236,7 +1274,7 @@ def solver_config_editor() -> dict[str, Any]:
         "Importar configuracion del solver",
         type=["json"],
         key=revisioned_widget_key("solver-config-upload"),
-        help="Carga todas las opciones visibles y avanzadas. Revisa los valores antes de escribir casos.",
+        help="La importacion migra primero al esquema vigente y conserva los ajustes avanzados.",
     )
     if uploaded is not None:
         try:
@@ -1256,236 +1294,123 @@ def solver_config_editor() -> dict[str, Any]:
                 st.session_state["_configuration_reload_notice"] = "Configuracion del solver importada."
                 st.rerun()
 
-    # These widgets intentionally live outside a Streamlit form. Selecting the
-    # time-step policy must rerun the page immediately so adaptive-only
-    # maxCo/maxDeltaT controls disappear when fixed deltaT is selected.
-    with st.container():
-        edited = dict(data)
-        tabs = st.tabs([
-            "General",
-            "Transitorio PIMPLE",
-            "Presupuesto temporal",
-            "Inicializacion SIMPLE",
-            "Perfil abierto",
-            "Escritura y postproceso",
-            "Trazabilidad",
-        ])
-        with tabs[0]:
-            st.caption(
-                "Modelo fisico, ejecutable y fuente de velocidad comunes. Spalart-Allmaras es el "
-                "modelo completamente implementado por el writer actual."
-            )
-            edited = render_solver_field_set(
-                edited,
-                "solver",
-                [
-                    "solver", "solver_module", "turbulence_model", "optional_secondary_model",
-                    "velocity_source", "farfield_boundary_condition",
-                ],
-            )
-        with tabs[1]:
-            st.caption(
-                "Integracion temporal implicita y acoplamiento PIMPLE. El modo variable protege "
-                "maxCo; el modo constante reproduce un deltaT* impuesto y requiere revisar Courant."
-            )
-            edited = render_solver_field_set(
-                edited,
-                "solver",
-                [
-                    "transient", "time_step_mode", "ddt_scheme", "deltaT_star",
-                ],
-            )
-            if edited.get("time_step_mode", "adaptive_physics_limited") != "fixed":
-                edited = render_solver_field_set(
-                    edited,
-                    "solver",
-                    ["maxDeltaT_star", "maxCo"],
-                )
-            else:
-                st.info(
-                    "Modo constante: controlDict escribira `adjustTimeStep no`. maxCo y "
-                    "maxDeltaT* se conservan en el archivo, pero no gobiernan esta ejecucion."
-                )
-            edited = render_solver_field_set(
-                edited,
-                "solver",
-                [
-                    "endTime_star", "n_outer_correctors", "n_correctors",
-                    "n_non_orthogonal_correctors", "transient_velocity_divergence_scheme",
-                    "transient_turbulence_divergence_scheme",
-                ],
-            )
-            outer_control = dict(edited.get("outer_corrector_residual_control") or {})
-            st.markdown("**Salida adaptativa del bucle PIMPLE**")
-            edited["outer_corrector_residual_control"] = render_solver_field_set(
-                outer_control,
-                "solver.outer_corrector_residual_control",
-                ["enabled", "U_tolerance", "nuTilda_tolerance", "relative_tolerance"],
-            )
-            edited = render_solver_field_set(
-                edited,
-                "solver",
-                ["transport_correction_final"],
-            )
-        with tabs[2]:
-            st.caption(
-                "Relaciona Strouhal, deltaT*, duracion y numero de ciclos. Nyquist es "
-                "solo un limite teorico; la tabla usa el objetivo de muestras por ciclo "
-                "y propone una secuencia de independencia temporal."
-            )
-            temporal = dict(edited.get("temporal_accuracy") or {})
-            edited["temporal_accuracy"] = render_temporal_accuracy_editor(
-                temporal,
-                "solver.temporal_accuracy",
-                edited,
-            )
-        with tabs[3]:
-            st.caption(
-                "Inicializacion RANS estacionaria comun. SIMPLE puede finalizar por residualControl "
-                "o por las metricas de fuerzas del runner; sus campos finales alimentan t=0 del transitorio."
-            )
-            edited = render_solver_field_set(
-                edited,
-                "solver",
-                ["steady_initialization_enabled", "steady_max_iterations", "steady_write_interval_iterations"],
-            )
-            steady_residual = dict(edited.get("steady_residual_control") or {})
-            st.markdown("**Criterios residualControl**")
-            edited["steady_residual_control"] = render_solver_field_set(
-                steady_residual,
-                "solver.steady_residual_control",
-                ["p", "U", "nuTilda"],
-            )
-            steady_numerics = dict(edited.get("steady_numerics") or {})
-            st.markdown("**Numerica SIMPLE**")
-            edited["steady_numerics"] = render_solver_field_set(
-                steady_numerics,
-                "solver.steady_numerics",
-                [
-                    "n_non_orthogonal_correctors", "p_relaxation", "U_relaxation",
-                    "nuTilda_relaxation", "velocity_divergence_scheme",
-                    "turbulence_divergence_scheme",
-                ],
-            )
-        with tabs[4]:
-            st.caption(
-                "Overrides exclusivos del perfil abierto con cavidad interna. Los campos ausentes "
-                "heredan automaticamente la configuracion comun."
-            )
-            profiles = dict(edited.get("topology_profiles") or {})
-            profiles.pop("closed_external_airfoil", None)
-            open_profile = dict(profiles.get("open_internal_cavity") or {})
-            open_profile.setdefault(
-                "time_step_mode",
-                edited.get("time_step_mode", "adaptive_physics_limited"),
-            )
-            st.caption(f"Perfil numerico: {open_profile.get('profile_id', 'open_internal_cavity')}")
-            open_profile = render_solver_field_set(
-                open_profile,
-                "solver.topology_profiles.open_internal_cavity",
-                [
-                    "velocity_source", "time_step_mode", "deltaT_star",
-                ],
-            )
-            if open_profile.get("time_step_mode", "adaptive_physics_limited") != "fixed":
-                open_profile = render_solver_field_set(
-                    open_profile,
-                    "solver.topology_profiles.open_internal_cavity",
-                    ["maxDeltaT_star", "maxCo"],
-                )
-            else:
-                st.info(
-                    "El perfil abierto usara deltaT* constante; sus limites maxCo/maxDeltaT* "
-                    "quedan almacenados pero no se escriben como controles activos."
-                )
-            open_profile = render_solver_field_set(
-                open_profile,
-                "solver.topology_profiles.open_internal_cavity",
-                [
-                    "field_write_interval_star", "field_write_interval_s", "purgeWrite",
-                    "n_outer_correctors", "n_correctors", "n_non_orthogonal_correctors",
-                    "transient_velocity_divergence_scheme",
-                    "transient_turbulence_divergence_scheme", "steady_max_iterations",
-                ],
-            )
-            open_outer = dict(open_profile.get("outer_corrector_residual_control") or {})
-            st.markdown("**Salida PIMPLE para cavidad abierta**")
-            open_profile["outer_corrector_residual_control"] = render_solver_field_set(
-                open_outer,
-                "solver.topology_profiles.open_internal_cavity.outer_corrector_residual_control",
-                ["enabled", "U_tolerance", "nuTilda_tolerance", "relative_tolerance"],
-            )
-            open_profile = render_solver_field_set(
-                open_profile,
-                "solver.topology_profiles.open_internal_cavity",
-                ["transport_correction_final"],
-            )
-            open_residual = dict(open_profile.get("steady_residual_control") or {})
-            st.markdown("**Criterios SIMPLE del perfil abierto**")
-            open_profile["steady_residual_control"] = render_solver_field_set(
-                open_residual,
-                "solver.topology_profiles.open_internal_cavity.steady_residual_control",
-                ["p", "U", "nuTilda"],
-            )
-            open_steady = dict(open_profile.get("steady_numerics") or {})
-            st.markdown("**Numerica SIMPLE del perfil abierto**")
-            open_profile["steady_numerics"] = render_solver_field_set(
-                open_steady,
-                "solver.topology_profiles.open_internal_cavity.steady_numerics",
-                [
-                    "n_non_orthogonal_correctors", "p_relaxation", "U_relaxation",
-                    "nuTilda_relaxation", "velocity_divergence_scheme",
-                    "turbulence_divergence_scheme",
-                ],
-            )
-            with st.expander("Presupuesto temporal de cavidad abierta", expanded=False):
-                st.caption(
-                    "Sustituye solo el rango de frecuencias, duracion de referencia y "
-                    "secuencia deltaT*; el resto de controles se hereda del bloque comun."
-                )
-                open_temporal = dict(open_profile.get("temporal_accuracy") or {})
-                open_effective = dict(edited)
-                open_effective.update(open_profile)
-                open_profile["temporal_accuracy"] = render_temporal_accuracy_editor(
-                    open_temporal,
-                    "solver.topology_profiles.open_internal_cavity.temporal_accuracy",
-                    open_effective,
-                )
-            profiles["open_internal_cavity"] = open_profile
-            edited["topology_profiles"] = profiles
-        with tabs[5]:
-            st.caption(
-                "Frecuencia de campos y estadisticas. Los coeficientes y residuos se conservan por "
-                "iteracion; estas opciones gobiernan principalmente snapshots volumetricos."
-            )
-            edited = render_solver_field_set(
-                edited,
-                "solver",
-                [
-                    "field_write_control", "field_write_interval_star", "field_write_interval_s",
-                    "field_write_interval_steps", "purgeWrite", "average_from_fraction",
-                    "velocity_profile_stations_xc", "velocity_profile_sample_points",
-                ],
-            )
-        with tabs[6]:
-            edited = render_solver_field_set(
-                edited,
-                "solver",
-                ["preset_id", "screening_note"],
-            )
-            st.caption(f"Version de esquema guardada: {max(13, int(data.get('config_schema_version', 0)))}")
-        submitted = st.button(
-            "Guardar configuracion del solver",
-            type="primary",
-            key="save-solver-configuration",
+    edited = dict(data)
+    profiles = dict(edited.get("topology_profiles") or {})
+    profiles.pop("closed_external_airfoil", None)
+    open_profile = dict(profiles.get("open_internal_cavity") or {})
+    open_profile.setdefault("time_step_mode", edited.get("time_step_mode", "adaptive_physics_limited"))
+    tabs = st.tabs(["General", "Solver Settings", "Writing & Postprocess", "Traceability"])
+
+    with tabs[0]:
+        edited = render_solver_field_set(
+            edited,
+            "solver",
+            ["solver", "solver_module", "turbulence_model", "optional_secondary_model", "velocity_source", "farfield_boundary_condition"],
         )
+        physical = read_json(ROOT / "CFD_2D/CFD_2D_inputs/case_package/physical_config.json", {}) or {}
+        selected_manifest = read_json(
+            ROOT / "CFD_2D/CFD_2D_inputs/case_package" / str(variant) / "manifest.json", {}
+        ) or {}
+        st.markdown("**Condiciones del CFD Case (solo lectura)**")
+        metrics = st.columns(4)
+        metrics[0].metric("Reynolds", f"{float(physical.get('reynolds', 0.0)):.6g}")
+        metrics[1].metric("Mach", f"{float(physical.get('mach', 0.0)):.6g}")
+        metrics[2].metric("Cuerda", f"{float(selected_manifest.get('chord_m', physical.get('chord_m', 0.0))):.6g} m")
+        metrics[3].metric("Angulos", str(len(physical.get("alphas_deg", []) or load_config(ROOT, "workflow").get("case_conditions", {}).get("alphas_deg", []))))
+        st.info("Para cambiar estas magnitudes, edita Condiciones CFD. El writer rechaza overrides de Reynolds distintos del CFD Case.")
+
+    with tabs[1]:
+        st.caption(
+            "Stationary/Transient significa inicializacion RANS estacionaria seguida de URANS transitorio. "
+            "El deltaT introducido en modo adaptativo es un techo fisico: OpenFOAM puede reducirlo por Courant, nunca superarlo."
+        )
+        closed_col, open_col = st.columns(2)
+        with closed_col:
+            st.markdown("### Closed")
+            edited = render_solver_field_set(edited, "solver", ["time_step_mode", "ddt_scheme"])
+            if edited.get("time_step_mode") == "fixed":
+                edited = render_solver_field_set(edited, "solver", ["deltaT_star"])
+            else:
+                edited = render_solver_field_set(edited, "solver", ["maxDeltaT_star", "maxCo"])
+                st.caption(f"Semilla interna deltaT*: {min(float(edited.get('deltaT_star', 0.0)), float(edited.get('maxDeltaT_star', 0.0))):.6g}")
+            edited = render_solver_field_set(
+                edited, "solver",
+                ["endTime_star", "n_outer_correctors", "n_correctors", "n_non_orthogonal_correctors", "transient_velocity_divergence_scheme", "transient_turbulence_divergence_scheme"],
+            )
+            edited["outer_corrector_residual_control"] = render_outer_residual_control(
+                dict(edited.get("outer_corrector_residual_control") or {}),
+                "solver.closed.outer",
+                ("U", "nuTilda"),
+            )
+            with st.expander("RANS initialization (Closed)", expanded=False):
+                edited = render_solver_field_set(edited, "solver", ["steady_initialization_enabled", "steady_max_iterations", "steady_write_interval_iterations"])
+                edited["steady_residual_control"] = render_solver_field_set(dict(edited.get("steady_residual_control") or {}), "solver.steady_residual_control", ["p", "U", "nuTilda"])
+                edited["steady_numerics"] = render_solver_field_set(dict(edited.get("steady_numerics") or {}), "solver.steady_numerics", ["n_non_orthogonal_correctors", "p_relaxation", "U_relaxation", "nuTilda_relaxation", "velocity_divergence_scheme", "turbulence_divergence_scheme"])
+            with st.expander("Temporal budget (Closed)", expanded=False):
+                edited["temporal_accuracy"] = render_temporal_accuracy_editor(dict(edited.get("temporal_accuracy") or {}), "solver.temporal_accuracy", edited)
+        with open_col:
+            st.markdown("### Open")
+            open_profile = render_solver_field_set(open_profile, "solver.topology_profiles.open_internal_cavity", ["velocity_source", "time_step_mode"])
+            if open_profile.get("time_step_mode") == "fixed":
+                open_profile = render_solver_field_set(open_profile, "solver.topology_profiles.open_internal_cavity", ["deltaT_star"])
+            else:
+                open_profile = render_solver_field_set(open_profile, "solver.topology_profiles.open_internal_cavity", ["maxDeltaT_star", "maxCo"])
+                st.caption(f"Semilla interna deltaT*: {min(float(open_profile.get('deltaT_star', 0.0)), float(open_profile.get('maxDeltaT_star', 0.0))):.6g}")
+            open_profile = render_solver_field_set(
+                open_profile, "solver.topology_profiles.open_internal_cavity",
+                ["endTime_star", "n_outer_correctors", "n_correctors", "n_non_orthogonal_correctors", "transient_velocity_divergence_scheme", "transient_turbulence_divergence_scheme"],
+            )
+            open_profile["outer_corrector_residual_control"] = render_outer_residual_control(
+                dict(open_profile.get("outer_corrector_residual_control") or {}),
+                "solver.open.outer",
+                ("U", "p"),
+            )
+            with st.expander("RANS initialization (Open)", expanded=False):
+                open_profile = render_solver_field_set(open_profile, "solver.topology_profiles.open_internal_cavity", ["steady_initialization_enabled", "steady_max_iterations", "steady_write_interval_iterations"])
+                open_profile["steady_residual_control"] = render_solver_field_set(dict(open_profile.get("steady_residual_control") or {}), "solver.topology_profiles.open_internal_cavity.steady_residual_control", ["p", "U", "nuTilda"])
+                open_profile["steady_numerics"] = render_solver_field_set(dict(open_profile.get("steady_numerics") or {}), "solver.topology_profiles.open_internal_cavity.steady_numerics", ["n_non_orthogonal_correctors", "p_relaxation", "U_relaxation", "nuTilda_relaxation", "velocity_divergence_scheme", "turbulence_divergence_scheme"])
+            with st.expander("Temporal budget (Open)", expanded=False):
+                effective_open = dict(edited)
+                effective_open.update(open_profile)
+                open_profile["temporal_accuracy"] = render_temporal_accuracy_editor(dict(open_profile.get("temporal_accuracy") or {}), "solver.topology_profiles.open_internal_cavity.temporal_accuracy", effective_open)
+        with st.expander("Advanced transport correction", expanded=False):
+            st.caption("false corrige transporte/turbulencia en cada outer; true solo en el ultimo. El default se conserva hasta completar la comparacion cientifica.")
+            adv_closed, adv_open = st.columns(2)
+            with adv_closed:
+                edited = render_solver_field_set(edited, "solver", ["transport_correction_final"])
+            with adv_open:
+                open_profile = render_solver_field_set(open_profile, "solver.topology_profiles.open_internal_cavity", ["transport_correction_final"])
+
+    with tabs[2]:
+        st.caption(
+            "Los campos volumetricos se escriben cada ~2000 pasos fisicos solicitados. Fuerzas, residuos y Courant/deltaT "
+            "se conservan en cada iteracion y purgeWrite no elimina esos historiales."
+        )
+        edited = render_solver_field_set(
+            edited, "solver",
+            ["field_write_control", "field_write_step_equivalent", "purgeWrite", "average_from_fraction", "velocity_profile_stations_xc", "velocity_profile_sample_points"],
+        )
+        open_profile = render_solver_field_set(open_profile, "solver.topology_profiles.open_internal_cavity", ["purgeWrite"])
+        st.success("Historiales continuos: forceCoeffs, residuos y Courant/deltaT. purgeWrite afecta solo a campos volumetricos.")
+
+    with tabs[3]:
+        edited = render_solver_field_set(edited, "solver", ["preset_id", "screening_note"])
+        st.metric("Solver config schema", _workflow_backend.SOLVER_CONFIG_SCHEMA_VERSION)
+        st.markdown(
+            "**Propiedad de datos**\n\n"
+            "- Reynolds, Mach y propiedades del fluido: `case_package/physical_config.json`.\n"
+            "- Cuerda: manifiesto de la variante del CFD Case.\n"
+            "- Numerica y escritura: esta configuracion schema 15.\n"
+            "- Cada caso escrito conserva `applied_solver_configuration.json`."
+        )
+
+    profiles["open_internal_cavity"] = open_profile
+    edited["topology_profiles"] = profiles
+    submitted = st.button("Guardar configuracion del solver", type="primary", key="save-solver-configuration")
     if submitted:
-        edited["config_schema_version"] = 13
-        profiles = dict(edited.get("topology_profiles") or {})
-        profiles.pop("closed_external_airfoil", None)
-        edited["topology_profiles"] = profiles
+        edited["config_schema_version"] = _workflow_backend.SOLVER_CONFIG_SCHEMA_VERSION
         backup = save_config(ROOT, "solver", edited)
-        st.success("Configuracion comun y overrides del perfil abierto guardados.")
+        st.success("Configuracion Closed/Open schema 15 guardada.")
         if backup:
             st.caption(f"Copia anterior: {backup}")
     return edited
@@ -3861,7 +3786,7 @@ if active_page == "Caso OpenFOAM" and workflow_case_ready:
         st.markdown(
             """
 - El techo fisico normal es `maxDeltaT*`, definido por la resolucion temporal y el contenido espectral que se desea conservar.
-- `adjustTimeStep` conserva una salvaguarda de Courant para responder a aumentos no lineales. En el flujo general se usa `maxCo=50` para perfiles cerrados y `maxCo=20` para abiertos; no son objetivos de precision.
+- `adjustTimeStep` conserva una salvaguarda de Courant para responder a aumentos no lineales. En el flujo general se usa `maxCo=50` para perfiles cerrados y `maxCo=25` para abiertos; no son objetivos de precision.
 - `backward` es implicito y de segundo orden, pero un Courant alto sigue degradando la precision temporal. No convierte en prescindible el estudio de independencia de `deltaT`.
 - `localEuler` usa pseudo-tiempo local y solo es apropiado para acelerar el inicializador estacionario; no representa tiempo fisico URANS.
 - La primera correccion debe ser geometrica: eliminar refinamiento tangencial innecesario, evitar aristas casi nulas, suavizar el crecimiento y mejorar volumen/skewness en el hotspot sin aumentar `y1` si el objetivo de `y+` lo impide.
@@ -3880,32 +3805,58 @@ if active_page == "Caso OpenFOAM" and workflow_case_ready:
         library_case_selection,
     )
     conditions = load_config(ROOT, "workflow").get("case_conditions", {})
+    configured_writer_alphas = [float(value) for value in (conditions.get("alphas_deg") or [alpha])]
     with st.form("case-writer-form"):
-        reynolds_case = st.number_input("Reynolds del caso", value=float(conditions.get("reynolds", 4.0e6)), format="%.8g", key=revisioned_widget_key("writer-reynolds"))
+        condition_cols = st.columns(3)
+        condition_cols[0].metric("Reynolds (CFD Case)", f"{float(conditions.get('reynolds', 0.0)):.6g}")
+        condition_cols[1].metric("Mach (CFD Case)", f"{float(conditions.get('mach', 0.0)):.6g}")
+        condition_cols[2].metric("Angulos disponibles", len(configured_writer_alphas))
         require_poly = st.toggle("Exigir polyMesh convertido y aprobado", value=True, key=revisioned_widget_key("writer-require-poly"))
-        write_all_alphas = st.toggle(
-            "Escribir todos los angulos definidos en Condiciones CFD",
-            value=False,
-            help="Prepara cada carpeta alpha_* de forma secuencial. El writer no ejecuta OpenFOAM.",
+        write_scope = st.radio(
+            "Angulos a preparar",
+            ["current", "all", "subset"],
+            format_func=lambda value: {
+                "current": "Angulo activo",
+                "all": "Todos los angulos del CFD Case",
+                "subset": "Subconjunto seleccionado",
+            }[value],
+            horizontal=True,
+            help="El writer prepara las carpetas de forma secuencial y no ejecuta OpenFOAM.",
             key=revisioned_widget_key("writer-all-alphas"),
+        )
+        selected_writer_alphas = st.multiselect(
+            "Subconjunto de angulos [deg]",
+            options=sorted(set(configured_writer_alphas)),
+            default=[alpha] if alpha in configured_writer_alphas else configured_writer_alphas[:1],
+            disabled=write_scope != "subset",
+            key=revisioned_widget_key("writer-subset-alphas"),
         )
         existing_case_action = st.selectbox("Caso/resultados existentes", ["archive", "delete", "keep"], index=0, key=revisioned_widget_key("writer-existing-action"))
         write_case = st.form_submit_button("Escribir caso OpenFOAM", type="primary")
     if write_case:
-        selected_case_alphas = [float(value) for value in (conditions.get("alphas_deg") or [alpha])] if write_all_alphas else [alpha]
+        selected_case_alphas = (
+            configured_writer_alphas
+            if write_scope == "all"
+            else [float(value) for value in selected_writer_alphas]
+            if write_scope == "subset"
+            else [alpha]
+        )
+        if not selected_case_alphas:
+            st.error("Selecciona al menos un angulo para preparar el caso.")
+            st.stop()
         existing_paths = [result_directory(ROOT, variant, selected_alpha) for selected_alpha in selected_case_alphas]
         backup = prepare_existing_outputs(
             ROOT,
             existing_paths,
             existing_case_action,
-            f"{variant}_{'alpha_sweep' if write_all_alphas else f'{alpha:+.3f}'}",
+            f"{variant}_{'alpha_sweep' if len(selected_case_alphas) > 1 else f'{selected_case_alphas[0]:+.3f}'}",
         )
         if backup:
             st.info(f"Salida anterior archivada en {backup}")
         start_job("openfoam_case", case_writer_command(
-            ROOT, variant=variant, alpha=alpha, reynolds=reynolds_case,
+            ROOT, variant=variant, alpha=selected_case_alphas[0],
             require_converted_polymesh=require_poly,
-            alphas=selected_case_alphas if write_all_alphas else None,
+            alphas=selected_case_alphas if len(selected_case_alphas) > 1 else None,
             existing_case_action=existing_case_action,
         ))
     cdir = case_directory(ROOT, variant, alpha)

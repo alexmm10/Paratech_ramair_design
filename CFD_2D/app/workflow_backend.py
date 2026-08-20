@@ -67,7 +67,7 @@ from ramair_2d_urans_cases import (  # noqa: E402
 
 
 BACKEND_API_VERSION = 24
-SOLVER_CONFIG_SCHEMA_VERSION = 14
+SOLVER_CONFIG_SCHEMA_VERSION = 15
 
 
 _IDLE_WATCHDOG_STARTED = False
@@ -192,22 +192,51 @@ def migrate_solver_config_schema(data: dict[str, Any]) -> dict[str, Any]:
     version = int(migrated.get("config_schema_version", 0) or 0)
     if version >= SOLVER_CONFIG_SCHEMA_VERSION:
         return migrated
-    migrated.setdefault(
-        "outer_corrector_residual_control",
-        {
-            "enabled": True,
-            "U_tolerance": 1.0e-4,
-            "nuTilda_tolerance": 1.0e-4,
-            "relative_tolerance": 0.0,
-        },
+    def residual_control(
+        raw: Any,
+        field_names: tuple[str, ...],
+    ) -> dict[str, Any]:
+        source = dict(raw) if isinstance(raw, dict) else {}
+        legacy_rel_tol = float(source.get("relative_tolerance", 0.0))
+        raw_fields = source.get("fields")
+        fields = dict(raw_fields) if isinstance(raw_fields, dict) else {}
+        normalized_fields: dict[str, dict[str, float]] = {}
+        for field_name in field_names:
+            field_source = fields.get(field_name)
+            field_data = dict(field_source) if isinstance(field_source, dict) else {}
+            legacy_tolerance = source.get(f"{field_name}_tolerance", 1.0e-4)
+            normalized_fields[field_name] = {
+                "tolerance": float(field_data.get("tolerance", legacy_tolerance)),
+                "relTol": float(field_data.get("relTol", legacy_rel_tol)),
+            }
+        return {
+            "enabled": bool(source.get("enabled", True)),
+            "fields": normalized_fields,
+        }
+
+    migrated["outer_corrector_residual_control"] = residual_control(
+        migrated.get("outer_corrector_residual_control"),
+        ("U", "nuTilda"),
     )
+    migrated["n_outer_correctors"] = min(
+        10, max(1, int(migrated.get("n_outer_correctors", 10)))
+    )
+    migrated["steady_max_iterations"] = 20000
+    migrated.setdefault("field_write_step_equivalent", 2000)
     migrated.setdefault("transport_correction_final", False)
     profiles = dict(migrated.get("topology_profiles") or {})
     open_profile = dict(profiles.get("open_internal_cavity") or {})
-    open_profile.setdefault(
-        "outer_corrector_residual_control",
-        dict(migrated["outer_corrector_residual_control"]),
+    open_profile["outer_corrector_residual_control"] = residual_control(
+        open_profile.get("outer_corrector_residual_control"),
+        ("U", "p"),
     )
+    open_profile["n_outer_correctors"] = min(
+        15, max(1, int(open_profile.get("n_outer_correctors", 15)))
+    )
+    if float(open_profile.get("maxCo", 20.0)) == 20.0:
+        open_profile["maxCo"] = 25.0
+    open_profile["steady_max_iterations"] = 20000
+    open_profile.setdefault("field_write_step_equivalent", migrated["field_write_step_equivalent"])
     open_profile.setdefault("transport_correction_final", False)
     profiles["open_internal_cavity"] = open_profile
     migrated["topology_profiles"] = profiles
@@ -744,18 +773,17 @@ def case_writer_command(
     *,
     variant: str,
     alpha: float,
-    reynolds: float,
     require_converted_polymesh: bool,
     overwrite: bool = True,
     alphas: list[float] | None = None,
     existing_case_action: str = "archive",
+    reynolds: float | None = None,
 ) -> list[str]:
     command = python_command(
         project_root,
         "CFD_2D/scripts/ramair_2d_openfoam_case_writer.py",
         "--case-root", project_root,
         "--variant", variant,
-        "--reynolds", reynolds,
         "--write-case",
     )
     if alphas:

@@ -786,7 +786,11 @@ def test_solver_editor_reruns_when_time_step_policy_changes() -> None:
     app_text = (ROOT / "CFD_2D/app/ramair_cfd2d_app.py").read_text(encoding="utf-8")
     assert 'with st.form("solver-config-form")' not in app_text
     assert 'key="save-solver-configuration"' in app_text
-    assert 'edited.get("time_step_mode", "adaptive_physics_limited") != "fixed"' in app_text
+    assert 'tabs = st.tabs(["General", "Solver Settings", "Writing & Postprocess", "Traceability"])' in app_text
+    assert 'edited.get("time_step_mode") == "fixed"' in app_text
+    assert '"subset": "Subconjunto seleccionado"' in app_text
+    assert "writer-reynolds" not in app_text
+    assert 'edited["config_schema_version"] = _workflow_backend.SOLVER_CONFIG_SCHEMA_VERSION' in app_text
     assert "ungrouped = []" in app_text
     assert "permanecen ocultos porque no intervienen" in app_text
     assert '"Detener visualizacion"' in app_text

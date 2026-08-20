@@ -132,11 +132,19 @@ synchronization.
 
 ## Time-step policy
 
-`cfd2d_solver_config.json` schema 12 includes `time_step_mode`:
+`cfd2d_solver_config.json` schema 15 includes `time_step_mode`:
 
 - `adaptive_courant` exposes `maxCo` and `maxDeltaT` and is the default;
 - `fixed` hides those adaptive limits in the application and uses the entered
   dimensional `deltaT`.
+
+In adaptive mode the entered `maxDeltaT*` is a strict physical ceiling; the
+internal seed is never allowed above it. Closed uses `maxCo=50`, up to 10 outer
+correctors and `U+nuTilda` residual exit. Open uses `maxCo=25`, up to 15 outer
+correctors and `U+p`. Volume fields use an approximately 2,000-step cadence;
+forces, residuals and Courant/deltaT are retained independently of
+`purgeWrite`. Reynolds, Mach and chord are owned by the CFD Case rather than
+this file.
 
 The fixed mode is not automatically faster. The retained bounded evidence in
 `CFD_2D/reports/mesh_studies/2026-07-27_open_efficiency_fixed_dt/` shows that

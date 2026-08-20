@@ -1,5 +1,5 @@
 {
-  "config_schema_version": 14,
+  "config_schema_version": 15,
   "preset_id": "LS1_0417_Ghoreyshi_2016_Fig10_laptop_first_tstar20",
   "solver": "foamRun",
   "solver_module": "incompressibleFluid",
@@ -7,7 +7,7 @@
   "transient": true,
   "time_step_mode": "adaptive_physics_limited",
   "ddt_scheme": "backward",
-  "n_outer_correctors": 15,
+  "n_outer_correctors": 10,
   "n_correctors": 2,
   "n_non_orthogonal_correctors": 1,
   "transient_velocity_divergence_scheme": "Gauss linearUpwind limited",
@@ -17,15 +17,23 @@
   "maxCo": 50.0,
   "outer_corrector_residual_control": {
     "enabled": true,
-    "U_tolerance": 0.0001,
-    "nuTilda_tolerance": 0.0001,
-    "relative_tolerance": 0.0
+    "fields": {
+      "U": {
+        "tolerance": 0.0001,
+        "relTol": 0.0
+      },
+      "nuTilda": {
+        "tolerance": 0.0001,
+        "relTol": 0.0
+      }
+    }
   },
   "transport_correction_final": false,
   "endTime_star": 20.0,
   "field_write_interval_star": 0.1,
   "field_write_interval_s": 0.002,
   "field_write_control": "adjustableRunTime",
+  "field_write_step_equivalent": 2000,
   "field_write_interval_steps": 200,
   "average_from_fraction": 0.6,
   "temporal_accuracy": {
@@ -52,7 +60,7 @@
   "purgeWrite": 24,
   "farfield_boundary_condition": "freestream",
   "steady_initialization_enabled": true,
-  "steady_max_iterations": 10000,
+  "steady_max_iterations": 20000,
   "steady_write_interval_iterations": 50,
   "steady_residual_control": {
     "p": 1e-05,
@@ -74,7 +82,7 @@
       "time_step_mode": "adaptive_physics_limited",
       "deltaT_star": 0.004,
       "maxDeltaT_star": 0.008,
-      "maxCo": 20.0,
+      "maxCo": 25.0,
       "field_write_interval_star": 0.1,
       "field_write_interval_s": null,
       "purgeWrite": 12,
@@ -83,14 +91,21 @@
       "n_non_orthogonal_correctors": 1,
       "outer_corrector_residual_control": {
         "enabled": true,
-        "U_tolerance": 0.0001,
-        "nuTilda_tolerance": 0.0001,
-        "relative_tolerance": 0.0
+        "fields": {
+          "U": {
+            "tolerance": 0.0001,
+            "relTol": 0.0
+          },
+          "p": {
+            "tolerance": 0.0001,
+            "relTol": 0.0
+          }
+        }
       },
       "transport_correction_final": false,
       "transient_velocity_divergence_scheme": "Gauss limitedLinearV 1",
       "transient_turbulence_divergence_scheme": "Gauss upwind",
-      "steady_max_iterations": 10000,
+      "steady_max_iterations": 20000,
       "steady_residual_control": {
         "p": 0.0001,
         "U": 0.0001,
@@ -166,5 +181,5 @@
     "timeout_hours": 24.0,
     "steady_checkpoint_timeout_min": 120.0
   },
-  "screening_note": "Topology-aware OpenFOAM 14 preset. SIMPLE uses nNonOrthogonalCorrectors=0 for both checked meshes. General URANS uses backward, a physics/spectrum-derived maxDeltaT*, up to 15 PIMPLE outer correctors and outerCorrectorResidualControl on U and nuTilda at 1e-4. maxCo=50 closed and 20 open are emergency nonlinear guards, not temporal-accuracy targets. Validation Lab studies remain fixed-deltaT/fixed-corrector experiments and explicitly disable the adaptive outer exit."
+  "screening_note": "Topology-aware OpenFOAM 14 preset. SIMPLE initialization is capped at 20000 iterations. General closed URANS uses at most 10 PIMPLE outer correctors and U+nuTilda residual control; open convergence retains at most 15 with U+p control. User maxDeltaT* is a physical ceiling, maxCo=50 closed and 25 open are emergency guards, and volume fields are written at approximately 2000 requested physical steps. transportCorrectionFinal=false retains transport/turbulence correction on every outer corrector. Validation Lab remains fixed-deltaT/fixed-corrector."
 }

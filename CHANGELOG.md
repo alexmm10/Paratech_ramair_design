@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+### UI-OPENFOAM / OF-SCIENCE: solver schema 15
+
+- Rebuilt the OpenFOAM editor as General, Solver Settings, Writing &
+  Postprocess, and Traceability, with Closed/Open controls side by side and
+  active/all/subset angle preparation.
+- Made the CFD Case the only source for Reynolds, Mach, fluid properties and
+  chord. The writer rejects a conflicting legacy Reynolds override and records
+  an `applied_solver_configuration.json` audit in every prepared case.
+- Set general Closed URANS to at most 10 PIMPLE outer correctors with
+  `U+nuTilda` residual exit; Open retains at most 15 with `U+p`. Both steady
+  RANS initializers allow 20,000 iterations. Validation Lab remains fixed.
+- Made user `maxDeltaT*` a strict adaptive ceiling, adopted emergency
+  `maxCo=50/25` for Closed/Open after a bounded OpenFOAM 14 smoke, and set
+  volume-field cadence to approximately 2,000 requested physical steps while
+  preserving scalar histories continuously.
+- Corrected solver saves that wrote schema 13, normalized legacy residual
+  controls during schema-15 migration, and documented the verified
+  `transportCorrectionFinal=false` every-outer semantics without changing its
+  default.
+
 ### MESH-SCIENCE: fractional y+, fixed fixtures and audited first-cell height
 
 - Added bounded Gmsh 4.15.2 fixtures for Delaunay 5 versus

@@ -3,7 +3,7 @@
 Context version: 2026-08-20
 Application backend API: 24  
 Validation Lab schema: 10  
-Solver configuration schema: 14  
+Solver configuration schema: 15
 Work Case manifest schema: 3
 Active workspace schema: 4
 Geometry DTO schema: 1
@@ -140,14 +140,26 @@ between bounded stages.
 
 ### 5.2 General URANS policy
 
-Solver schema 14 separates physical temporal resolution from the emergency
-Courant guard. `maxDeltaT_star` is the normal physics/spectral ceiling;
-`adjustTimeStep` remains active with `maxCo=50` for closed profiles and
-`maxCo=20` for open profiles. PIMPLE permits at most 15 outer correctors and
-can leave the loop early when absolute residuals for `U` and `nuTilda` reach
-`1e-4` (`relTol=0`). Pressure still uses its final solve but is not an outer
-exit gate. Validation Lab explicitly removes adaptive outer-exit controls and
-retains fixed `deltaT` and corrector counts.
+Solver schema 15 makes `maxDeltaT_star` the user-requested physical ceiling;
+the internal starting step is clamped to it. `adjustTimeStep` remains active
+with emergency `maxCo=50` for closed profiles and `maxCo=25` for open
+profiles. Closed PIMPLE permits at most 10 outer correctors and exits on
+`U+nuTilda`; Open retains at most 15 and exits on `U+p`. Absolute tolerance is
+`1e-4` with `relTol=0`. Validation Lab explicitly removes adaptive outer-exit
+controls and retains fixed `deltaT` and corrector counts.
+
+Steady RANS/SIMPLE initialization is capped at 20,000 iterations and feeds the
+URANS stage; it is not a second result mode. `transportCorrectionFinal=false`
+means transport/turbulence is corrected on every outer corrector and remains
+the reviewed advanced default. Volume fields are written at approximately
+2,000 requested physical steps. Forces, residuals and Courant/deltaT histories
+remain continuous and are not subject to `purgeWrite`.
+
+Reynolds, Mach and fluid properties come only from the CFD Case physical
+configuration; chord comes from its selected variant manifest. The solver UI
+does not own editable copies. Every prepared case writes
+`applied_solver_configuration.json` with exact effective values and source
+ownership.
 
 ### 5.3 Open-airfoil wall topology
 

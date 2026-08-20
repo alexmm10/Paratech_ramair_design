@@ -3,7 +3,7 @@
 ## Validation & Convergence Lab
 
 The isolated laboratory uses registry schema 10 while the general solver
-configuration uses schema 14 and backend API 24. It keeps the
+configuration uses schema 15 and backend API 24. It keeps the
 closed/open coarse-medium-fine study separate from the normal active
 workspace. Its six main sections cover meshes/conditions, solver strategy,
 RANS, URANS, space-time convergence and reports/workspace. One collapsed
@@ -43,13 +43,12 @@ No missing Cp or unconverged operating point is silently accepted.
 
 ## General URANS execution
 
-Outside Validation Lab, schema 14 treats `maxDeltaT_star` as the physical
+Outside Validation Lab, schema 15 treats `maxDeltaT_star` as the physical
 temporal-resolution ceiling and Courant as an emergency nonlinear guard. The
-closed profile default is `maxCo=50`; the open profile default is `maxCo=20`.
-Both use at most 15 PIMPLE outer correctors and may stop the outer loop early
-when `U` and `nuTilda` reach absolute residual `1e-4` with zero relative
-tolerance. Validation Lab strips this early-exit block and retains fixed
-timesteps and corrector counts for controlled comparisons.
+closed profile default is `maxCo=50`; the open profile default is `maxCo=25`.
+Closed uses at most 10 PIMPLE outer correctors with `U+nuTilda` residual exit;
+Open retains at most 15 with `U+p`. Validation Lab strips this early-exit block
+and retains fixed timesteps and corrector counts for controlled comparisons.
 
 The runner records the real solver PID/PGID and process-start token. A clean
 stop requests `writeNow`, preserves the latest root or decomposed time and
@@ -245,16 +244,16 @@ animations directly from the OpenFOAM reader.
 
 The active solver configuration is topology-aware:
 
-- closed external airfoil: at most 15 PIMPLE outer loops, two pressure
+- closed external airfoil: at most 10 PIMPLE outer loops, two pressure
   correctors, emergency `maxCo=50` and second-order implicit `backward`;
 - open connected cavity: at most 15 outer loops, two pressure correctors,
-  emergency `maxCo=20`, `limitedLinearV 1` momentum and a smaller physical
+  emergency `maxCo=25`, `limitedLinearV 1` momentum and a smaller physical
   `maxDeltaT_star` ceiling;
-- both can finish the outer loop early when `U` and `nuTilda` reach absolute
-  residual `1e-4`; Validation Lab removes this adaptive exit;
+- Closed can finish on `U+nuTilda`; Open uses `U+p`, both at absolute residual
+  `1e-4`; Validation Lab removes this adaptive exit;
 - both use Spalart-Allmaras. Other turbulence model names are rejected until
   their complete field/boundary contract is implemented.
-- both SIMPLE initializers allow up to 10000 iterations and use
+- both SIMPLE initializers allow up to 20000 iterations and use
   `nNonOrthogonalCorrectors=0`. This is the OpenFOAM 14 usual steady-state
   setting; an earlier open-profile override of 1 was removed.
 
@@ -321,7 +320,7 @@ mesh independence by itself.
 
 ### Adaptive and fixed time stepping
 
-Solver schema 14 exposes `time_step_mode` for the general workflow:
+Solver schema 15 exposes `time_step_mode` for the general workflow:
 
 - `adaptive_physics_limited` writes `adjustTimeStep yes`, normally limits the
   step with the physics-derived `maxDeltaT` and retains `maxCo` as an emergency

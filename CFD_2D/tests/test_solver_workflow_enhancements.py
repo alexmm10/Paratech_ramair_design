@@ -455,22 +455,23 @@ def test_open_wall_topology_is_explicit_and_does_not_require_baffles(tmp_path: P
 def test_general_urans_uses_adaptive_outer_exit_but_validation_does_not(tmp_path: Path) -> None:
     controls = {
         "enabled": True,
-        "U_tolerance": 1.0e-4,
-        "nuTilda_tolerance": 1.0e-4,
-        "relative_tolerance": 0.0,
+        "fields": {
+            "U": {"tolerance": 1.0e-4, "relTol": 0.0},
+            "nuTilda": {"tolerance": 1.0e-4, "relTol": 0.0},
+        },
     }
     general = tmp_path / "general"
     write_system(
         general,
         OpenFOAMCaseConfig(
-            n_outer_correctors=15,
+            n_outer_correctors=10,
             outer_corrector_residual_control=controls,
             transport_correction_final=False,
         ),
         [{"name": "airfoil_wall", "type": "wall"}],
     )
     general_solution = (general / "system/fvSolution").read_text(encoding="utf-8")
-    assert "nOuterCorrectors 15;" in general_solution
+    assert "nOuterCorrectors 10;" in general_solution
     assert "outerCorrectorResidualControl" in general_solution
     assert "transportCorrectionFinal false;" in general_solution
 
@@ -618,15 +619,20 @@ def test_canonical_open_solver_uses_requested_courant_and_steady_window() -> Non
             encoding="utf-8"
         )
     )
-    assert solver["config_schema_version"] >= 14
+    assert solver["config_schema_version"] >= 15
     assert solver["time_step_mode"] == "adaptive_physics_limited"
     assert (
         solver["topology_profiles"]["open_internal_cavity"]["time_step_mode"]
         == "adaptive_physics_limited"
     )
     assert solver["maxCo"] == pytest.approx(50.0)
-    assert solver["topology_profiles"]["open_internal_cavity"]["maxCo"] == pytest.approx(20.0)
-    assert solver["n_outer_correctors"] == 15
+    assert solver["topology_profiles"]["open_internal_cavity"]["maxCo"] == pytest.approx(25.0)
+    assert solver["n_outer_correctors"] == 10
+    assert solver["topology_profiles"]["open_internal_cavity"]["n_outer_correctors"] == 15
+    assert list(solver["outer_corrector_residual_control"]["fields"]) == ["U", "nuTilda"]
+    assert list(solver["topology_profiles"]["open_internal_cavity"]["outer_corrector_residual_control"]["fields"]) == ["U", "p"]
+    assert solver["steady_max_iterations"] == 20000
+    assert solver["field_write_step_equivalent"] == 2000
     assert solver["outer_corrector_residual_control"]["enabled"] is True
     assert workflow["execution"]["steady_force_window_samples"] >= 500
 
