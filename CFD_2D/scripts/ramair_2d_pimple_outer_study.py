@@ -336,7 +336,7 @@ def _resume_entry_selection(
 
 
 def _measurement_signature(case: Path) -> str:
-    """Hash a clone while normalizing the only permitted PIMPLE variation."""
+    """Hash frozen science while normalizing phase-owned runtime cursors."""
     digest = hashlib.sha256()
     for path in sorted(
         (item for item in case.rglob("*") if item.is_file()),
@@ -348,14 +348,43 @@ def _measurement_signature(case: Path) -> str:
         if relative.startswith("processor") or relative.startswith("postProcessing/"):
             continue
         content = path.read_bytes()
-        if relative == "system/fvSolution":
+        if relative.startswith("system/"):
             text = content.decode("utf-8", errors="replace")
-            text = re.sub(
-                r"(?m)^(\s*nOuterCorrectors\s+)[^;]+;",
-                r"\g<1><OUTER>;",
-                text,
-                count=1,
-            )
+            if relative == "system/fvSolution":
+                text = re.sub(
+                    r"(?m)^(\s*nOuterCorrectors\s+)[^;]+;",
+                    r"\g<1><OUTER>;",
+                    text,
+                    count=1,
+                )
+            elif relative == "system/fvSchemes":
+                # configure_stage owns the Euler -> backward phase cursor.
+                text = re.sub(
+                    r"(?m)^(\s*ddtSchemes\s*\{\s*default\s+)[^;]+;",
+                    r"\g<1><PHASE_SCHEME>;",
+                    text,
+                    count=1,
+                )
+            elif relative == "system/decomposeParDict":
+                # The common serial bootstrap and the MPI measurements write
+                # different transient rank counts before execution.
+                text = re.sub(
+                    r"(?m)^(\s*numberOfSubdomains\s+)[^;]+;",
+                    r"\g<1><RUNTIME_RANKS>;",
+                    text,
+                    count=1,
+                )
+            elif relative == "system/controlDict":
+                for name in (
+                    "startFrom", "startTime", "stopAt", "endTime", "deltaT",
+                    "writeControl", "writeInterval", "purgeWrite",
+                ):
+                    text = re.sub(
+                        rf"(?m)^(\s*{name}\s+)[^;]+;",
+                        rf"\g<1><PHASE_{name.upper()}>;",
+                        text,
+                        count=1,
+                    )
             content = text.encode("utf-8")
         digest.update(relative.encode("utf-8"))
         digest.update(b"\0")

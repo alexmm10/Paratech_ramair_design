@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT / "CFD_2D/scripts"))
 
 from ramair_2d_pimple_outer_study import (  # noqa: E402
     _entry_completion_evidence,
+    _measurement_signature,
     _resume_entry_selection,
 )
 
@@ -59,3 +60,35 @@ def test_resume_preserves_completed_legacy_entries_and_selects_only_n4(
     assert selection["execute"] == ["case_pimple4_backward"]
     assert _entry_completion_evidence(tmp_path, entries[1])["complete"] is True
     assert _entry_completion_evidence(tmp_path, entries[2])["complete"] is False
+
+
+def test_measurement_signature_ignores_only_phase_owned_runtime_cursors(
+    tmp_path: Path,
+) -> None:
+    cases = []
+    for outer, scheme, ranks in ((2, "backward", 8), (4, "Euler", 4)):
+        case = tmp_path / str(outer)
+        for folder in ("0", "constant", "system"):
+            (case / folder).mkdir(parents=True)
+        (case / "0/U").write_text("same-field")
+        (case / "constant/transportProperties").write_text("same-physics")
+        (case / "system/fvSolution").write_text(
+            f"PIMPLE\n{{\n nOuterCorrectors {outer};\n nCorrectors 2;\n}}\n"
+        )
+        (case / "system/fvSchemes").write_text(
+            f"ddtSchemes {{ default {scheme}; }}\n"
+            "divSchemes { default none; }\n"
+        )
+        (case / "system/decomposeParDict").write_text(
+            f"numberOfSubdomains {ranks};\nmethod scotch;\n"
+        )
+        (case / "system/controlDict").write_text(
+            f"startFrom startTime;\nstartTime 0;\nendTime {outer};\n"
+            f"deltaT 0.001;\nwriteControl timeStep;\nwriteInterval {outer};\n"
+            "purgeWrite 3;\n"
+        )
+        cases.append(case)
+    assert _measurement_signature(cases[0]) == _measurement_signature(cases[1])
+    with (cases[1] / "system/fvSchemes").open("a", encoding="utf-8") as stream:
+        stream.write("gradSchemes { default Gauss linear; }\n")
+    assert _measurement_signature(cases[0]) != _measurement_signature(cases[1])
