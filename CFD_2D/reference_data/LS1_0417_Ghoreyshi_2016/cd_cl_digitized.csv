@@ -1,0 +1,36 @@
+series,Cl,Cd
+Experimental,-0.694,0.02100
+Experimental,-0.504,0.01623
+Experimental,-0.284,0.01432
+Experimental,0.225,0.01286
+Experimental,0.326,0.01280
+Experimental,0.558,0.01285
+Experimental,0.665,0.01322
+Experimental,0.893,0.01478
+Experimental,1.063,0.01696
+Experimental,1.251,0.01990
+Experimental,1.377,0.02375
+CFD Cobalt,-0.70,0.0188
+CFD Cobalt,-0.50,0.0152
+CFD Cobalt,-0.25,0.0130
+CFD Cobalt,0.00,0.0121
+CFD Cobalt,0.25,0.0120
+CFD Cobalt,0.50,0.0125
+CFD Cobalt,0.75,0.0134
+CFD Cobalt,0.90,0.0148
+CFD Cobalt,1.10,0.0175
+CFD Cobalt,1.30,0.0213
+CFD Cobalt,1.45,0.0273
+CFD Cobalt,1.55,0.0358
+CFD Kestrel,-0.695,0.01910
+CFD Kestrel,-0.483,0.01539
+CFD Kestrel,-0.254,0.01325
+CFD Kestrel,-0.017,0.01232
+CFD Kestrel,0.220,0.01214
+CFD Kestrel,0.453,0.01260
+CFD Kestrel,0.678,0.01390
+CFD Kestrel,0.894,0.01539
+CFD Kestrel,1.093,0.01817
+CFD Kestrel,1.280,0.02180
+CFD Kestrel,1.453,0.02765
+CFD Kestrel,1.597,0.03680

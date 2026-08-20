@@ -1,0 +1,41 @@
+{
+  "case_id": "LS1_0417_M0p15_Re1p9e6",
+  "geometry_variant": "reference_uncut_validation_1m",
+  "airfoil": "NASA LS(1)-0417 / GA(W)-1",
+  "reference_dataset": "CFD_2D/reference_data/LS1_0417_Ghoreyshi_2016/reference_manifest.json",
+  "mach": 0.15,
+  "reynolds": 1900000.0,
+  "published_method": {
+    "turbulence_model": "Spalart-Allmaras",
+    "time_order": "second order",
+    "newton_subiterations": 3,
+    "time_steps": 25000,
+    "delta_t_s": 0.00025,
+    "computational_chord_m": 1.0,
+    "domain_radius_chord": 50.0,
+    "maximum_prism_layers": 50,
+    "first_cell_spacing_m": 0.00005,
+    "averaged_final_steps": 10000
+  },
+  "implemented_mapping": {
+    "solver": "OpenFOAM 14 foamRun -solver incompressibleFluid",
+    "turbulence_model": "SpalartAllmaras",
+    "ddt_scheme": "backward",
+    "n_outer_correctors": 3,
+    "reference_delta_t_star": 0.01276096076,
+    "delta_t_s_for_1m_chord": 0.00025,
+    "end_time_star": 319.0240189,
+    "end_time_s": 6.25,
+    "average_from_fraction": 0.6
+  },
+  "thermodynamic_similarity": {
+    "temperature_K": 288.15,
+    "dynamic_viscosity_Pa_s": 1.7894e-05,
+    "velocity_m_s": 51.0438430298,
+    "density_required_kg_m3": 0.666066620026177,
+    "ideal_gas_pressure_required_Pa": 55092.6730677,
+    "literal_sea_level_reynolds_at_same_mach": 3494395.20015,
+    "note": "M=0.15, Re=1.9e6, c=1 m, standard sea-level T/mu and literal sea-level pressure cannot all hold simultaneously. The implemented density/pressure preserve Mach and Reynolds similarity while T and mu remain fixed."
+  },
+  "known_method_difference": "The OpenFOAM case is incompressible low-Mach RANS and PIMPLE outer correctors are not identical to Cobalt/Kestrel Newton subiterations."
+}

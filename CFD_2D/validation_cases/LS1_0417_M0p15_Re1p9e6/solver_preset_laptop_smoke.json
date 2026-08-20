@@ -1,0 +1,42 @@
+{
+  "config_schema_version": 7,
+  "preset_id": "LS1_0417_Ghoreyshi_2016_Fig10_laptop_smoke_tstar0p2",
+  "solver": "foamRun",
+  "solver_module": "incompressibleFluid",
+  "velocity_source": "mach",
+  "transient": true,
+  "ddt_scheme": "backward",
+  "n_outer_correctors": 3,
+  "n_correctors": 2,
+  "n_non_orthogonal_correctors": 1,
+  "deltaT_star": 0.01276096076,
+  "maxDeltaT_star": 0.01276096076,
+  "maxCo": 1.0,
+  "endTime_star": 0.2,
+  "field_write_interval_star": 0.02,
+  "field_write_interval_s": 0.0004,
+  "field_write_control": "adjustableRunTime",
+  "field_write_interval_steps": 100,
+  "average_from_fraction": 0.6,
+  "purgeWrite": 24,
+  "farfield_boundary_condition": "freestream",
+  "steady_initialization_enabled": true,
+  "steady_max_iterations": 10000,
+  "steady_write_interval_iterations": 50,
+  "steady_residual_control": {
+    "p": 1e-05,
+    "U": 1e-05,
+    "nuTilda": 1e-05
+  },
+  "steady_numerics": {
+    "n_non_orthogonal_correctors": 0,
+    "p_relaxation": 0.3,
+    "U_relaxation": 0.5,
+    "nuTilda_relaxation": 0.5
+  },
+  "velocity_profile_stations_xc": [0.1, 0.3, 0.6, 0.9],
+  "velocity_profile_sample_points": 40,
+  "turbulence_model": "SpalartAllmaras",
+  "optional_secondary_model": "kOmegaSST",
+  "screening_note": "Bounded software smoke preset. It preserves backward, maxCo=1 and the published nominal dt*, but stops at t*=0.2. Runtime must be remeasured with the active OpenFOAM 14 build, mesh and rank count. It verifies stability and output only; it is not long enough for aerodynamic interpretation or validation."
+}

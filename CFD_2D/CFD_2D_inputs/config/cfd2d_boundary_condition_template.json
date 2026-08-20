@@ -1,0 +1,12 @@
+{
+  "open_variants": {
+    "inlet_opening_marker": "feature_opening_not_openfoam_boundary",
+    "walls": "noSlip",
+    "farfield": "freestream",
+    "forbidden_physical_patch": "ram_air_inlet"
+  },
+  "closed_reference": {
+    "airfoil_wall": "noSlip",
+    "farfield": "freestream"
+  }
+}

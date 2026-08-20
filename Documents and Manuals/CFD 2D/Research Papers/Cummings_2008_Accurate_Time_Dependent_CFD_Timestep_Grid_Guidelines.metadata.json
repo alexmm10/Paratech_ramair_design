@@ -1,0 +1,17 @@
+{
+  "stored_file": "Cummings_2008_Accurate_Time_Dependent_CFD_Timestep_Grid_Guidelines.pdf",
+  "original_file": "Timestep_selection_TRANSIENT_process.pdf",
+  "title": "Experiences in accurately predicting time-dependent flows",
+  "authors": [
+    "Russell M. Cummings",
+    "Scott A. Morton",
+    "David R. McDaniel"
+  ],
+  "journal": "Progress in Aerospace Sciences",
+  "volume": 44,
+  "year": 2008,
+  "pages": "241-257",
+  "doi": "10.1016/j.paerosci.2008.01.001",
+  "sha256": "5540F0BA3EA415145321BF4DC48ACFF86FFB3271FB630190B6659306D1C11859",
+  "project_use": "Primary methodology reference for joint grid, time-step, subiteration and numerical-damping sensitivity studies."
+}

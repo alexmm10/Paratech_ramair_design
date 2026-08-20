@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "base_profile": "Airfoil Profiles/NASA LS1-0417.dat",
+  "design_mode": "optimized_cl_window",
+  "reynolds": 4000000.0,
+  "mach": 0.1,
+  "panel_count": 200,
+  "panel_bunching": 1.0,
+  "te_le_density_ratio": 0.15,
+  "refined_area_le_density_ratio": 0.2,
+  "alpha_start_deg": -5.0,
+  "alpha_end_deg": 15.0,
+  "alpha_step_deg": 0.5,
+  "cl_min": 0.5,
+  "cl_max": 1.5,
+  "xfoil_iteration_limit": 180,
+  "xfoil_timeout_s": 420,
+  "stagnation_search_x_over_c": 0.18,
+  "minimum_stagnation_cp": 0.7,
+  "cut_margin_panel_points": 1,
+  "existing_output_action": "archive"
+}

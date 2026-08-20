@@ -1,0 +1,58 @@
+# Python and editor state
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.coverage
+.venv*/
+.vscode/
+.idea/
+tmp/
+
+# Runtime state and generated CAE data
+logs/
+Application Support/Logs/
+Application Support/Reports/
+Application Support/Packages/
+Application Support/Temp/
+Previous Versions/
+Results/
+CFD_2D/app_state/
+CFD_2D/logs/
+CFD_2D/reports/
+CFD_2D/results/
+CFD_2D/meshes/
+CFD_2D/openfoam_cases/
+CFD_2D/validation_studies/
+CFD_2D/CFD_2D_inputs/case_package/
+CFD_2D/CFD_2D_inputs/geometry/
+CFD_2D/CFD_2D_inputs/previews/
+CFD_2D/CFD_2D_inputs/validation/
+CFD_2D/CFD_2D_inputs/inlet_design/
+CATIA/Inputs/
+CATIA/Exports/
+
+# Third-party/reference binaries and publications
+Documents and Manuals/**/*.pdf
+Documents and Manuals/CFD 2D/Research Papers/*.png
+Application Support/Tools/xfoil/
+
+# Heavy/intermediate formats
+*.zip
+*.7z
+*.tar
+*.tar.gz
+*.msh
+*.vtk
+*.vtu
+*.pvtu
+*.foam
+*.OpenFOAM
+processor*/
+postProcessing/
+VTK/
+
+# OS leftovers
+Thumbs.db
+.DS_Store
+desktop.ini

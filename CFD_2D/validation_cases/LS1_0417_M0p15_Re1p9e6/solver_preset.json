@@ -1,0 +1,62 @@
+{
+  "config_schema_version": 12,
+  "preset_id": "LS1_0417_Ghoreyshi_2016_Fig10",
+  "solver": "foamRun",
+  "solver_module": "incompressibleFluid",
+  "velocity_source": "mach",
+  "transient": true,
+  "ddt_scheme": "backward",
+  "n_outer_correctors": 3,
+  "n_correctors": 2,
+  "n_non_orthogonal_correctors": 1,
+  "deltaT_star": 0.01276096076,
+  "maxDeltaT_star": 0.01276096076,
+  "maxCo": 1.0,
+  "endTime_star": 319.0240189,
+  "field_write_interval_star": 0.5,
+  "field_write_interval_s": 0.01,
+  "field_write_control": "adjustableRunTime",
+  "field_write_interval_steps": 500,
+  "average_from_fraction": 0.6,
+  "temporal_accuracy": {
+    "profile_id": "LS1_0417_Fig10_frequency_budget_v1",
+    "target_min_strouhal": 0.05,
+    "target_max_strouhal": 20.0,
+    "target_samples_per_cycle": 20,
+    "minimum_cycles_for_statistics": 10,
+    "smoke_end_time_star": 20.0,
+    "reference_deltaT_star": 0.01276096076,
+    "reference_end_time_star": 319.0240189,
+    "reference_average_time_star": 127.60960756,
+    "time_step_study_values_star": [
+      0.01276096076,
+      0.00638048038,
+      0.00319024019,
+      0.001595120095,
+      0.0007975600475,
+      0.00039878002375
+    ],
+    "strouhal_scope": "Conservative frequency-screening envelope; replace it with measured force, pressure-probe and wake spectra after the pilot run.",
+    "scope_note": "The first value reproduces the published nominal step. The halved values form the required temporal-independence sequence."
+  },
+  "purgeWrite": 24,
+  "farfield_boundary_condition": "freestream",
+  "steady_initialization_enabled": true,
+  "steady_max_iterations": 10000,
+  "steady_write_interval_iterations": 50,
+  "steady_residual_control": {
+    "p": 1e-05,
+    "U": 1e-05,
+    "nuTilda": 1e-05
+  },
+  "steady_numerics": {
+    "n_non_orthogonal_correctors": 0,
+    "p_relaxation": 0.3,
+    "U_relaxation": 0.5,
+    "nuTilda_relaxation": 0.5
+  },
+  "velocity_profile_stations_xc": [0.1, 0.3, 0.6, 0.9],
+  "velocity_profile_sample_points": 40,
+  "turbulence_model": "SpalartAllmaras",
+  "optional_secondary_model": "kOmegaSST"
+}

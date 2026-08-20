@@ -1,0 +1,31 @@
+{
+  "preset_id": "LS1_0417_Ghoreyshi_2016_Fig10",
+  "geometry": {
+    "variant": "reference_uncut_validation_1m",
+    "domain": "circular_50c",
+    "run_preprocessor": true,
+    "rebuild_case_package": true
+  },
+  "case_conditions": {
+    "alphas_deg": [-10, -8, -6, -4, -2, 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20],
+    "alpha_step_deg": 2.0,
+    "reynolds": 1900000.0,
+    "mach": 0.15,
+    "rho_kg_m3": 0.666066620026177,
+    "mu_pa_s": 1.7894e-05,
+    "pressure_ref_pa": 55092.6730677,
+    "temperature_K": 288.15,
+    "velocity": "auto",
+    "condition_note": "The preprocessor-derived CFD geometry is scaled to c=1 m. With T=288.15 K and fixed standard-air mu=1.7894e-5 Pa.s, rho=0.66606662 kg/m3 and p=rho*R*T=55.093 kPa match M=0.15 and Re=1.9e6 simultaneously. This is a similarity condition, not literal sea-level density/pressure; literal sea-level air would give Re about 3.49e6."
+  },
+  "execution": {
+    "execution_mode": "sweep",
+    "run_solver": false,
+    "execution_backend": "pyfoam",
+    "n_cores": 6,
+    "continue_sweep_after_timeout": true,
+    "postprocess_after_each_alpha": true,
+    "steady_initialization": true,
+    "pyfoam_live_monitor": true
+  }
+}

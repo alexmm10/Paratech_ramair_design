@@ -1,0 +1,12 @@
+services:
+  ramair-openfoam:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ramair-design-cfd:openfoam14
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+    stdin_open: true
+    tty: true
+    command: bash

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "profiles": [
+    {
+      "path": "Airfoil Profiles/NASA_LS1_0417_Cut_Optimized_Re4000000_M0p1_Gap4p1pct.csv",
+      "created_at": "2026-07-17 00:58:53",
+      "base_profile": "Airfoil Profiles/NASA LS1-0417.dat",
+      "design_mode": "optimized_cl_window",
+      "reynolds": 4000000.0,
+      "mach": 0.1,
+      "inlet_gap_percent_chord": 4.097791531273165,
+      "metadata": "CFD_2D/CFD_2D_inputs/inlet_design/NASA_LS1_0417_optimized_Re4e_06_M0_100/inlet_design_metadata.json"
+    }
+  ]
+}

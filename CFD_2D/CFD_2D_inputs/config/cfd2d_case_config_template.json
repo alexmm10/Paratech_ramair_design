@@ -1,0 +1,20 @@
+{
+  "variants": [
+    "open_ramair",
+    "closed_reference",
+    "reference_uncut",
+    "ross_standard_8p4",
+    "ross_minimum_4p0"
+  ],
+  "default_variant": "open_ramair",
+  "length_unit": "m",
+  "axis_convention": "x_chord_positive_TE_z_positive_up",
+  "chord_reference": "local_profile_chord",
+  "chord_m": 3.016,
+  "alpha_start_deg": -5.0,
+  "alpha_end_deg": 15.0,
+  "alpha_step_deg": 1.0,
+  "reynolds": 3000000.0,
+  "mach": 0.1,
+  "mesh_generation": "next_module_ramair_2d_mesh_builder"
+}

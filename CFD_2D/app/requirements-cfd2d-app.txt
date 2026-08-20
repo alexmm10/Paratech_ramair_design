@@ -1,0 +1,17 @@
+# Browser-based user interface and supported Python API adapters.
+streamlit==1.58.0
+# PyArrow 25.0.0 segfaults in libarrow.so.2500 on the current WSL2 kernel.
+# Keep a known-compatible wheel even though diagnostic tables avoid Arrow.
+pyarrow==18.1.0
+gmsh==4.15.2
+PyFoam==2026.6
+# Keep the scientific stack ABI-consistent with Ubuntu 22.04 extensions.
+numpy==1.26.4
+scipy==1.13.1
+pandas==2.2.3
+matplotlib==3.8.4
+# GIF fallback for automatic ParaView animations when ffmpeg is unavailable.
+Pillow==12.3.0
+numexpr==2.10.2
+bottleneck==1.4.2
+pytest==8.4.1

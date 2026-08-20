@@ -1,0 +1,11 @@
+{
+  "source": "Ross Computational Aerodynamics in the Design and Analysis of Ram-Air-Inflated Wings",
+  "airfoil": "NASA LS1-0417",
+  "standard_inlet_percent_c": 8.4,
+  "minimum_inlet_percent_c": 4.0,
+  "navier_stokes_re": 4000000.0,
+  "cp_alpha_deg": 4.0,
+  "clean_validation_re": 6000000.0,
+  "clean_validation_alpha_pressure_deg": 4.17,
+  "digitized": false
+}

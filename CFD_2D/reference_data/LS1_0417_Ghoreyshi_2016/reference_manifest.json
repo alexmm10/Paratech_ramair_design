@@ -1,0 +1,21 @@
+{
+  "dataset_id": "ghoreyshi_2016_ls1_0417_fig10",
+  "airfoil": "NASA LS(1)-0417 / GA(W)-1",
+  "reference": "Ghoreyshi et al., Assessment of Aerodynamic Modeling for Flight Dynamics of Ram-Air Parachutes, Journal of Aircraft, 2016, DOI 10.2514/1.C033763",
+  "figure": 10,
+  "mach": 0.15,
+  "reynolds": 1900000.0,
+  "series": ["Experimental", "CFD Cobalt", "CFD Kestrel"],
+  "digitization": {
+    "method": "manual pixel calibration from the supplied Figure 10 raster",
+    "status": "approximate",
+    "intended_use": "engineering overlay and workflow validation, not replacement of original tabulated source data",
+    "estimated_uncertainty": {
+      "alpha_deg": 0.15,
+      "Cl": 0.015,
+      "Cd": 0.0003
+    }
+  },
+  "source_image": "Documents and Manuals/CFD 2D/Research Papers/LS1_0417_VALIDATION_FIG10_REFERENCE.png",
+  "source_pdf": "Documents and Manuals/CFD 2D/Research Papers/2D_3D_CFD_EXPERIMENT_COMPARISON_VARIOUS_AIRFOILS.pdf"
+}

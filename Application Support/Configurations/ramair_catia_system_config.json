@@ -1,0 +1,281 @@
+{
+  "suspension": {
+    "enabled": true,
+    "derive_anhedral_from_R_over_b": true
+  },
+  "canopy_reference": {
+    "p_ref_x_c": 0.25,
+    "p_ref_z_mode": "chord_line",
+    "description": "P_ref is defined in the central rib plane. Use chord_line to avoid contamination by profile thickness."
+  },
+  "banks": [
+    {
+      "name": "A",
+      "enabled": true,
+      "type": "structural",
+      "x_c": 0.1,
+      "riser_group": "front"
+    },
+    {
+      "name": "B",
+      "enabled": true,
+      "type": "structural",
+      "x_c": 0.3,
+      "riser_group": "front"
+    },
+    {
+      "name": "C",
+      "enabled": true,
+      "type": "structural",
+      "x_c": 0.6,
+      "riser_group": "rear"
+    },
+    {
+      "name": "D",
+      "enabled": true,
+      "type": "structural",
+      "x_c": 0.8,
+      "riser_group": "rear"
+    },
+    {
+      "name": "BRK",
+      "enabled": true,
+      "type": "brake",
+      "x_c": 0.95,
+      "riser_group": "brake"
+    }
+  ],
+  "loaded_rib_selection": {
+    "mode": "cell_boundaries",
+    "indices": [
+      0,
+      2,
+      4,
+      5,
+      7,
+      9
+    ],
+    "enforce_symmetric_pairs": true,
+    "description": "cell_boundaries are the loaded boundary ribs from left to right, indexed 0..num_cells. For 9 cells, [0,2,4,5,7,9] gives 6 loaded stations."
+  },
+  "anchors": {
+    "surface": "lower",
+    "z_offset_mm": 0.0,
+    "name_format": "{bank}_rib{rib_id:02d}_{side}",
+    "tip_anchor_mode": "auto",
+    "tip_attachment_banks": [
+      "A",
+      "B",
+      "C",
+      "D"
+    ],
+    "description": "Tip anchors use the lower rib profile by default. If stabilizers.active and stabilizers.attach_tip_lines_to_stabilizer are true, external structural tip anchors move to the stabilizer edge. Set tip_anchor_mode='rib' to force rib anchors or 'stabilizer' to force stabilizer anchors."
+  },
+  "cascades": {
+    "structural": [
+      {
+        "level": 1,
+        "group_size": 2,
+        "fraction_to_target": 0.25,
+        "grouping_rule": "adjacent_spanwise",
+        "bank_applicability": [
+          "A",
+          "B",
+          "C",
+          "D"
+        ]
+      },
+      {
+        "level": 2,
+        "group_size": 2,
+        "fraction_to_target": 0.55,
+        "grouping_rule": "adjacent_spanwise",
+        "bank_applicability": [
+          "A",
+          "B",
+          "C",
+          "D"
+        ]
+      }
+    ],
+    "brake": [
+      {
+        "level": 1,
+        "group_size": 2,
+        "fraction_to_target": 0.2,
+        "grouping_rule": "adjacent_spanwise",
+        "bank_applicability": [
+          "BRK"
+        ]
+      },
+      {
+        "level": 2,
+        "group_size": 2,
+        "fraction_to_target": 0.6,
+        "grouping_rule": "adjacent_spanwise",
+        "bank_applicability": [
+          "BRK"
+        ]
+      }
+    ],
+    "description": "P_cascade = centroid(children) + fraction_to_target*(target-centroid). Groups are created centre-to-tip on each side to enforce mirror symmetry."
+  },
+  "angles": {
+    "alpha_op_deg": 4.2,
+    "gamma_deg": 17.05,
+    "mu_deg": 1.0,
+    "theta_deg": null,
+    "angle_tolerance_deg": 0.25,
+    "description": "If theta_deg is null, theta = alpha_op + mu - gamma. v16 deliberately does not export long rigging-measurement diagnostics; the suspension/payload system is positioned using this theta relation and the report only checks the angular closure error."
+  },
+  "constraints": {
+    "R_over_b": 0.8,
+    "R_tolerance_fraction": 0.01,
+    "auto_solve_R": true,
+    "R_definition": "straight_anchor_to_central_confluence",
+    "R_target_point": "slider_center_on_symmetry_axis",
+    "path_length_dispersion_warning_fraction": 0.08,
+    "max_bifurcation_angle_deg": 55.0,
+    "symmetry_tolerance_mm": 1.0,
+    "segment_length_symmetry_tolerance_mm": 1.0,
+    "description": "R/b is solved by moving slider/risers/payload along the payload line defined by theta."
+  },
+  "line_properties": {
+    "line_diameter_mm": 1.2,
+    "material": "aramid_or_Dyneema_placeholder",
+    "line_density_kg_m": 0.001,
+    "elastic_modulus_pa": 50000000000.0,
+    "poisson_ratio": 0.35,
+    "nominal_segment_tension_N": 50.0,
+    "reference_velocity_m_s": 20.0,
+    "air_density_kg_m3": 1.225,
+    "dynamic_viscosity_pa_s": 1.81e-05,
+    "strouhal_number": 0.22,
+    "line_visualization_mode": "curve",
+    "cad_strategy": "curve_with_properties",
+    "Cd0_line": 1.2,
+    "segmented_drag_active": true,
+    "velocity_reference": "alpha_op",
+    "incident_velocity_angle_deg": null,
+    "include_lower_straps_in_drag": true,
+    "include_brake_lines_in_drag": true,
+    "description": "For CD_lines_segmented, the incident velocity is defined in the central X-Z plane. velocity_reference='alpha_op' uses the canopy operating angle of attack; 'gamma' uses the glide angle; 'custom' uses incident_velocity_angle_deg."
+  },
+  "risers": {
+    "mode": "four_riser_slider_corners",
+    "mapping": {
+      "A": "front",
+      "B": "front",
+      "C": "rear",
+      "D": "rear",
+      "BRK": "brake"
+    },
+    "side_y_fraction_b_if_no_slider": 0.08,
+    "front_x_c_if_no_slider": 0.22,
+    "rear_x_c_if_no_slider": 0.7,
+    "brake_x_c_if_no_slider": 0.95,
+    "initial_slider_distance_mm": null,
+    "brake_actuator_offset_depth_mm": 120.0,
+    "brake_actuator_offset_span_mm": 80.0,
+    "brake_actuator_offset_down_mm": 80.0,
+    "description": "With active slider, front/rear risers are placed at slider corners. Brake actuators are offset from rear corners."
+  },
+  "slider": {
+    "active": true,
+    "slider_area_ratio": 0.02,
+    "slider_width_mm": null,
+    "slider_chord_or_depth_mm": null,
+    "slider_aspect_ratio": 1.0,
+    "description": "Slider plane is perpendicular to the payload line. width is spanwise, depth is chordwise in the local slider plane."
+  },
+  "payload": {
+    "active": true,
+    "payload_length_mm": 700.0,
+    "payload_width_mm": 800.0,
+    "payload_height_mm": 500.0,
+    "payload_drop_below_slider_mm": 1200.0,
+    "payload_CG_offset_local_mm": [
+      0.0,
+      0.0,
+      250.0
+    ],
+    "payload_attach_offset_local_mm": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "lower_straps_active": true,
+    "description": "Local axes are depth, span, down-along-payload-line. Positive local z is downward from canopy to payload."
+  },
+  "agu": {
+    "active": true,
+    "agu_length_mm": 400.0,
+    "agu_width_mm": 300.0,
+    "agu_height_mm": 300.0,
+    "agu_fraction_between_slider_and_payload": 0.45,
+    "description": "AGU is an optional oriented box between slider and payload attach point."
+  },
+  "brakes": {
+    "active": true,
+    "separate_from_structural": true,
+    "brake_anchor_x_c": 0.95,
+    "brake_anchor_distribution": "loaded_ribs",
+    "brake_target": "agu_if_active",
+    "brake_deflection_mode": "none",
+    "brake_deflection_mm": 0.0,
+    "brake_line_shortening_mm": 0.0,
+    "trailing_edge_displacement_mm": 0.0,
+    "description": "Brake lines are independent from A/B/C/D. By default they terminate at AGU_CONTROL when the AGU is active, otherwise at the slider brake actuator."
+  },
+  "stabilizers": {
+    "active": false,
+    "shape": "triangular",
+    "chord_start_x_c": 0.15,
+    "chord_end_x_c": 0.95,
+    "apex_x_c": 0.62,
+    "height_mm": 450.0,
+    "sweep_mm": 0.0,
+    "lower_edge_scale": 0.85,
+    "height_direction": "rib_down",
+    "surface_reference": "lower",
+    "triangular_anchor_edge_mode": "lower_perimeter_by_x",
+    "attach_to_loaded_ribs": true,
+    "attach_tip_lines_to_stabilizer": false,
+    "description": "Independent side panel on the two external ribs. For line anchors, this is the single main switch: set this true to move external structural tip anchors to the stabilizer edge. Default triangular panel uses UP_LE and UP_TE on the external rib plus an apex controlled by apex_x_c and height_mm. Lines are distributed along UP_LE-apex-UP_TE according to bank x/c, not collapsed at the apex. height_direction: rib_down, global_down, span_outward."
+  },
+  "tip_side_bulge": {
+    "active": false,
+    "max_lateral_bulge_mm": 80.0,
+    "chordwise_start_x_c": 0.0,
+    "chordwise_end_x_c": 1.0,
+    "chordwise_peak_x_c": 0.5,
+    "chordwise_width_fraction": 0.45,
+    "vertical_peak_fraction": 0.5,
+    "vertical_width_fraction": 0.6,
+    "shape_power": 1.0,
+    "chordwise_points": 17,
+    "vertical_layers": 11,
+    "hide_original_flat_tip_ribs_in_CATIA": false,
+    "description": "Canopy-level optional curved external side panel. The lateral bulge is zero on upper and lower boundaries and at chordwise_start/end so the generated surface closes with the external upper/lower canopy panels instead of floating apart."
+  },
+  "fabric_thickness": {
+    "properties_enabled": true,
+    "thickness_mm": 0.3,
+    "density_kg_m3": 1150.0,
+    "material": "ripstop_nylon_placeholder",
+    "strategy": "shell_property",
+    "catia_offsets_enabled": false,
+    "catia_offset_mode": "none",
+    "description": "Recommended strategy: export mid-surfaces + shell thickness metadata for FEM; create physical thickness later in meshing/FEM software. CATIA offsets are experimental and disabled by default."
+  },
+  "outputs": {
+    "write_visualizer_png": true,
+    "visualizer_png": "ramair_suspension_network_preview.png",
+    "write_json_used": true,
+    "catia_create_points_and_lines": true,
+    "catia_create_surfaces": true,
+    "catia_create_tubes": false,
+    "export_subfolder": "..\\Exports",
+    "labels": false
+  }
+}

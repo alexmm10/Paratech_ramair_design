@@ -1,0 +1,146 @@
+{
+  "project_paths": {
+    "profiles_dir": "Airfoil Profiles",
+    "catia_inputs_dir": "CATIA/Inputs",
+    "catia_exports_dir": "CATIA/Exports",
+    "cfd_2d_inputs_dir": "CFD_2D/CFD_2D_inputs",
+    "reports_dir": "Application Support/Reports",
+    "logs_dir": "Application Support/Logs"
+  },
+  "profile_inputs": {
+    "main_profile": "Airfoil Profiles/LS1-0417_Cut_Standard_Re3000000.csv",
+    "reference_uncut_profile": "Airfoil Profiles/NASA LS1-0417.dat",
+    "ross_standard_profile": "Airfoil Profiles/ross_standard_8p4.csv",
+    "ross_minimum_profile": "Airfoil Profiles/ross_minimum_4p0.csv",
+    "profile_input_order": "auto"
+  },
+  "canopy_geometry": {
+    "chord_mm": 3016.0,
+    "span_mm": 8119.0,
+    "cells": 9,
+    "anhedral_deg": 17.9,
+    "enable_variable_chord": false,
+    "chord_mode": "elliptic",
+    "tip_chord_factor": 0.55,
+    "chord_anchor": "quarter_chord",
+    "chord_anchor_fraction": 0.5,
+    "quasi_elliptic_exponent": 0.65,
+    "enable_variable_cell_span": false,
+    "cell_span_mode": "uniform",
+    "tip_cell_width_factor": 0.75,
+    "enable_span_shrinkage": false,
+    "span_shrinkage_fraction": 0.15,
+    "anhedral_arc_mode": "center_to_tip_line",
+    "anhedral_rotation_pivot_mode": "profile_min_z",
+    "anhedral_section_orientation": "focus_inward"
+  },
+  "rib_and_cell_geometry": {
+    "enable_rib_inc_translation": false,
+    "loaded_rib_incidence_deg": 0.0,
+    "nonloaded_rib_incidence_deg": 1.5,
+    "loaded_rib_vertical_offset_mm": 0.0,
+    "nonloaded_rib_vertical_offset_mm": 19.05,
+    "loaded_rib_chordwise_offset_mm": 0.0,
+    "nonloaded_rib_chordwise_offset_mm": 0.0,
+    "tip_extra_incidence_deg": 0.0,
+    "tip_extra_vertical_offset_mm": 0.0,
+    "enable_cell_ballooning": false,
+    "max_thickness_increase_fraction": 0.3,
+    "midcell_aft_shift_mm": 0.0
+  },
+  "airfoil_processing": {
+    "te_closure_mode": "rounded",
+    "te_rounding_points": 20,
+    "sharp_te_intersection_max_x_c": 1.08,
+    "sharp_te_min_extension_x_c": 1.0,
+    "sharp_te_safe_gap_chord": 1e-05,
+    "min_spline_point_distance_mm": 0.01,
+    "model_zero_thickness_as_thin_solid": true,
+    "fabric_thickness_chord": 1e-05
+  },
+  "crossports": {
+    "enable_crossports": true,
+    "cut_mode": "post_split_surfaces",
+    "split_orientation": -1,
+    "cut_strategy": "curve_split_first",
+    "cutter_extrude_mode": "auto_semicell_span",
+    "cutter_extrude_factor_semicell": 0.35,
+    "cutter_extrude_min_mm": 20.0,
+    "cutter_extrude_max_mm": 600.0,
+    "cutter_extrude_mm": 200.0,
+    "shape": "ellipse",
+    "ellipse_orientation": "horizontal",
+    "count": 3,
+    "position_mode": "standard_3",
+    "x_positions_chord": [
+      0.25,
+      0.45,
+      0.65
+    ],
+    "x_start_chord": 0.25,
+    "x_end_chord": 0.7,
+    "width_fraction_chord": 0.08,
+    "height_fraction_local_thickness": 0.15,
+    "edge_clearance_fraction_local_thickness": 0.22,
+    "points_per_loop": 32,
+    "apply_to": "all_internal",
+    "centerline_mode": "profile_midline",
+    "custom_specs": []
+  },
+  "fabric_and_lines": {
+    "enable_fabric_thickness_properties": true,
+    "fabric_thickness_mm": 0.3,
+    "fabric_density_kg_m3": 1150.0,
+    "fabric_material": "ripstop_nylon_placeholder",
+    "fabric_thickness_strategy": "shell_property",
+    "enable_fabric_thickness": false,
+    "fabric_thickness_mode": "none",
+    "fabric_thickness_offset_side": "normal",
+    "fabric_thickness_include_ribs": true,
+    "fabric_thickness_include_stabilizers": true,
+    "fabric_thickness_include_tip_bulge": true,
+    "enable_suspension_tube_geometry": false,
+    "default_suspension_line_diameter_mm": 1.2,
+    "suspension_line_cad_strategy": "curve_with_properties"
+  },
+  "catia_generation": {
+    "create_rib_fills": true,
+    "create_loft_panels": true,
+    "create_te_closure_panels": true,
+    "force_export_to_base_folder": true
+  },
+  "catia_exports": {
+    "export_iges": true,
+    "export_dxf": true,
+    "export_full_assembly_iges": true,
+    "export_full_assembly_step": false,
+    "export_component_manifest": true,
+    "exports_subfolder": "../Exports",
+    "export_canopy_filename": "ramair_canopy_geometry.igs",
+    "export_full_filename": "ramair_full_assembly.igs"
+  },
+  "optional_modules": {
+    "enable_canopy_stabilizers": false,
+    "enable_suspension_lines": false,
+    "enable_tip_side_bulge": false,
+    "system_config_json": "Application Support/Configurations/ramair_catia_system_config.json"
+  },
+  "cfd_2d_exports": {
+    "enable_2d_cae_exports": true,
+    "export_open_ramair_profile": true,
+    "export_closed_reference_profile": true,
+    "export_profile_quality_report": true,
+    "export_mesh_config_template": true
+  },
+  "cfd_2d": {
+    "reynolds": 3000000.0,
+    "mach": 0.1,
+    "alpha_start_deg": -5.0,
+    "alpha_end_deg": 15.0,
+    "alpha_step_deg": 1.0
+  },
+  "debug_plots": {
+    "write_chord_distribution_plot": true,
+    "write_2d_profile_previews": true
+  }
+}

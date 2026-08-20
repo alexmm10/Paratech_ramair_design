@@ -1,0 +1,170 @@
+{
+  "config_schema_version": 14,
+  "preset_id": "LS1_0417_Ghoreyshi_2016_Fig10_laptop_first_tstar20",
+  "solver": "foamRun",
+  "solver_module": "incompressibleFluid",
+  "velocity_source": "mach",
+  "transient": true,
+  "time_step_mode": "adaptive_physics_limited",
+  "ddt_scheme": "backward",
+  "n_outer_correctors": 15,
+  "n_correctors": 2,
+  "n_non_orthogonal_correctors": 1,
+  "transient_velocity_divergence_scheme": "Gauss linearUpwind limited",
+  "transient_turbulence_divergence_scheme": "Gauss linearUpwind limited",
+  "deltaT_star": 0.01276096076,
+  "maxDeltaT_star": 0.01276096076,
+  "maxCo": 50.0,
+  "outer_corrector_residual_control": {
+    "enabled": true,
+    "U_tolerance": 0.0001,
+    "nuTilda_tolerance": 0.0001,
+    "relative_tolerance": 0.0
+  },
+  "transport_correction_final": false,
+  "endTime_star": 20.0,
+  "field_write_interval_star": 0.1,
+  "field_write_interval_s": 0.002,
+  "field_write_control": "adjustableRunTime",
+  "field_write_interval_steps": 200,
+  "average_from_fraction": 0.6,
+  "temporal_accuracy": {
+    "profile_id": "closed_external_frequency_budget_v1",
+    "target_min_strouhal": 0.05,
+    "target_max_strouhal": 20.0,
+    "target_samples_per_cycle": 20,
+    "minimum_cycles_for_statistics": 10,
+    "smoke_end_time_star": 20.0,
+    "reference_deltaT_star": 0.01276096076,
+    "reference_end_time_star": 319.0240189,
+    "reference_average_time_star": 127.60960756,
+    "time_step_study_values_star": [
+      0.01276096076,
+      0.00638048038,
+      0.00319024019,
+      0.001595120095,
+      0.0007975600475,
+      0.00039878002375
+    ],
+    "strouhal_scope": "Conservative screening envelope for coherent wake, separated-flow and shear-layer content. St_max=20 comes from the Cummings et al. high-frequency shear-layer example and must be replaced by measured spectra when available.",
+    "scope_note": "The 20-samples-per-cycle ceiling is a project engineering target, not a quoted universal rule. The Ghoreyshi validation deltaT is retained as a reproduction reference and must be followed by sequential halving."
+  },
+  "purgeWrite": 24,
+  "farfield_boundary_condition": "freestream",
+  "steady_initialization_enabled": true,
+  "steady_max_iterations": 10000,
+  "steady_write_interval_iterations": 50,
+  "steady_residual_control": {
+    "p": 1e-05,
+    "U": 1e-05,
+    "nuTilda": 1e-05
+  },
+  "steady_numerics": {
+    "n_non_orthogonal_correctors": 0,
+    "p_relaxation": 0.3,
+    "U_relaxation": 0.6,
+    "nuTilda_relaxation": 0.5,
+    "velocity_divergence_scheme": "bounded Gauss linearUpwind limited",
+    "turbulence_divergence_scheme": "bounded Gauss upwind"
+  },
+  "topology_profiles": {
+    "open_internal_cavity": {
+      "profile_id": "open_cavity_sa_rans_urans_robust_v1",
+      "velocity_source": "reynolds",
+      "time_step_mode": "adaptive_physics_limited",
+      "deltaT_star": 0.004,
+      "maxDeltaT_star": 0.008,
+      "maxCo": 20.0,
+      "field_write_interval_star": 0.1,
+      "field_write_interval_s": null,
+      "purgeWrite": 12,
+      "n_outer_correctors": 15,
+      "n_correctors": 2,
+      "n_non_orthogonal_correctors": 1,
+      "outer_corrector_residual_control": {
+        "enabled": true,
+        "U_tolerance": 0.0001,
+        "nuTilda_tolerance": 0.0001,
+        "relative_tolerance": 0.0
+      },
+      "transport_correction_final": false,
+      "transient_velocity_divergence_scheme": "Gauss limitedLinearV 1",
+      "transient_turbulence_divergence_scheme": "Gauss upwind",
+      "steady_max_iterations": 10000,
+      "steady_residual_control": {
+        "p": 0.0001,
+        "U": 0.0001,
+        "nuTilda": 0.0001
+      },
+      "steady_numerics": {
+        "n_non_orthogonal_correctors": 0,
+        "p_relaxation": 0.25,
+        "U_relaxation": 0.5,
+        "nuTilda_relaxation": 0.4,
+        "velocity_divergence_scheme": "bounded Gauss limitedLinearV 1",
+        "turbulence_divergence_scheme": "bounded Gauss upwind"
+      },
+      "temporal_accuracy": {
+        "profile_id": "open_cavity_frequency_budget_v1",
+        "target_min_strouhal": 0.05,
+        "target_max_strouhal": 20.0,
+        "target_samples_per_cycle": 20,
+        "minimum_cycles_for_statistics": 10,
+        "smoke_end_time_star": 20.0,
+        "reference_deltaT_star": 0.034,
+        "reference_end_time_star": 680.0,
+        "reference_average_time_star": 340.0,
+        "time_step_study_values_star": [
+          0.008,
+          0.004,
+          0.002,
+          0.001
+        ],
+        "strouhal_scope": "Screening envelope for inlet-lip shear-layer, cavity-pressure, external separation and wake content. The accepted range must be updated from pressure probes and force PSD.",
+        "scope_note": "Open ram-air cases require a longer startup and averaging record than the closed software smoke case. Cavity-core refinement may remain coarse, but inlet lips, exterior BL, TE and wake are frequency-bearing regions."
+      }
+    }
+  },
+  "velocity_profile_stations_xc": [
+    0.1,
+    0.3,
+    0.6,
+    0.9
+  ],
+  "velocity_profile_sample_points": 40,
+  "turbulence_model": "SpalartAllmaras",
+  "optional_secondary_model": "kOmegaSST",
+  "validation_study": {
+    "enabled": false,
+    "study_id": "",
+    "alpha_deg": 8.0,
+    "time_policy": "fixed_staged",
+    "startup_scheme": "Euler",
+    "production_scheme": "backward",
+    "sensitivity_scheme": "CrankNicolson",
+    "crank_nicolson_psi": 0.9,
+    "dt_target_s": null,
+    "startup_factors": [
+      0.25,
+      0.5,
+      1.0
+    ],
+    "startup_duration_tc": [
+      1.0,
+      1.0,
+      2.0
+    ],
+    "settling_tc": null,
+    "sampling_tc": null,
+    "nOuterCorrectors": 3,
+    "nCorrectors": 2,
+    "nNonOrthogonalCorrectors": 0,
+    "courant_controls_dt": false,
+    "field_write_interval_tc": 1.0,
+    "retained_snapshots": 24,
+    "mpi_ranks": 8,
+    "timeout_hours": 24.0,
+    "steady_checkpoint_timeout_min": 120.0
+  },
+  "screening_note": "Topology-aware OpenFOAM 14 preset. SIMPLE uses nNonOrthogonalCorrectors=0 for both checked meshes. General URANS uses backward, a physics/spectrum-derived maxDeltaT*, up to 15 PIMPLE outer correctors and outerCorrectorResidualControl on U and nuTilda at 1e-4. maxCo=50 closed and 20 open are emergency nonlinear guards, not temporal-accuracy targets. Validation Lab studies remain fixed-deltaT/fixed-corrector experiments and explicitly disable the adaptive outer exit."
+}

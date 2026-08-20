@@ -1,0 +1,50 @@
+# RAM-AIR CFD 2D - REFERENCE_UNCUT DEBUG COMMANDS
+#
+# This file is safe to paste inside Ubuntu/WSL because every explanatory line
+# starts with "#". The previous version contained headings such as "1)" and
+# dashed separators without "#"; Bash interpreted those lines as commands and
+# produced errors like:
+#
+#   -bash: syntax error near unexpected token `)'
+#   -------------------------: command not found
+#
+# Recommended use:
+#   1. Open Ubuntu/WSL.
+#   2. Paste the block below.
+#   3. Follow the pauses in docs/run_reference_uncut_debug_wsl.sh.
+#
+# The script:
+#   - copies the project to ~/ramair_cfd/INPUT_FILES before running Gmsh;
+#   - does not install packages automatically;
+#   - does not run CATIA;
+#   - archives the previous reference_uncut mesh output before remeshing;
+#   - generates a fresh Gmsh mesh;
+#   - writes TE zoom PNGs for manual geometry inspection;
+#   - pauses so you can open mesh_final.msh manually;
+#   - converts/checks the mesh for OpenFOAM;
+#   - asks whether to archive or delete any previous OpenFOAM case/results;
+#   - writes the OpenFOAM case;
+#   - performs a runner dry-run;
+#   - asks before any short solver execution;
+#   - can request a clean stopAt writeNow after N minutes for partial debug post-processing;
+#   - keeps partial solver outputs for post-processing if the debug timeout is reached;
+#   - asks whether to export VTK for latestTime only or all written times;
+#   - can open ParaView/paraFoam after post-processing.
+
+SOURCE_PROJECT="${RAMAIR_PROJECT_ROOT:-$PWD}"
+[ -f "$SOURCE_PROJECT/preprocess_ramair_main.py" ] || { echo "Run this block from the project root or export RAMAIR_PROJECT_ROOT first."; exit 1; }
+cd "$SOURCE_PROJECT" || exit 1
+
+echo "Project found at:"
+pwd
+
+# One-time Gmsh installation. It is skipped quickly when 4.15.2 is present.
+bash docs/install_gmsh_4_15_wsl.sh || exit 1
+export PATH="$HOME/.local/bin:$PATH"
+export RAMAIR_GMSH_EXECUTABLE="$HOME/.local/opt/gmsh-4.15.2/bin/gmsh"
+
+echo "Checking Bash syntax of the debug script..."
+bash -n docs/run_reference_uncut_debug_wsl.sh || exit 1
+
+echo "Launching step-by-step debug flow..."
+bash docs/run_reference_uncut_debug_wsl.sh

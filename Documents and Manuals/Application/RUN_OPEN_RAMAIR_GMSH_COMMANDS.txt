@@ -1,0 +1,24 @@
+# RAM-AIR CFD 2D - OPEN_RAMAIR THIN-SOLID GMSH COMMANDS
+#
+# Paste this block inside Ubuntu/WSL. Every explanatory line starts with "#".
+# The script generates a finite-thickness thin-solid Gmsh mesh for the open
+# ram-air profile. The inlet gap remains fluid and no physical ram_air_inlet
+# patch is created. It stops after Gmsh for manual inspection.
+
+SOURCE_PROJECT="${RAMAIR_PROJECT_ROOT:-$PWD}"
+[ -f "$SOURCE_PROJECT/preprocess_ramair_main.py" ] || { echo "Run this block from the project root or export RAMAIR_PROJECT_ROOT first."; exit 1; }
+cd "$SOURCE_PROJECT" || exit 1
+
+echo "Project found at:"
+pwd
+
+# One-time Gmsh installation. It is skipped quickly when 4.15.2 is present.
+bash docs/install_gmsh_4_15_wsl.sh || exit 1
+export PATH="$HOME/.local/bin:$PATH"
+export RAMAIR_GMSH_EXECUTABLE="$HOME/.local/opt/gmsh-4.15.2/bin/gmsh"
+
+echo "Checking Bash syntax of the open-profile debug script..."
+bash -n docs/run_open_ramair_debug_wsl.sh || exit 1
+
+echo "Launching open_ramair thin-solid Gmsh flow..."
+bash docs/run_open_ramair_debug_wsl.sh

@@ -1,0 +1,89 @@
+{
+  "version": 3,
+  "geometry": {
+    "variant": "reference_uncut",
+    "domain": "circular_50c",
+    "run_preprocessor": true,
+    "rebuild_case_package": true
+  },
+  "case_conditions": {
+    "alphas_deg": [
+      4.0
+    ],
+    "reynolds": 4000000.0,
+    "mach": 0.1,
+    "rho_kg_m3": 1.225,
+    "mu_pa_s": 1.81e-5,
+    "velocity": "auto"
+  },
+  "mesh": {
+    "mesh_level": "custom",
+    "gmsh_backend": "auto",
+    "write_openfoam_mesh": true,
+    "open_diagnostic_mesh": false,
+    "gmsh_timeout_s": 900,
+    "openfoam_tool_timeout_s": 600,
+    "gmsh_threads": null,
+    "plot": true,
+    "overwrite": true
+  },
+  "execution": {
+    "run_solver": false,
+    "execution_backend": "native",
+    "solver": "auto",
+    "n_cores": 8,
+    "timeout_min": 120,
+    "stop_after_min": null,
+    "stop_grace_min": 5,
+    "stop_mode": "writeNow",
+    "pyfoam_live_monitor": true,
+    "cleanup_processor_directories": true,
+    "existing_simulation_action": "resume",
+    "stop_when_force_stable": false,
+    "execution_mode": "single",
+    "resume_existing": true,
+    "resume_additional_time_star": 20.0,
+    "steady_initialization": true,
+    "steady_timeout_min": 30,
+    "steady_force_window_samples": 500,
+    "steady_force_mean_tolerance_percent": 1.0,
+    "steady_force_fluctuation_tolerance_percent": 2.0,
+    "steady_pyfoam_live_monitor": true,
+    "steady_additional_iterations": 500,
+    "force_transient_after_unconverged_steady": true,
+    "continue_sweep_after_timeout": true,
+    "continue_sweep_after_error": true,
+    "postprocess_after_each_alpha": false,
+    "convergence_minimum_time_star": 4.0,
+    "convergence_window_time_star": 1.0,
+    "closed_convergence_minimum_time_star": 4.0,
+    "closed_convergence_window_time_star": 1.0,
+    "open_convergence_minimum_time_star": 8.0,
+    "open_convergence_window_time_star": 2.0,
+    "convergence_mean_tolerance": 0.02,
+    "convergence_oscillation_tolerance": 0.1,
+    "convergence_poll_s": 10.0,
+    "allow_failed_checkmesh_for_debug": false
+  },
+  "postprocess": {
+    "run_openfoam_postprocess": true,
+    "export_mode": "openfoam_reader",
+    "open_results_folder": true,
+    "open_paraview": false,
+    "timeout_s": 300,
+    "wall_profile_analysis": true,
+    "velocity_profile_stations_xc": [0.1, 0.3, 0.6, 0.9],
+    "velocity_profile_sample_points": 40,
+    "automatic_paraview_products": true,
+    "paraview_maximum_frames": 24
+  },
+  "safeguards": {
+    "existing_mesh_action": "ask",
+    "existing_case_results_action": "ask",
+    "pause_after_geometry": true,
+    "pause_after_mesh": true,
+    "pause_before_solver": true,
+    "require_manual_mesh_approval": true,
+    "copy_to_native_wsl_fs": true
+  }
+}

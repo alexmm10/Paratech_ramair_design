@@ -1,0 +1,593 @@
+CFD_2D_TECHNICAL_SPECIFICATIONS.txt
+Ram-air parafoil / LS(1)-0417 2D CFD meshing and OpenFOAM implementation guide
+================================================================================
+
+Purpose
+-------
+This document is the technical input that Codex must use when modifying or generating the Python scripts for the 2D CFD workflow: geometry/case package generation, Gmsh mesh generation, mesh quality verification, OpenFOAM case writing, safe OpenFOAM execution, post-processing and comparison with reference data.
+
+Primary references used
+-----------------------
+1. Ghoreyshi, Bergeron, Seidel, Lofthouse & Cummings, "Grid Quality and Resolution Effects for Aerodynamic Modeling of Ram-Air Parachutes", Journal of Aircraft, 2016.
+2. Balaji, Mittal & Rai, "Effect of leading edge cut on the aerodynamics of ram-air parachutes", International Journal for Numerical Methods in Fluids, 2005.
+3. Ross, "Computational Aerodynamics in the Design and Analysis of Ram-Air-Inflated Wings", NASA Ames / AIAA, 1993.
+4. Gmsh reference manual: https://gmsh.info/doc/texinfo/gmsh.html
+5. OpenFOAM v2312 documentation: https://doc.openfoam.com/2312/ and https://www.openfoam.com/documentation/user-guide
+
+================================================================================
+1. GEOMETRY TYPES AND PHYSICAL INTERPRETATION
+================================================================================
+
+The workflow must clearly distinguish at least these 2D geometry variants:
+
+1. reference_uncut
+   - Original/base LS(1)-0417 profile with no leading-edge opening.
+   - Closed solid airfoil.
+   - No internal fluid.
+   - CFD domain = external flow only.
+
+2. closed_reference
+   - Cut/open profile artificially closed with a TE/LE closure or test closure.
+   - No internal fluid.
+   - CFD domain = external flow only.
+   - Mainly diagnostic/comparative.
+
+3. open_ramair / standard / optimized / ross_standard_8p4 / ross_minimum_4p0
+   - Open parafoil section.
+   - External flow and internal cavity flow must both be present.
+   - The inlet is a geometric opening, not a boundary condition.
+   - The fabric is an impermeable solid wall with small but finite thickness.
+   - CFD domain = one connected fluid region: external domain + internal cavity connected through the ram-air inlet.
+
+Important implementation rule:
+- Do NOT create a physical OpenFOAM patch named "ram_air_inlet".
+- The inlet must remain an open connection between exterior and interior fluid regions.
+- For open profiles, a mesh consisting only of zero-thickness curves is diagnostic only and must never be marked OpenFOAM-ready.
+- For OpenFOAM, the final 2D case must be extruded to a one-cell-thick 3D mesh with front/back patches of type "empty".
+
+================================================================================
+2. RECOMMENDED PROJECT STRUCTURE
+================================================================================
+
+Use this project structure:
+
+project_root/
+  preprocess_ramair_main.py
+  Generate_RamAir_Canopy_MAIN.CATScript
+  profiles/
+  configs/
+  CATIA_inputs/
+  CATIA_exports/
+  CFD_2D/
+    CFD_2D_inputs/
+    scripts/
+    meshes/
+    openfoam_cases/
+    results/
+    reference_data/
+    tests/
+    reports/
+  docs/
+  reports/
+  logs/
+  previous_versions/
+
+Rules:
+- Latest usable preprocessor in root: preprocess_ramair_main.py
+- Latest usable CATScript in root: Generate_RamAir_Canopy_MAIN.CATScript
+- Move old, duplicated, obsolete, or unused versions to previous_versions/ without deleting.
+- CATIA must read only from CATIA_inputs/.
+- CFD 2D must not depend on CATIA_inputs; it must read from CFD_2D/CFD_2D_inputs/ and profiles/.
+- Use pathlib.Path in Python and avoid hardcoded absolute Windows paths.
+
+================================================================================
+3. PROFILE INPUTS AND PREPROCESSING REQUIREMENTS
+================================================================================
+
+All base profile files must live in profiles/:
+  LS1_0417_closed.dat
+  LS1_0417_standard.csv
+  LS1_0417_optimized.csv
+  Ross_LS1_0417_8p4_inlet.dat
+  Ross_LS1_0417_4p0_inlet.dat
+  README_profiles.md
+
+Profile parsing must:
+- accept .csv and .dat;
+- detect columns robustly;
+- normalize to chord c = 1 unless explicitly configured otherwise;
+- preserve true geometry orientation;
+- verify no duplicated points or self-intersections;
+- split upper and lower surfaces correctly:
+    upper surface: from LE/inlet upper lip toward TE along the upper side;
+    lower surface: from TE toward LE/inlet lower lip along the lower/negative side, or consistently oriented but clearly tagged;
+- identify upper_lip_point, lower_lip_point, inlet segment, trailing edge region, optional rounded trailing edge, leading edge/stagnation zone;
+- generate diagnostic PNGs: base closed profile, open profile with inlet visible, cut profile closed artificially, Ross 8.4% and 4% geometries, upper/lower/inlet/TE labels.
+
+If the preprocessor offers "rounded" TE closing, the exported airfoil_used for CFD must include the actual rounded closing geometry, not just the raw point set.
+
+================================================================================
+4. DOMAIN SELECTIONS
+================================================================================
+
+Implement domain presets:
+
+A. ross_cgrid_like
+   - Reproduces Ross-style open parafoil computations.
+   - Farfield minimum distance >= 10c.
+   - Prefer C-grid/O-grid-like topology around the airfoil when possible.
+   - Wake resolution required.
+   - Used for initial Ross validation cases.
+
+B. rectangular_balaji
+   - Based on Balaji/Mittal/Rai.
+   - Upstream boundary: 5c from LE.
+   - Downstream boundary: 11c from LE.
+   - Upper/lower boundaries: +/-5c.
+   - Used for reproducing the 2005 leading-edge cut tests.
+
+C. circular_50c
+   - Production/reference domain.
+   - Farfield radius around 50c.
+   - Based on Ghoreyshi et al. recommendation that L/D stabilizes beyond about 50c.
+
+D. debug_20c
+   - Reduced domain for software and workflow tests only.
+   - Not for final L/D validation.
+
+Domain requirements:
+- Closed profiles: external fluid region only.
+- Open profiles: external + internal fluid in a single connected region.
+- Farfield patches must be named consistently.
+- For OpenFOAM 2D, mesh must be extruded in z with one layer and front/back empty.
+
+================================================================================
+5. MESHING STRATEGY
+================================================================================
+
+Recommended topology:
+- Hybrid mesh: structured/quasi-structured wall-normal boundary layer near airfoil/fabric walls + triangular/quadrilateral unstructured outer field.
+- Local refinement at inlet lips, leading edge, trailing edge, wake and expected separation.
+- Closed airfoil: use a solid airfoil hole in the outer fluid domain.
+- Open airfoil: create finite fabric thickness and build the fluid region around it. Do not use zero-thickness fabric as final OpenFOAM mesh.
+
+Ross reference mesh details:
+- C-grid around airfoil.
+- Farfield at least 10c.
+- Grid extends from farfield through airfoil surface into the interior cavity.
+- Trailing edge modeled with finite thickness so internal grid lines can follow wake cut.
+- Surface discretization: ~150 points around airfoil, 45 points in wake, 101 outward, 20 internal/outward inside section.
+- First exterior boundary-layer row: ~5e-6 c.
+- Modeled fabric thickness: ~1e-5 c.
+- Spacing to first row inside inner surface: ~1e-5 c.
+- Fabric impermeable.
+- Exterior turbulence active; interior assumed laminar in Ross.
+
+Balaji/Mittal/Rai mesh details:
+- Structured triangular mesh close to body.
+- Unstructured Delaunay triangulation away from body.
+- Fictitious/local refinement boundary near body and wake.
+- First element thickness normal to wall: 1e-4 c.
+- Example mesh for LS(1)-0417 with xcut=0.1c, theta=150 deg, alpha=7.5:
+    M1: 20,927 nodes, 41,412 elements.
+    M2: 36,044 nodes, 71,606 elements.
+    M3: 64,402 nodes, 128,137 elements.
+
+Ghoreyshi grid-quality recommendations:
+- Use geometry-conforming mesh with good wall orthogonality.
+- y+ <= 1; y+ around 0.25 gave faster residual convergence.
+- Growth rate GR <= 1.2; GR = 1.1 preferred.
+- At least 50 prism/viscous layers; more than 50 gives only marginal improvement.
+- Farfield radius about 50c for reliable L/D.
+- Avoid highly skewed near-wall cells.
+- Smoothness alone is not enough: skewness and wall orthogonality affect accuracy.
+- Open-inlet cases are less sensitive to y+ and internal cavity grid than closed cases.
+- Internal cavity may be meshed much more coarsely than the outer boundary layer because internal flow is nearly stagnant except near the inlet.
+- Refine near inlet lips and outer walls because separation starts there.
+
+Practical mesh levels:
+- debug: farfield 10c-20c, low count, geometry/script checks.
+- coarse: preliminary force trends only.
+- medium: y+ <=1, GR<=1.2, 40-50 wall layers, wake/inlet refinement.
+- fine/ross_like: y+~0.25, GR=1.1, >=50 wall layers, high inlet/TE/wake resolution, validation.
+
+================================================================================
+6. GMSH IMPLEMENTATION REQUIREMENTS
+================================================================================
+
+Use Gmsh .geo scripting or Python API, but always export reproducible .geo/.msh files for inspection.
+
+Use:
+- geometric entities for points/curves/surfaces;
+- OpenCASCADE if Boolean operations are needed for open thin-fabric domains;
+- Physical Groups for every boundary patch and fluid region;
+- mesh size fields: Distance/Threshold near walls, Box fields for wake, local fields at inlet lips and TE, optional BoundaryLayer field if robust;
+- recombination/extrusion where needed;
+- MSH version compatible with OpenFOAM conversion.
+
+OpenFOAM conversion:
+- Prefer: gmsh -3 mesh.geo -format msh2 -o mesh_final.msh
+- 2D .msh may be created for visual checks only; it is not OpenFOAM-ready.
+- For OpenFOAM, create 3D one-cell-thick extruded mesh:
+    spanwise_thickness = 0.01c by default;
+    spanwise_layers = 1;
+    frontAndBack patches = empty.
+
+Physical patch naming:
+Closed cases:
+  airfoil_wall
+  farfield
+  frontAndBack
+
+Rectangular farfield alternative:
+  inlet
+  outlet
+  top
+  bottom
+  airfoil_wall
+  frontAndBack
+
+Open cases:
+  outer_upper_wall
+  outer_lower_wall
+  inner_upper_wall
+  inner_lower_wall
+  upper_lip_wall
+  lower_lip_wall
+  trailing_edge_wall
+  farfield or inlet/outlet/top/bottom
+  frontAndBack
+
+Forbidden physical patch:
+  ram_air_inlet
+
+Mesh builder outputs:
+  mesh.geo
+  mesh_final.msh
+  mesh_preview.png
+  mesh_closeup_inlet.png
+  mesh_closeup_te.png
+  mesh_quality_report.json
+  log.gmsh
+  log.gmshToFoam
+  log.checkMesh
+
+================================================================================
+7. OPENFOAM CASE REQUIREMENTS
+================================================================================
+
+Recommended solver:
+- pimpleFoam for transient incompressible RANS.
+- Open-inlet cases are unsteady and must not be treated only as steady.
+- simpleFoam may be used only as diagnostic for closed, low-angle, stable cases.
+
+Turbulence model:
+- Base OpenFOAM model: Spalart-Allmaras.
+- Optional comparison: kOmegaSST.
+- Ross used Baldwin-Barth and Balaji used Baldwin-Lomax, so OpenFOAM results need trend agreement first, not exact equality.
+- Ghoreyshi used Spalart-Allmaras, making SA the best starting model.
+
+Dimensional/nondimensional setup:
+Option A, nondimensional:
+  c = 1, U_inf = 1, nu = 1/Re, deltaT = deltaT*
+Option B, Ghoreyshi-like:
+  c = 1 m, U_inf = 34 m/s, Re = 1.4e6, nu = U*c/Re, deltaT = 0.034*c/U
+Use one convention consistently and store it in case_config.json.
+
+Angle of attack:
+- Prefer setting freestream vector:
+    Ux = U_inf*cos(alpha)
+    Uy = U_inf*sin(alpha)
+- Do not rotate both geometry and freestream unless explicitly intended.
+
+Boundary conditions:
+Closed/circular farfield:
+  airfoil_wall: U noSlip, p zeroGradient, turbulence wall values.
+  farfield: freestreamVelocity/freestreamPressure if supported; otherwise robust fallback fixedValue U + zeroGradient p or inletOutlet/freestream-style.
+  frontAndBack: empty for all fields.
+
+Rectangular Balaji-like:
+  inlet/upstream: U fixedValue freestream, p zeroGradient.
+  outlet/downstream: U zeroGradient or inletOutlet, p fixedValue 0 or zeroGradient depending setup.
+  top/bottom: slip/symmetryPlane/farfield approximation; document choice.
+  walls: noSlip.
+
+Open profiles:
+  all fabric wall patches: noSlip.
+  no ram_air_inlet boundary condition.
+  inlet is simply open fluid connection between outer and inner domains.
+
+OpenFOAM files:
+  0/U
+  0/p
+  0/nuTilda
+  0/nut
+  constant/transportProperties
+  constant/turbulenceProperties
+  system/controlDict
+  system/fvSchemes
+  system/fvSolution
+  system/decomposeParDict if parallel
+  system/forceCoeffs or functionObjects in controlDict
+
+Force coefficients:
+Closed force patches:
+  (airfoil_wall)
+Open force patches:
+  (outer_upper_wall outer_lower_wall inner_upper_wall inner_lower_wall upper_lip_wall lower_lip_wall trailing_edge_wall)
+Reference:
+  Aref = c * spanwise_thickness or 1 if using 2D normalized forceCoeffs convention;
+  lRef = c = 1;
+  magUInf = U_inf;
+  CofR = quarter-chord or configurable.
+
+Time configuration:
+- Ghoreyshi production reference:
+    deltaT* = V*deltaT/c = 0.034;
+    20,000 iterations;
+    average last 10,000 iterations;
+    if U=1 and c=1: deltaT=0.034 and endTime=680.
+- Debug: endTime* = 5-20, coarse mesh, short timeout.
+- Production: endTime* around 680 or enough for periodic statistics; average from 50% final time onward.
+
+Numerics:
+- Start conservative: bounded upwind/limitedLinear for debug.
+- Then production: second-order spatial schemes where stable.
+- Control maxCo.
+- Record residuals, Courant number, force histories and any divergence.
+
+================================================================================
+8. MESH QUALITY VERIFICATION
+================================================================================
+
+Minimum checks before approval:
+- Geometry: no self-intersections; closed loops valid; open cavity connected to external fluid; no zero-thickness final wall for OpenFOAM open cases.
+- Gmsh: mesh generated, physical groups present, near-wall refinement present.
+- gmshToFoam: conversion completed, constant/polyMesh exists, boundary file exists.
+- checkMesh: run checkMesh -allTopology -allGeometry; no failed checks; no negative volumes; frontAndBack exists and is empty.
+- Quality gates: y+ <=1 preferably ~0.25; growth <=1.2 preferably 1.1; controlled skewness/non-orthogonality; farfield distance documented.
+
+Hard fail:
+- negative volumes/cells;
+- failed checkMesh;
+- missing boundary patches;
+- missing frontAndBack;
+- ram_air_inlet listed as patch;
+- open case without connected cavity.
+
+Warning:
+- high non-orthogonality;
+- high skewness;
+- y+ estimate >1;
+- farfield <10c;
+- boundary-layer layer count <50 for validation meshes.
+
+Pass only if:
+- no failed checkMesh;
+- required patches exist;
+- geometry classified correctly;
+- mesh report written;
+- user explicitly approves mesh before solver execution.
+
+================================================================================
+9. VALIDATION / REFERENCE CASES
+================================================================================
+
+A. Ross reference cases
+----------------------
+Purpose: verify trends for LS1-0417 base airfoil and open inlets.
+
+Geometry:
+- Basic airfoil: LS1-0417, no inlet.
+- Standard inlet: approximately 8.4%c opening.
+- Minimum inlet: approximately 4%c opening.
+- Minimum inlet designed to cover stagnation point range for Cl about 0.5 to 1.5.
+- For open geometry, compute both external and internal flow.
+
+Ross computational setup:
+- 2D incompressible Navier-Stokes INS2D.
+- C-grid.
+- Farfield minimum 10c.
+- Re = 4e6 for inlet-size comparisons.
+- Clean baseline also compared at Re = 6e6 and alpha = 4.17 deg.
+- Baldwin-Barth turbulence model.
+- Exterior turbulent, interior laminar.
+- Fabric impermeable.
+- First exterior boundary-layer point about 5e-6c.
+- Fabric thickness about 1e-5c.
+- Internal first spacing about 1e-5c.
+
+Ross outputs to compare:
+- Fig. 8: Cl-alpha for basic airfoil, 4% inlet, 8.4% inlet, Re=4e6.
+- Fig. 9: L/D versus Cl for same three sections, Re=4e6.
+- Fig. 10: Cp distribution at alpha=4 deg, Re=4e6, 4% and 8.4% inlets.
+- Fig. 11: particle traces near inlet at Re=4e6: 8.4% inlet around Cl=0.75; 4% inlet around Cl=0.9.
+
+Approximate visual targets before formal digitization:
+- Basic airfoil Clmax close to 1.9.
+- 4% inlet Clmax just above 1.5.
+- 8.4% inlet Clmax around 0.9.
+- 4% inlet has much higher L/D than 8.4% inlet.
+- 4% inlet L/D peak visually near Cl ~0.8-1.0.
+- 8.4% inlet L/D peak visually near Cl ~0.7-0.8 and much lower.
+- Cp at alpha=4 deg: 8.4% inlet has stronger suction spikes around inlet lips than 4% inlet.
+These are sanity checks only; final comparison must use digitized data.
+
+B. Balaji/Mittal/Rai reference cases
+------------------------------------
+Setup:
+- LS(1)-0417 airfoil.
+- Re = 1e6.
+- Incompressible RANS with Baldwin-Lomax.
+- Stabilized finite element formulation.
+- Domain: upstream 5c, downstream 11c, upper/lower +/-5c.
+- Mesh: structured near body + unstructured Delaunay farfield; first normal element thickness = 1e-4c.
+- Boundary conditions: noSlip on parafoil; upstream freestream velocity; downstream Neumann/zero viscous stress; top/bottom normal velocity = 0 and tangential stress = 0.
+- Fabric porosity neglected.
+- Internal and external pressure difference represented with two node sets across fabric.
+
+Clean LS(1)-0417 reference at Re=1e6:
+  alpha=7.5 deg: Cl=1.148, Cd=0.019, L/D=60.42
+  alpha=15 deg:  Cl=1.567, Cd=0.061, L/D=25.69
+  alpha=17 deg:  Cl=1.561, Cd=0.119, L/D=13.12
+
+Cut cases at Re=1e6 and alpha=7.5 deg:
+  no cut:               Cl=1.148, Cd=0.019, L/D=60.42
+  xcut=0.1c, theta=135: Cl=0.894, Cd=0.245, L/D=3.65
+  xcut=0.05c,theta=135: Cl=0.887, Cd=0.237, L/D=3.74
+  xcut=0.1c, theta=150: Cl=0.880, Cd=0.034, L/D=25.88
+
+Cut cases at Re=1e6 and alpha=15 deg:
+  xcut=0.10c, theta=135: Cl=1.122, Cd=0.511, L/D=2.20
+  xcut=0.05c, theta=135: Cl=1.103, Cd=0.482, L/D=2.29
+  xcut=0.10c, theta=150: Cl=1.264, Cd=0.448, L/D=2.82
+
+Best LS(1)-0417 cut in Balaji: xcut=0.1c, theta=150 deg.
+Alpha sweep:
+  alpha=0:   Cl=0.314, Cd=0.036, L/D=8.72
+  alpha=5:   Cl=0.746, Cd=0.022, L/D=32.75
+  alpha=7.5: Cl=0.880, Cd=0.034, L/D=25.88
+  alpha=10:  Cl=0.876, Cd=0.056, L/D=15.54
+  alpha=12:  Cl=0.950, Cd=0.236, L/D=4.02
+  alpha=15:  Cl=1.264, Cd=0.448, L/D=2.82
+
+Mesh convergence for xcut=0.1c, theta=150 deg, Re=1e6, alpha=7.5:
+  M1: 20,927 nodes, 41,412 elements, Cl=0.880, Cd=0.032, L/D=27.25, Cl_rms=0.058, Cd_rms=0.075
+  M2: 36,044 nodes, 71,606 elements, Cl=0.914, Cd=0.035, L/D=26.04, Cl_rms=0.068, Cd_rms=0.105
+  M3: 64,402 nodes, 128,137 elements, Cl=0.963, Cd=0.035, L/D=27.27, Cl_rms=0.070, Cd_rms=0.121
+  M1 dt=1e-3, M3 dt=1e-4 in their formulation.
+
+C. Ghoreyshi grid-quality cases
+-------------------------------
+Setup:
+- 2D open/closed parachute sections.
+- Cobalt solver run in 2D mode.
+- Spalart-Allmaras turbulence model.
+- Mach=0.1, Re=1.4e6.
+- Alpha sweep 0 to 10 deg in 1 deg increments.
+- Open-inlet airfoil is unsteady.
+- Open-inlet simulations: second-order time accuracy; 20,000 iterations; normalized time step deltaT*=0.034; last 10,000 iterations averaged.
+
+Closed-grid conclusions:
+- Around 134k well-shaped cells with y+ around 0.26 can match much finer grids.
+- Farfield effects become small above about 50c.
+- L/D is the most sensitive metric to farfield distance.
+- Poor skewness/wall orthogonality can cause large L/D errors even if global quality score looks high.
+
+Open-grid conclusions:
+- External wall quality remains important.
+- Internal cavity grid resolution/type has little effect once the cavity flow is captured.
+- Very coarse internal unstructured cavity meshes can be acceptable.
+- Avoid unstructured anisotropic near-wall cells with poor skewness on the external wall.
+
+================================================================================
+10. SCRIPT RESPONSIBILITIES
+================================================================================
+
+ramair_2d_profile_case_builder.py
+- Read preprocessed profiles and/or profiles/ raw files.
+- Build clean/closed/open case packages.
+- Verify surface splitting, inlet, TE, geometry orientation.
+- Export points.csv, edges.csv, patches.json, manifest.json and diagnostic PNGs.
+
+ramair_2d_mesh_builder.py
+- Read case package.
+- Generate Gmsh .geo and .msh.
+- Generate OpenFOAM-ready 3D extruded mesh when requested.
+- Run gmsh and optionally gmshToFoam/checkMesh.
+- Never execute solver.
+- Never mark open diagnostic geometry as PASS.
+
+ramair_2d_mesh_quality_controller.py
+- Parse Gmsh/checkMesh logs.
+- Verify mesh quality gates.
+- Write mesh_quality_report.json.
+- Approve mesh only with explicit user action.
+
+ramair_2d_openfoam_case_writer.py
+- Create OpenFOAM case folders.
+- Copy a real converted polyMesh.
+- Never create empty constant/polyMesh.
+- Write 0/constant/system dictionaries.
+- Use existing patch names from boundary file.
+- Reject ram_air_inlet patch.
+- Write forceCoeffs with correct wall patches.
+
+ramair_2d_openfoam_runner.py
+- Dry-run by default.
+- Execute only with explicit --run.
+- Check environment and mesh approval before running.
+- Enforce timeout.
+- Detect solver divergence/NaN/FATAL ERROR.
+- Write run_status.json.
+
+ramair_2d_postprocess.py
+- Read forceCoeffs, residuals, yPlus, Cp samples if available.
+- Never create fake successful results.
+- Distinguish NOT_RUN_YET, RUN_FAILED, FORCECOEFFS_MISSING_AFTER_RUN, PARSE_FAILED, PROCESSED.
+- Export plots and summary CSV/JSON.
+- Compare against digitized Ross/Balaji data only if available.
+
+================================================================================
+11. SAFE EXECUTION WORKFLOW
+================================================================================
+
+Required order:
+1. Check environment:
+   python CFD_2D/scripts/check_environment.py
+2. Run preprocessor:
+   python preprocess_ramair_main.py --config configs/default_case_config.json
+3. Build CFD 2D case package:
+   python CFD_2D/scripts/ramair_2d_profile_case_builder.py --variant reference_uncut
+4. Generate debug mesh:
+   python CFD_2D/scripts/ramair_2d_mesh_builder.py --variant reference_uncut --domain debug_20c --mesh-level debug --write-openfoam-mesh
+5. Convert and check:
+   python CFD_2D/scripts/ramair_2d_mesh_builder.py --variant reference_uncut --check-mesh
+6. Inspect mesh manually:
+   gmsh CFD_2D/meshes/reference_uncut/mesh_final.msh
+7. Approve mesh:
+   python CFD_2D/scripts/ramair_2d_mesh_quality_controller.py --variant reference_uncut --approve
+8. Write OpenFOAM case:
+   python CFD_2D/scripts/ramair_2d_openfoam_case_writer.py --variant reference_uncut --alpha 4 --re 4000000
+9. Dry-run:
+   python CFD_2D/scripts/ramair_2d_openfoam_runner.py --case CFD_2D/openfoam_cases/reference_uncut/alpha_004
+10. Optional short run only:
+   python CFD_2D/scripts/ramair_2d_openfoam_runner.py --case CFD_2D/openfoam_cases/reference_uncut/alpha_004 --run --timeout-min 10
+11. Postprocess:
+   python CFD_2D/scripts/ramair_2d_postprocess.py --case CFD_2D/openfoam_cases/reference_uncut/alpha_004
+
+Never run a long alpha sweep automatically.
+
+================================================================================
+12. TESTING REQUIREMENTS
+================================================================================
+
+Tests must not require CATIA.
+OpenFOAM-dependent tests must run only if RAMAIR_RUN_OPENFOAM_TESTS=1.
+
+Required tests:
+- latest preprocessor and CATScript exist in project root;
+- old versions moved to previous_versions;
+- CATIA_inputs contains only CATIA-readable inputs;
+- CFD_2D is outside CATIA_inputs;
+- profiles are read from profiles/;
+- geometry split into upper/lower/inlet correctly;
+- diagnostic PNGs exist;
+- technical specifications file exists;
+- mesh builder does not execute solver;
+- OpenFOAM case writer does not create empty polyMesh;
+- runner is dry-run by default;
+- postprocess does not fake results;
+- ram_air_inlet is not a physical patch;
+- checkMesh is called only when OpenFOAM tools exist;
+- relative paths work on Windows and Ubuntu/WSL.
+
+================================================================================
+13. LIMITATIONS AND EXPECTATIONS
+================================================================================
+
+- OpenFOAM SA/pimpleFoam will not exactly reproduce Ross INS2D Baldwin-Barth or Balaji finite-element Baldwin-Lomax values.
+- Initial validation focuses on correct geometry, mesh topology, patch naming, checkMesh, stable execution, and correct trends.
+- Quantitative agreement requires digitized reference curves, grid refinement, solver sensitivity, turbulence model sensitivity, and careful force normalization.
+- Do not calibrate results artificially.
+- Report mismatches honestly.
