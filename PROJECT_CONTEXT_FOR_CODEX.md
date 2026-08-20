@@ -1,9 +1,11 @@
 # RamAir Project Context for Codex
 
-Context version: 2026-08-18  
+Context version: 2026-08-20
 Application backend API: 24  
 Validation Lab schema: 10  
 Solver configuration schema: 14  
+Work Case manifest schema: 3
+Active workspace schema: 4
 Canonical Windows source: `C:\Users\alejm\Desktop\PRACTICAS_INVICSA\3D design\DESIGN APP`  
 Canonical WSL runtime: `/home/alejm/ramair_cfd/DESIGN_APP`
 
@@ -22,9 +24,10 @@ future work and must not be inferred from diagnostic placeholders.
   user action and is not part of normal pytest.
 - Gmsh, `gmshToFoam` and `checkMesh` may be used only as bounded verification.
 - Never fabricate fields, mesh results, quality PASS states or empty `polyMesh`.
-- Do not delete data outside an explicit lifecycle action. The one schema-9
-  migration authorization applies only to legacy URANS data in the isolated
-  Validation Lab.
+- Do not delete data outside an explicit lifecycle action. Work Case schema-3
+  migration is metadata-only: it may back up and atomically replace small
+  `case_manifest.json` files, but it must not move, duplicate or delete package
+  artifacts.
 - Maximum supported MPI ranks remain eight and the laboratory has one atomic
   solver lease.
 
@@ -55,6 +58,34 @@ under `CFD_2D/scripts`.
 
 Heavy execution belongs in the Linux WSL filesystem. The Windows source is
 synchronized atomically by the official launcher.
+
+### 4.1 Work Case schema 3
+
+Every Work Case owns a stable `work_case_id`. Every geometry, CFD case, mesh,
+solver, simulation and postprocess package owns a stable `entity_id` and a
+SHA-256 `revision_id`. A revision records provenance, artifact inventory and
+explicit upstream dependencies as `{role, entity_id, revision_id}`. The
+top-level `entities` and `active_entities` objects are indexes; stage packages
+remain the source of truth and retain their existing folders.
+
+Approvals belong to one immutable revision. Editing a package preserves the
+old decision in `revision_history`, creates a new revision and resets only that
+new revision to `pending`. When an active upstream entity or revision changes,
+dependent packages become `stale`; they remain visible with warnings and are
+never silently restored. Selection order is active compatible revision, most
+recent compatible revision, then explicit creation by the caller.
+
+Schemas 1 and 2 are accepted through a read-only adapter. An explicit
+`ramair_case_library.py migrate --apply` creates a manifest backup under
+`Previous Versions/Results Library Manifest Backups`, writes schema 3
+atomically and generates `Results/work_case_index.json`. The index classifies
+legacy cases and marks the three protected scientific Work Cases. No heavy
+artifact is hashed or copied by the migration itself.
+
+The migration was applied on 2026-08-20 to the five WSL Work Cases. Original
+schema-2 manifests are retained in the backup tree. An immediate repeat dry
+run was idempotent, and aggregate hashes excluding `case_manifest.json` were
+identical before and after for all three protected Work Cases.
 
 ## 5. CFD stage boundaries
 

@@ -16,7 +16,17 @@ sys.path.insert(0, str(APP))
 
 from project_layout import LAYOUT, canonicalize_project_relative, find_project_root, project_path  # noqa: E402
 from mesh_configuration import apply_mesh_level, domain_parameters  # noqa: E402
-from ramair_case_library import activate_workspace_configuration, copy_item, create_case, list_cases, restore_stage, restore_workspace, save_stage  # noqa: E402
+from ramair_case_library import (  # noqa: E402
+    activate_workspace_configuration,
+    approve_stage_package,
+    copy_item,
+    create_case,
+    list_cases,
+    migrate_work_case_library,
+    restore_stage,
+    restore_workspace,
+    save_stage,
+)
 from workflow_backend import (  # noqa: E402
     load_config,
     save_config,
@@ -163,6 +173,152 @@ def test_results_case_manifest_is_discoverable(project: Path) -> None:
     cases = list_cases(project)
     assert [item["folder"] for item in cases] == ["saved_case"]
     assert cases[0]["reynolds"] == 4_000_000
+
+
+def test_legacy_manifest_adapter_is_read_only_until_explicit_migration(
+    project: Path,
+) -> None:
+    case_root = project / "Results/legacy_case"
+    write(case_root / "Operating Case/Case Package/manifest.json", "{}")
+    manifest_path = case_root / "case_manifest.json"
+    original = {
+        "schema_version": 1,
+        "case_name": "legacy_case",
+        "created_at": "2025-01-02 03:04:05",
+        "variant": "reference_uncut",
+        "alpha_deg": 4.0,
+        "stages": {
+            "case": {
+                "folder": "Operating Case",
+                "saved_at": "2025-01-02 03:04:05",
+                "file_count": 1,
+                "size_bytes": 2,
+                "variant": "reference_uncut",
+                "alpha_deg": 4.0,
+            }
+        },
+    }
+    write(manifest_path, json.dumps(original))
+    before = manifest_path.read_bytes()
+
+    adapted = list_cases(project)[0]
+    dry_run = migrate_work_case_library(project, dry_run=True)
+
+    assert adapted["schema_version"] == 3
+    assert adapted["work_case_id"]
+    assert adapted["stages"]["case"]["packages"]["legacy"]["entity_id"]
+    assert manifest_path.read_bytes() == before
+    assert dry_run["cases"][0]["written"] is False
+    assert not (project / "Results/work_case_index.json").exists()
+
+    applied = migrate_work_case_library(project, dry_run=False)
+    migrated = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert applied["status"] == "MIGRATED"
+    assert migrated["schema_version"] == 3
+    assert migrated["migration"]["metadata_only"] is True
+    assert (project / "Results/work_case_index.json").is_file()
+    assert any(
+        (project / "Previous Versions/Results Library Manifest Backups/legacy_case").glob(
+            "*_case_manifest_schema1.json"
+        )
+    )
+
+
+def test_revision_approval_is_preserved_when_package_is_edited(project: Path) -> None:
+    for stage in ("geometry", "case", "mesh"):
+        save_stage(
+            project,
+            stage,
+            "revision_case",
+            "reference_uncut",
+            4.0,
+            "Revision lifecycle",
+            "archive",
+            "baseline",
+        )
+    decision = approve_stage_package(
+        project,
+        "revision_case",
+        "mesh",
+        "baseline",
+        "approved",
+        actor="qa-user",
+        evidence={"checkMesh": "passed"},
+    )
+    old_revision = decision["approval"]["revision_id"]
+    manifest_path = project / "Results/revision_case/case_manifest.json"
+    old_entity = json.loads(manifest_path.read_text(encoding="utf-8"))[
+        "stages"
+    ]["mesh"]["packages"]["baseline"]["entity_id"]
+    write(project / "CFD_2D/meshes/reference_uncut/mesh_quality_report.json", '{"ok": true}')
+
+    save_stage(
+        project,
+        "mesh",
+        "revision_case",
+        "reference_uncut",
+        4.0,
+        "Edited revision",
+        "archive",
+        "baseline",
+    )
+    current = json.loads(manifest_path.read_text(encoding="utf-8"))[
+        "stages"
+    ]["mesh"]["packages"]["baseline"]
+
+    assert current["entity_id"] == old_entity
+    assert current["revision_id"] != old_revision
+    assert current["approval"]["status"] == "pending"
+    assert current["approval"]["revision_id"] == current["revision_id"]
+    assert current["revision_history"][-1]["revision_id"] == old_revision
+    assert current["revision_history"][-1]["approval"]["status"] == "approved"
+    assert current["revision_history"][-1]["archived_path"]
+
+
+def test_upstream_revision_change_marks_dependents_stale_and_blocks_restore(
+    project: Path,
+) -> None:
+    for stage in ("geometry", "case", "mesh"):
+        save_stage(
+            project,
+            stage,
+            "dependency_case",
+            "reference_uncut",
+            4.0,
+            "Dependency graph",
+            "archive",
+            "baseline",
+        )
+    write(
+        project / "CFD_2D/CFD_2D_inputs/geometry/reference_uncut/new_revision.json",
+        '{"revision": 2}',
+    )
+    save_stage(
+        project,
+        "geometry",
+        "dependency_case",
+        "reference_uncut",
+        4.0,
+        "Geometry changed",
+        "archive",
+        "baseline",
+    )
+
+    manifest = json.loads(
+        (project / "Results/dependency_case/case_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    case_info = manifest["stages"]["case"]["packages"]["baseline"]
+    mesh_info = manifest["stages"]["mesh"]["packages"]["baseline"]
+    assert case_info["compatibility"]["status"] == "stale"
+    assert mesh_info["compatibility"]["status"] == "stale"
+    assert "dependency_revision_changed:geometry" in case_info["compatibility"][
+        "warnings"
+    ]
+    with pytest.raises(ValueError, match="stale case package"):
+        restore_workspace(project, "dependency_case", "archive")
 
 
 def test_complete_workspace_restore_loads_geometry_case_mesh_and_solver(project: Path) -> None:
@@ -323,6 +479,14 @@ def test_working_case_supports_multiple_named_mesh_packages(project: Path) -> No
 def test_saved_config_updates_active_workcase_package(project: Path) -> None:
     create_case(project, "active_defaults", "reference_uncut", 4.0, "")
     set_workcase_selection(project, "active_defaults")
+    approved = approve_stage_package(
+        project,
+        "active_defaults",
+        "solver",
+        "topology_solver_v11",
+        "approved",
+        evidence="reviewed defaults",
+    )
     save_config(
         project,
         "solver",
@@ -346,6 +510,33 @@ def test_saved_config_updates_active_workcase_package(project: Path) -> None:
         ]
         is True
     )
+    revision = manifest["stages"]["solver"]["packages"]["topology_solver_v11"]
+    assert revision["revision_id"] != approved["approval"]["revision_id"]
+    assert revision["approval"]["status"] == "pending"
+    assert revision["revision_history"][-1]["approval"]["status"] == "approved"
+    archived_path = Path(revision["revision_history"][-1]["archived_path"])
+    assert (archived_path / "Configurations/cfd2d_solver_config.json").is_file()
+
+    second_approval = approve_stage_package(
+        project,
+        "active_defaults",
+        "solver",
+        "topology_solver_v11",
+        "approved",
+        evidence="reviewed edit",
+    )
+    save_config(
+        project,
+        "solver",
+        {"preset_id": "edited_in_app", "maxCo": 0.8, "steady_max_iterations": 10000},
+    )
+    unchanged = json.loads(
+        (project / "Results/active_defaults/case_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )["stages"]["solver"]["packages"]["topology_solver_v11"]
+    assert unchanged["revision_id"] == second_approval["approval"]["revision_id"]
+    assert unchanged["approval"]["status"] == "approved"
 
 
 def test_temporary_workspace_does_not_mutate_last_loaded_workcase(project: Path) -> None:

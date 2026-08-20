@@ -16,6 +16,7 @@ from ramair_2d_scale_validation_geometry import build_scaled_variant
 from ramair_2d_validation_workcase import copy_required, read_json, stage_entry
 from ramair_case_library import (
     STAGE_COLLECTION_FOLDERS,
+    schema3_manifest,
     seed_standard_solver_package,
     write_json_atomic,
 )
@@ -248,7 +249,7 @@ def build_open_validation_workcase(
             variant=VARIANT,
             alpha=4.0,
         )
-        write_json_atomic(incoming / "case_manifest.json", manifest)
+        write_json_atomic(incoming / "case_manifest.json", schema3_manifest(incoming, manifest))
         incoming.replace(destination)
     except Exception:
         shutil.rmtree(incoming, ignore_errors=True)

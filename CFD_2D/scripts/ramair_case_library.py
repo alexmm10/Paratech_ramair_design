@@ -10,9 +10,21 @@ import shutil
 import time
 import uuid
 from pathlib import Path
-from typing import Iterable
 
 from project_layout import canonicalize_project_relative, find_project_root, project_path
+from ramair_workcase_schema import (
+    ACTIVE_WORKSPACE_SCHEMA_VERSION,
+    CASE_MANIFEST_SCHEMA_VERSION,
+    make_package_revision,
+    migrate_case_manifest as migrate_schema_manifest,
+    migrate_case_library as migrate_schema_library,
+    new_work_case_id,
+    normalize_case_manifest,
+    package_compatibility,
+    rebuild_entity_index,
+    refresh_compatibility,
+    set_revision_approval,
+)
 
 
 STAGE_FOLDERS = {
@@ -92,26 +104,61 @@ def seed_standard_solver_package(
         raise FileNotFoundError(f"Standard solver configuration is missing: {source}")
     destination = _standard_solver_package_path(case_root)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, destination)
-    files, size = tree_stats(destination.parents[1])
+    normalized = normalize_case_manifest(
+        case_root,
+        manifest,
+        stage_folders=STAGE_FOLDERS,
+        collection_folders=STAGE_COLLECTION_FOLDERS,
+    )
+    manifest.clear()
+    manifest.update(normalized)
     stages = manifest.setdefault("stages", {})
+    current = stages.get("solver")
+    previous_info = None
+    if isinstance(current, dict) and isinstance(current.get("packages"), dict):
+        candidate = current["packages"].get(STANDARD_SOLVER_PACKAGE)
+        previous_info = candidate if isinstance(candidate, dict) else None
+    archived_path: Path | None = None
+    if destination.is_file() and previous_info:
+        archived_path = (
+            root
+            / "Previous Versions/Results Library Revision Backups"
+            / case_root.name
+            / "solver"
+            / str(previous_info.get("entity_id") or STANDARD_SOLVER_PACKAGE)
+            / str(previous_info.get("revision_id") or "unversioned")
+        )
+        archived_config = archived_path / "Configurations/cfd2d_solver_config.json"
+        archived_config.parent.mkdir(parents=True, exist_ok=True)
+        if not archived_config.exists():
+            shutil.copy2(destination, archived_config)
+    shutil.copy2(source, destination)
     stages["solver"] = {
         "folder": STAGE_COLLECTION_FOLDERS["solver"],
         "active_package": STANDARD_SOLVER_PACKAGE,
-        "packages": {
-            STANDARD_SOLVER_PACKAGE: {
-                "folder": (
-                    Path(STAGE_COLLECTION_FOLDERS["solver"]) / STANDARD_SOLVER_PACKAGE
-                ).as_posix(),
-                "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "file_count": files,
-                "size_bytes": size,
-                "variant": variant,
-                "alpha_deg": float(alpha),
-                "standard_default": True,
-            }
-        },
+        "packages": {},
     }
+    relative = (Path(STAGE_COLLECTION_FOLDERS["solver"]) / STANDARD_SOLVER_PACKAGE).as_posix()
+    info = make_package_revision(
+        manifest,
+        case_root,
+        "solver",
+        STANDARD_SOLVER_PACKAGE,
+        folder=relative,
+        variant=variant,
+        alpha=alpha,
+        provenance={
+            "origin": "active_application_default",
+            "source": STANDARD_SOLVER_CONFIG.as_posix(),
+            "recorded_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        },
+        previous_info=previous_info,
+        archived_path=str(archived_path) if archived_path else None,
+    )
+    info["standard_default"] = True
+    stages["solver"]["packages"][STANDARD_SOLVER_PACKAGE] = info
+    rebuild_entity_index(manifest)
+    refresh_compatibility(manifest)
     return destination
 
 
@@ -356,7 +403,7 @@ def case_metadata(root: Path, case_name: str, variant: str, alpha: float, descri
     workflow = read_json(root / "CFD_2D/CFD_2D_inputs/config/cfd2d_workflow_config.json", {}) or {}
     conditions = workflow.get("case_conditions") or {}
     return {
-        "schema_version": 2,
+        "schema_version": CASE_MANIFEST_SCHEMA_VERSION,
         "case_name": case_name,
         "description": description,
         "variant": variant,
@@ -378,6 +425,7 @@ def create_case(root: Path, case_name: str, variant: str, alpha: float, descript
         raise FileExistsError(f"Working case already exists: {case_root}")
     case_root.mkdir(parents=True, exist_ok=False)
     manifest = case_metadata(root, case_name, variant, alpha, description)
+    manifest["work_case_id"] = new_work_case_id()
     manifest["created_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
     manifest["stages"] = {}
     solver_config = seed_standard_solver_package(
@@ -392,11 +440,18 @@ def create_case(root: Path, case_name: str, variant: str, alpha: float, descript
     write_json_atomic(
         active_workspace_path,
         {
-            "schema_version": 3,
+            "schema_version": ACTIVE_WORKSPACE_SCHEMA_VERSION,
+            "work_case_id": manifest["work_case_id"],
             "case": case_name,
             "stage": "workspace_defaults",
             "package": STANDARD_SOLVER_PACKAGE,
             "packages": {"solver": STANDARD_SOLVER_PACKAGE},
+            "entities": {
+                "solver": {
+                    "entity_id": manifest["stages"]["solver"]["packages"][STANDARD_SOLVER_PACKAGE]["entity_id"],
+                    "revision_id": manifest["stages"]["solver"]["packages"][STANDARD_SOLVER_PACKAGE]["revision_id"],
+                }
+            },
             "variant": variant,
             "alpha_deg": float(alpha),
             "restored_at": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -413,17 +468,31 @@ def create_case(root: Path, case_name: str, variant: str, alpha: float, descript
     }
 
 
-def _promote_legacy_stage_entry(stage: str, entry: dict[str, object]) -> dict[str, object]:
-    if isinstance(entry.get("packages"), dict):
-        return entry
-    folder = str(entry.get("folder") or STAGE_FOLDERS[stage])
-    legacy = dict(entry)
-    legacy["folder"] = folder
-    return {
-        "folder": STAGE_COLLECTION_FOLDERS[stage],
-        "active_package": "legacy",
-        "packages": {"legacy": legacy},
-    }
+def schema3_manifest(case_root: Path, manifest: dict[str, object]) -> dict[str, object]:
+    """Read schema-1/2 work cases through the non-mutating schema-3 adapter."""
+    return normalize_case_manifest(
+        case_root,
+        manifest,
+        stage_folders=STAGE_FOLDERS,
+        collection_folders=STAGE_COLLECTION_FOLDERS,
+    )
+
+
+def mutable_schema3_manifest(root: Path, case_root: Path) -> dict[str, object]:
+    """Load a writable manifest, backing up legacy metadata before migration."""
+    manifest_path = case_root / "case_manifest.json"
+    raw = read_json(manifest_path, {}) or {}
+    if manifest_path.is_file() and int(raw.get("schema_version") or 1) < CASE_MANIFEST_SCHEMA_VERSION:
+        migrate_schema_manifest(
+            root,
+            manifest_path,
+            stage_folders=STAGE_FOLDERS,
+            collection_folders=STAGE_COLLECTION_FOLDERS,
+            writer=write_json_atomic,
+            dry_run=False,
+        )
+        raw = read_json(manifest_path, {}) or {}
+    return schema3_manifest(case_root, raw)
 
 
 def saved_stage_packages(case_root: Path, manifest: dict[str, object], stage: str) -> dict[str, dict[str, object]]:
@@ -448,15 +517,40 @@ def resolve_stage_package(
     stage: str,
     package_name: str | None,
 ) -> tuple[str, Path]:
+    manifest = schema3_manifest(case_root, manifest)
     packages = saved_stage_packages(case_root, manifest, stage)
     if not packages:
         raise FileNotFoundError(f"Saved stage does not exist: {case_root / STAGE_FOLDERS[stage]}")
     entry = (manifest.get("stages") or {}).get(stage) or {}
     selected = safe_package_name(package_name) if package_name else str(entry.get("active_package") or "")
-    if not selected:
-        selected = next(reversed(packages))
+    if not package_name:
+        active_status = (
+            package_compatibility(manifest, stage, selected).get("status")
+            if selected in packages
+            else None
+        )
+        if active_status == "stale" or not selected:
+            compatible = sorted(
+                (
+                    str(info.get("saved_at") or ""),
+                    name,
+                )
+                for name, info in packages.items()
+                if package_compatibility(manifest, stage, name).get("status")
+                == "compatible"
+            )
+            if compatible:
+                selected = compatible[-1][1]
+            elif not selected:
+                selected = sorted(packages)[-1]
     if selected not in packages:
         raise KeyError(f"Unknown {stage} package '{selected}'. Available: {', '.join(packages)}")
+    compatibility = package_compatibility(manifest, stage, selected)
+    if compatibility.get("status") == "stale":
+        warnings = ", ".join(map(str, compatibility.get("warnings") or []))
+        raise ValueError(
+            f"Refusing to load stale {stage} package '{selected}': {warnings}"
+        )
     folder = str(packages[selected].get("folder") or STAGE_FOLDERS[stage])
     path = case_root / folder
     if not path.is_dir():
@@ -477,6 +571,7 @@ def save_stage(
     case_name = safe_case_name(case_name)
     case_root = project_path(root, "results_library", case_name)
     package = safe_package_name(package_name) if package_name else None
+    package_key = package or "legacy"
     relative_destination = (
         Path(STAGE_COLLECTION_FOLDERS[stage]) / package
         if package
@@ -486,6 +581,12 @@ def save_stage(
     available = [(source, relative) for source, relative in source_items(root, stage, variant, alpha) if source.exists()]
     if not available:
         raise FileNotFoundError(f"No active {stage} output exists for {variant}, alpha={alpha:g}.")
+    manifest_path = case_root / "case_manifest.json"
+    manifest = mutable_schema3_manifest(root, case_root)
+    current_entry = (manifest.get("stages") or {}).get(stage) or {}
+    current_packages = current_entry.get("packages") or {}
+    previous_info = current_packages.get(package_key)
+    previous_info = previous_info if isinstance(previous_info, dict) else None
     backup = prepare_destination(root, destination, action, f"{case_name}_{stage}")
     destination.parent.mkdir(parents=True, exist_ok=True)
     incoming = case_root / f".{stage}.incoming.{uuid.uuid4().hex}"
@@ -498,34 +599,50 @@ def save_stage(
     except Exception:
         shutil.rmtree(incoming, ignore_errors=True)
         raise
-    files, size = tree_stats(destination)
-    manifest_path = case_root / "case_manifest.json"
-    manifest = read_json(manifest_path, {}) or {}
     manifest.update(case_metadata(root, case_name, variant, alpha, description))
+    manifest.setdefault("work_case_id", new_work_case_id())
     stages = manifest.setdefault("stages", {})
-    stage_info = {
-        "folder": relative_destination.as_posix(),
-        "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "file_count": files,
-        "size_bytes": size,
-        "variant": variant,
-        "alpha_deg": float(alpha),
-    }
-    if package:
-        current = stages.get(stage)
-        if isinstance(current, dict) and current and not isinstance(current.get("packages"), dict):
-            current = _promote_legacy_stage_entry(stage, current)
-        if not isinstance(current, dict):
-            current = {"folder": STAGE_COLLECTION_FOLDERS[stage], "packages": {}}
-        packages = current.setdefault("packages", {})
-        packages[package] = stage_info
-        current["active_package"] = package
-        current["folder"] = STAGE_COLLECTION_FOLDERS[stage]
-        stages[stage] = current
-    else:
-        stages[stage] = stage_info
+    current = stages.get(stage)
+    if not isinstance(current, dict):
+        current = {"folder": STAGE_COLLECTION_FOLDERS[stage], "packages": {}}
+    packages = current.setdefault("packages", {})
+    stage_info = make_package_revision(
+        manifest,
+        case_root,
+        stage,
+        package_key,
+        folder=relative_destination.as_posix(),
+        variant=variant,
+        alpha=alpha,
+        provenance={
+            "origin": "application_stage_save",
+            "recorded_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "source_stage": stage,
+        },
+        previous_info=previous_info,
+        archived_path=str(backup) if backup else None,
+    )
+    packages[package_key] = stage_info
+    current["active_package"] = package_key
+    current["folder"] = STAGE_COLLECTION_FOLDERS[stage]
+    stages[stage] = current
+    rebuild_entity_index(manifest)
+    refresh_compatibility(manifest)
+    manifest["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
     write_json_atomic(manifest_path, manifest)
-    return {"status": "SAVED", "stage": stage, "package": package or "legacy", "case": case_name, "destination": str(destination), "backup": str(backup) if backup else None, "file_count": files, "size_bytes": size}
+    return {
+        "status": "SAVED",
+        "stage": stage,
+        "package": package_key,
+        "entity_id": stage_info["entity_id"],
+        "revision_id": stage_info["revision_id"],
+        "approval": stage_info["approval"],
+        "case": case_name,
+        "destination": str(destination),
+        "backup": str(backup) if backup else None,
+        "file_count": stage_info["file_count"],
+        "size_bytes": stage_info["size_bytes"],
+    }
 
 
 def restore_stage(
@@ -540,9 +657,12 @@ def restore_stage(
 ) -> dict[str, object]:
     case_name = safe_case_name(case_name)
     case_root = project_path(root, "results_library", case_name)
-    manifest = read_json(case_root / "case_manifest.json", {}) or {}
+    manifest = schema3_manifest(
+        case_root, read_json(case_root / "case_manifest.json", {}) or {}
+    )
     package, case_stage = resolve_stage_package(case_root, manifest, stage, package_name)
     package_info = saved_stage_packages(case_root, manifest, stage)[package]
+    compatibility = package_compatibility(manifest, stage, package)
     variant = str(package_info.get("variant") or variant or manifest.get("variant") or "")
     alpha_value = package_info.get("alpha_deg")
     if alpha_value is None:
@@ -564,6 +684,7 @@ def restore_stage(
         restored.append(str(destination))
     if not restored:
         raise FileNotFoundError(f"Saved {stage} stage contains no restorable data.")
+    warnings = list(compatibility.get("warnings") or [])
     if apply_solver_precedence and stage != "solver":
         solver_packages = saved_stage_packages(case_root, manifest, "solver")
         if solver_packages:
@@ -571,20 +692,30 @@ def restore_stage(
             solver_package = str(
                 solver_entry.get("active_package") or next(reversed(solver_packages))
             )
-            _, solver_root = resolve_stage_package(
-                case_root, manifest, "solver", solver_package
+            solver_compatibility = package_compatibility(
+                manifest, "solver", solver_package
             )
-            solver_source = (
-                solver_root / "Configurations/cfd2d_solver_config.json"
-            )
-            solver_destination = root / STANDARD_SOLVER_CONFIG
-            if solver_source.is_file():
-                solver_destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(solver_source, solver_destination)
-                restored.append(str(solver_destination))
+            if solver_compatibility.get("status") == "stale":
+                warnings.extend(
+                    f"solver_not_restored:{value}"
+                    for value in solver_compatibility.get("warnings") or []
+                )
+            else:
+                _, solver_root = resolve_stage_package(
+                    case_root, manifest, "solver", solver_package
+                )
+                solver_source = (
+                    solver_root / "Configurations/cfd2d_solver_config.json"
+                )
+                solver_destination = root / STANDARD_SOLVER_CONFIG
+                if solver_source.is_file():
+                    solver_destination.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(solver_source, solver_destination)
+                    restored.append(str(solver_destination))
     active_workspace_path = root / "CFD_2D/app_state/active_workspace.json"
     active_workspace = {
-        "schema_version": 2,
+        "schema_version": ACTIVE_WORKSPACE_SCHEMA_VERSION,
+        "work_case_id": manifest["work_case_id"],
         "case": case_name,
         "stage": stage,
         "package": package,
@@ -592,6 +723,11 @@ def restore_stage(
         "alpha_deg": alpha,
         "restored_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "source": str(case_stage.resolve()),
+        "entity_id": package_info.get("entity_id"),
+        "revision_id": package_info.get("revision_id"),
+        "approval": package_info.get("approval"),
+        "compatibility": compatibility,
+        "warnings": warnings,
         "restored": restored,
         "backups": backups,
     }
@@ -603,6 +739,12 @@ def restore_stage(
         "case": case_name,
         "variant": variant,
         "alpha_deg": alpha,
+        "work_case_id": manifest["work_case_id"],
+        "entity_id": package_info.get("entity_id"),
+        "revision_id": package_info.get("revision_id"),
+        "approval": package_info.get("approval"),
+        "compatibility": compatibility,
+        "warnings": warnings,
         "restored": restored,
         "backups": backups,
         "active_workspace": str(active_workspace_path),
@@ -613,15 +755,20 @@ def restore_workspace(root: Path, case_name: str, action: str) -> dict[str, obje
     """Restore the coherent geometry, CFD-case and mesh packages of one work case."""
     case_name = safe_case_name(case_name)
     case_root = project_path(root, "results_library", case_name)
-    manifest = read_json(case_root / "case_manifest.json", {}) or {}
+    manifest = schema3_manifest(
+        case_root, read_json(case_root / "case_manifest.json", {}) or {}
+    )
     restored_stages: dict[str, object] = {}
     packages_used: dict[str, str] = {}
+    warnings: list[str] = []
+    selected_packages: dict[str, str] = {}
     for stage in ("geometry", "case", "mesh"):
         packages = saved_stage_packages(case_root, manifest, stage)
         if not packages:
             raise FileNotFoundError(f"The work case has no restorable {stage} package: {case_root}")
-        entry = (manifest.get("stages") or {}).get(stage) or {}
-        package = str(entry.get("active_package") or next(reversed(packages)))
+        package, _ = resolve_stage_package(case_root, manifest, stage, None)
+        selected_packages[stage] = package
+    for stage, package in selected_packages.items():
         result = restore_stage(
             root,
             stage,
@@ -634,23 +781,27 @@ def restore_workspace(root: Path, case_name: str, action: str) -> dict[str, obje
         )
         restored_stages[stage] = result
         packages_used[stage] = package
+        warnings.extend(map(str, result.get("warnings") or []))
 
     solver_packages = saved_stage_packages(case_root, manifest, "solver")
     if solver_packages:
-        entry = (manifest.get("stages") or {}).get("solver") or {}
-        package = str(entry.get("active_package") or next(reversed(solver_packages)))
-        result = restore_stage(
-            root,
-            "solver",
-            case_name,
-            str(manifest.get("variant") or ""),
-            float(manifest.get("alpha_deg", 0.0)),
-            action,
-            package,
-            apply_solver_precedence=False,
-        )
-        restored_stages["solver"] = result
-        packages_used["solver"] = package
+        try:
+            package, _ = resolve_stage_package(case_root, manifest, "solver", None)
+            result = restore_stage(
+                root,
+                "solver",
+                case_name,
+                str(manifest.get("variant") or ""),
+                float(manifest.get("alpha_deg", 0.0)),
+                action,
+                package,
+                apply_solver_precedence=False,
+            )
+            restored_stages["solver"] = result
+            packages_used["solver"] = package
+            warnings.extend(map(str, result.get("warnings") or []))
+        except ValueError as exc:
+            warnings.append(f"solver_not_restored:{exc}")
 
     # A legacy package can contain a stale workflow variant from the workspace
     # where it was saved. The case manifest is the authoritative identity after
@@ -663,17 +814,30 @@ def restore_workspace(root: Path, case_name: str, action: str) -> dict[str, obje
     write_json_atomic(workflow_path, workflow)
 
     active_workspace_path = root / "CFD_2D/app_state/active_workspace.json"
+    entities = {
+        stage: {
+            "entity_id": result.get("entity_id"),
+            "revision_id": result.get("revision_id"),
+            "approval": result.get("approval"),
+            "compatibility": result.get("compatibility"),
+        }
+        for stage, result in restored_stages.items()
+        if isinstance(result, dict)
+    }
     active_workspace = {
-        "schema_version": 3,
+        "schema_version": ACTIVE_WORKSPACE_SCHEMA_VERSION,
+        "work_case_id": manifest["work_case_id"],
         "case": case_name,
         "stage": "workspace",
         "package": "active_packages",
         "packages": packages_used,
+        "entities": entities,
         "variant": str(manifest.get("variant") or ""),
         "alpha_deg": float(manifest.get("alpha_deg", 0.0)),
         "restored_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "source": str(case_root.resolve()),
         "validation": manifest.get("validation"),
+        "warnings": sorted(set(warnings)),
     }
     write_json_atomic(active_workspace_path, active_workspace)
     return {
@@ -682,6 +846,8 @@ def restore_workspace(root: Path, case_name: str, action: str) -> dict[str, obje
         "variant": active_workspace["variant"],
         "alpha_deg": active_workspace["alpha_deg"],
         "packages": packages_used,
+        "entities": entities,
+        "warnings": sorted(set(warnings)),
         "stages": restored_stages,
         "active_workspace": str(active_workspace_path),
     }
@@ -698,7 +864,7 @@ def activate_workspace_configuration(
     package = safe_package_name(package_name)
     case_root = project_path(root, "results_library", case_name)
     manifest_path = case_root / "case_manifest.json"
-    manifest = read_json(manifest_path, {}) or {}
+    manifest = mutable_schema3_manifest(root, case_root)
     stages = manifest.get("stages") or {}
     variant = ""
     for stage in ("geometry", "case", "mesh"):
@@ -719,6 +885,19 @@ def activate_workspace_configuration(
             )
         variant = package_variant or variant
     manifest["stages"] = stages
+    rebuild_entity_index(manifest)
+    refresh_compatibility(manifest)
+    stale = {
+        stage: package_compatibility(manifest, stage, package)
+        for stage in ("geometry", "case", "mesh")
+        if package_compatibility(manifest, stage, package).get("status") == "stale"
+    }
+    if stale:
+        details = "; ".join(
+            f"{stage}: {', '.join(map(str, value.get('warnings') or []))}"
+            for stage, value in stale.items()
+        )
+        raise ValueError(f"Incompatible configuration '{package}': {details}")
     if variant:
         manifest["variant"] = variant
     convergence = manifest.get("mesh_convergence_study")
@@ -740,7 +919,7 @@ def standardize_solver_defaults(root: Path) -> dict[str, object]:
     library = project_path(root, "results_library")
     for manifest_path in sorted(library.glob("*/case_manifest.json")):
         case_root = manifest_path.parent
-        manifest = read_json(manifest_path, {}) or {}
+        manifest = mutable_schema3_manifest(root, case_root)
         variant = str(manifest.get("variant") or "")
         alpha = float(manifest.get("alpha_deg", 0.0) or 0.0)
         solver_path = seed_standard_solver_package(
@@ -796,12 +975,60 @@ def standardize_solver_defaults(root: Path) -> dict[str, object]:
     }
 
 
+def approve_stage_package(
+    root: Path,
+    case_name: str,
+    stage: str,
+    package_name: str,
+    status: str,
+    *,
+    actor: str = "local-user",
+    evidence: object = None,
+) -> dict[str, object]:
+    """Persist a decision against the package's current immutable revision."""
+    case_name = safe_case_name(case_name)
+    package = safe_package_name(package_name)
+    case_root = project_path(root, "results_library", case_name)
+    manifest_path = case_root / "case_manifest.json"
+    manifest = mutable_schema3_manifest(root, case_root)
+    approval = set_revision_approval(
+        manifest,
+        stage,
+        package,
+        status,
+        actor=actor,
+        evidence=evidence,
+    )
+    write_json_atomic(manifest_path, manifest)
+    return {
+        "status": "APPROVAL_RECORDED",
+        "case": case_name,
+        "stage": stage,
+        "package": package,
+        "approval": approval,
+    }
+
+
+def migrate_work_case_library(root: Path, *, dry_run: bool = True) -> dict[str, object]:
+    """Migrate/index Results manifests without copying any package artifacts."""
+    return migrate_schema_library(
+        root,
+        project_path(root, "results_library"),
+        stage_folders=STAGE_FOLDERS,
+        collection_folders=STAGE_COLLECTION_FOLDERS,
+        writer=write_json_atomic,
+        dry_run=dry_run,
+    )
+
+
 def list_cases(root: Path) -> list[dict[str, object]]:
     library = project_path(root, "results_library")
     cases: list[dict[str, object]] = []
     for manifest_path in sorted(library.glob("*/case_manifest.json")):
         try:
-            manifest = read_json(manifest_path, {}) or {}
+            manifest = schema3_manifest(
+                manifest_path.parent, read_json(manifest_path, {}) or {}
+            )
             manifest["folder"] = manifest_path.parent.name
             cases.append(manifest)
         except Exception:
@@ -815,6 +1042,12 @@ def main() -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("list")
     subparsers.add_parser("standardize-solvers")
+    migrate = subparsers.add_parser("migrate")
+    migrate.add_argument(
+        "--apply",
+        action="store_true",
+        help="Write schema-3 manifests and the Results index after creating backups.",
+    )
     create = subparsers.add_parser("create")
     create.add_argument("--case-name", required=True)
     create.add_argument("--variant", required=True)
@@ -841,10 +1074,19 @@ def main() -> int:
         choices=["archive", "delete", "keep"],
         default="archive",
     )
+    approve = subparsers.add_parser("approve")
+    approve.add_argument("--case-name", required=True)
+    approve.add_argument("--stage", choices=sorted(STAGE_FOLDERS), required=True)
+    approve.add_argument("--package-name", required=True)
+    approve.add_argument("--status", choices=["pending", "approved", "rejected"], required=True)
+    approve.add_argument("--actor", default="local-user")
+    approve.add_argument("--evidence")
     args = parser.parse_args()
     root = find_project_root(args.project_root)
     if args.command == "list":
         result: object = {"status": "OK", "cases": list_cases(root)}
+    elif args.command == "migrate":
+        result = migrate_work_case_library(root, dry_run=not args.apply)
     elif args.command == "standardize-solvers":
         result = standardize_solver_defaults(root)
     elif args.command == "create":
@@ -861,6 +1103,16 @@ def main() -> int:
             args.case_name,
             args.package_name,
             args.existing_action,
+        )
+    elif args.command == "approve":
+        result = approve_stage_package(
+            root,
+            args.case_name,
+            args.stage,
+            args.package_name,
+            args.status,
+            actor=args.actor,
+            evidence=args.evidence,
         )
     else:
         result = restore_stage(root, args.stage, args.case_name, args.variant, args.alpha, args.existing_action, args.package_name)

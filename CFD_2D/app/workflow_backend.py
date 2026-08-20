@@ -40,6 +40,8 @@ from paraview_case_viewer import (  # noqa: E402
 )
 from ramair_2d_rans_paraview_final import resolve_final_vtk_artifacts  # noqa: E402
 from project_layout import LEGACY_ALIASES, find_project_root, project_path  # noqa: E402
+from ramair_case_library import mutable_schema3_manifest, schema3_manifest  # noqa: E402
+from ramair_workcase_schema import refresh_package_revision  # noqa: E402
 from ramair_2d_study_registry import (  # noqa: E402
     active_workspace_root as _validation_active_workspace_root,
     load_study as _load_validation_study,
@@ -272,13 +274,15 @@ def sync_active_workcase_config(project_root: Path, name: str) -> list[Path]:
         return []
     case_root = project_path(project_root, "results_library", case_name)
     manifest_path = case_root / "case_manifest.json"
-    manifest = read_json(manifest_path, {}) or {}
+    manifest = mutable_schema3_manifest(project_root, case_root)
     stages = manifest.get("stages") or {}
     source = config_path(project_root, name)
     if not source.is_file():
         return []
     content = source.read_bytes()
     written: list[Path] = []
+    touched: dict[str, str] = {}
+    revision_backups: dict[str, Path] = {}
     for stage, relative in targets:
         entry = stages.get(stage) if isinstance(stages, dict) else None
         if not isinstance(entry, dict):
@@ -294,6 +298,23 @@ def sync_active_workcase_config(project_root: Path, name: str) -> list[Path]:
         if not package_root.is_dir():
             continue
         destination = package_root / relative
+        if destination.is_file() and destination.read_bytes() == content:
+            continue
+        revision_id = str(info.get("revision_id") or "unversioned")
+        backup_root = (
+            project_root
+            / "Previous Versions/Results Library Revision Backups"
+            / case_name
+            / stage
+            / str(info.get("entity_id") or package)
+            / revision_id
+        )
+        if destination.is_file():
+            backup_destination = backup_root / relative
+            backup_destination.parent.mkdir(parents=True, exist_ok=True)
+            if not backup_destination.exists():
+                shutil.copy2(destination, backup_destination)
+            revision_backups[stage] = backup_root
         _write_bytes_atomic(destination, content)
         written.append(destination)
         files = [item for item in package_root.rglob("*") if item.is_file()]
@@ -301,7 +322,31 @@ def sync_active_workcase_config(project_root: Path, name: str) -> list[Path]:
         info["file_count"] = len(files)
         info["size_bytes"] = sum(item.stat().st_size for item in files)
         info["configuration_updated_in_app"] = True
+        touched[stage] = package
     if written:
+        stage_order = ("geometry", "case", "mesh", "solver", "simulation", "postprocess")
+        for stage in stage_order:
+            package = touched.get(stage)
+            if not package:
+                continue
+            refreshed = refresh_package_revision(
+                case_root,
+                manifest,
+                stage,
+                package,
+                provenance={
+                    "origin": "application_config_edit",
+                    "configuration": name,
+                    "source": str(source.relative_to(project_root).as_posix()),
+                    "recorded_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                },
+                archived_path=(
+                    str(revision_backups[stage])
+                    if stage in revision_backups
+                    else None
+                ),
+            )
+            refreshed["configuration_updated_in_app"] = True
         manifest["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
         _write_bytes_atomic(
             manifest_path,
@@ -1780,7 +1825,9 @@ def saved_cases(project_root: Path) -> list[dict[str, Any]]:
     cases: list[dict[str, Any]] = []
     for manifest_path in sorted(project_path(project_root, "results_library").glob("*/case_manifest.json")):
         try:
-            data = read_json(manifest_path, {}) or {}
+            data = schema3_manifest(
+                manifest_path.parent, read_json(manifest_path, {}) or {}
+            )
             if isinstance(data, dict):
                 data["folder"] = manifest_path.parent.name
                 cases.append(data)

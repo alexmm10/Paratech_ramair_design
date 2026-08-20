@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+## [2026-08-20]
+
+### Work Case architecture: manifest schema 3 / active workspace schema 4
+
+- Added stable UUID identities for Work Cases and stage entities, SHA-256
+  revision identities, provenance, artifact inventories and explicit upstream
+  dependency snapshots while preserving all existing package folders.
+- Added persistent approval/rejection evidence per immutable revision. Editing
+  an approved package now retains the historical decision and creates a new
+  pending revision.
+- Added compatibility evaluation and non-destructive invalidation warnings.
+  Stale packages remain visible but are not silently restored; coherent active
+  packages retain deterministic precedence.
+- Added a read-only schema-1/2 adapter plus an explicit metadata-only schema-3
+  migrator with atomic writes, per-manifest backups and a classified Results
+  index. Protected Work Cases are indexed without copying their CFD data.
+- Applied the migration to five WSL Work Cases: three protected scientific
+  cases plus two historical executed cases. A second dry run reported zero
+  changes, all five original schema-2 manifest hashes matched their backups,
+  and aggregate artifact hashes for the protected cases were unchanged.
+- Updated application config synchronization and all Work Case builders to
+  publish revision-aware metadata. Active workspace records now include exact
+  entity/revision identities, approvals and compatibility warnings.
+
 ## [2026-08-18]
 
 ### Durable execution, adaptive URANS and portable server runs: API 24 / solver schema 14

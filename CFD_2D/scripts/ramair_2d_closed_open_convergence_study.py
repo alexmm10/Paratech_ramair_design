@@ -22,6 +22,7 @@ from project_layout import find_project_root, project_path
 from ramair_case_library import (
     STAGE_COLLECTION_FOLDERS,
     copy_item,
+    schema3_manifest,
     seed_standard_solver_package,
     tree_stats,
     variant_profile,
@@ -441,6 +442,7 @@ def build_workspace(
             variant=LEVEL_VARIANTS["closed"]["medium"],
             alpha=4.0,
         )
+        manifest = schema3_manifest(incoming, manifest)
         write_json_atomic(incoming / "case_manifest.json", manifest)
         study_dir = incoming / "Convergence Study"
         study_dir.mkdir(parents=True, exist_ok=True)

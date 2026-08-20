@@ -22,7 +22,7 @@ import pandas as pd
 from project_layout import find_project_root, project_path
 from ramair_2d_validation import generate_validation_report
 from ramair_2d_scale_validation_geometry import build_scaled_variant
-from ramair_case_library import STAGE_COLLECTION_FOLDERS, tree_stats, variant_profile, write_json_atomic
+from ramair_case_library import STAGE_COLLECTION_FOLDERS, schema3_manifest, tree_stats, variant_profile, write_json_atomic
 
 
 DEFAULT_CASE_NAME = "LS1_0417_validation_M0p15_Re1p9e6"
@@ -216,7 +216,7 @@ def build_validation_workcase(root: Path, case_name: str, existing_action: str) 
                 "mesh": stage_entry(MESH_PACKAGE, mesh_dir, VARIANT, alphas[0]),
             },
         }
-        write_json_atomic(incoming / "case_manifest.json", manifest)
+        write_json_atomic(incoming / "case_manifest.json", schema3_manifest(incoming, manifest))
         incoming.replace(destination)
     except Exception:
         shutil.rmtree(incoming, ignore_errors=True)
