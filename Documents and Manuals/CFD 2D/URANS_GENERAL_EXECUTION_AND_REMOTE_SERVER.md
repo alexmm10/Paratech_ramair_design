@@ -1,8 +1,8 @@
 # General URANS Execution and Remote Server Workflow
 
 Version: 2026-08-18  
-Application backend API: 24  
-Solver configuration schema: 14
+Application backend API: 25
+Solver configuration schema: 15
 
 ## 1. Scope
 
@@ -19,8 +19,8 @@ physics/spectral ceiling. `adjustTimeStep` is kept active as an emergency
 nonlinear safeguard rather than as the time-resolution design method:
 
 - closed profile: `maxCo = 50`;
-- open profile: `maxCo = 20`;
-- maximum outer correctors per timestep: 15;
+- open profile: `maxCo = 25`;
+- maximum outer correctors per timestep: 10 for Closed and 15 for Open;
 - early outer-loop exit: `U` and `nuTilda` absolute residuals below `1e-4`,
   with `relTol = 0`;
 - pressure receives its normal final solve but does not gate outer-loop exit;
@@ -48,8 +48,10 @@ group and Linux `/proc` start token. Clean stop writes a durable request,
 changes `controlDict` to `stopAt writeNow` and waits for a checkpoint. If the
 solver does not stop within the grace period, escalation is SIGINT, SIGTERM
 and finally SIGKILL. A latest root or processor time makes the result
-`PAUSED_RESTARTABLE`. Startup reconciliation repairs stale runtime labels and
-never deletes fields.
+`PAUSED_RECOVERABLE` in the schema-1 lifecycle. Startup reconciliation repairs
+stale runtime labels and never deletes fields. The compatibility process file
+remains readable, while `.ramair_execution_state.json` is the transactional
+source for new orchestration.
 
 ## 5. ParaView products
 

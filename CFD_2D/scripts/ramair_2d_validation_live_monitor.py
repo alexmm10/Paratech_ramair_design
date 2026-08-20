@@ -22,6 +22,7 @@ from ramair_2d_study_registry import (
     write_json_atomic,
 )
 from ramair_2d_execution_registry import load_registry
+from ramair_monitor_core import parse_openfoam_lines
 
 
 RESIDUAL_RE = re.compile(
@@ -77,91 +78,12 @@ def _parse_increment(
     *,
     max_points: int,
 ) -> dict[str, Any]:
-    residuals = list(recent.get("residuals") or [])
-    iterations = list(recent.get("iterations") or [])
-    courant = list(recent.get("courant") or [])
-    continuity = list(recent.get("continuity") or [])
-    execution = list(recent.get("execution") or [])
-    delta_t = recent.get("deltaT")
-    current_iteration = recent.get("current_iteration")
-    for line in lines:
-        match = ITERATION_RE.search(line)
-        if match:
-            current_iteration = _finite(match.group(1))
-            iterations.append(current_iteration)
-        match = DELTA_T_RE.search(line)
-        if match:
-            delta_t = _finite(match.group(1))
-        match = RESIDUAL_RE.search(line)
-        if match:
-            value = _finite(match.group(2))
-            final = _finite(match.group(3))
-            if value is not None and final is not None:
-                raw_field = match.group(1).strip()
-                field = {
-                    "Ux": "U.x",
-                    "Uy": "U.y",
-                    "Uz": "U.z",
-                }.get(raw_field, raw_field)
-                residuals.append(
-                    {
-                        "iteration": current_iteration,
-                        "equation": field,
-                        "component": (
-                            field.split(".", 1)[1] if "." in field else ""
-                        ),
-                        "field": field,
-                        "value": value,
-                        "initial_residual": value,
-                        "final_residual": final,
-                        "n_iterations": int(match.group(4)),
-                    }
-                )
-        match = COURANT_RE.search(line)
-        if match:
-            mean = _finite(match.group(1))
-            maximum = _finite(match.group(2))
-            if mean is not None and maximum is not None:
-                courant.append(
-                    {
-                        "iteration": current_iteration,
-                        "mean": mean,
-                        "max": maximum,
-                    }
-                )
-        match = CONTINUITY_RE.search(line)
-        if match:
-            values = [_finite(match.group(index)) for index in (1, 2, 3)]
-            if all(value is not None for value in values):
-                continuity.append(
-                    {
-                        "iteration": current_iteration,
-                        "local": values[0],
-                        "global": values[1],
-                        "cumulative": values[2],
-                    }
-                )
-        match = EXECUTION_RE.search(line)
-        if match:
-            cpu = _finite(match.group(1))
-            clock = _finite(match.group(2))
-            if cpu is not None and clock is not None:
-                execution.append(
-                    {
-                        "iteration": current_iteration,
-                        "cpu_s": cpu,
-                        "clock_s": clock,
-                    }
-                )
-    return {
-        "residuals": residuals[-max_points:],
-        "iterations": iterations[-max_points:],
-        "courant": courant[-max_points:],
-        "continuity": continuity[-max_points:],
-        "execution": execution[-max_points:],
-        "deltaT": delta_t,
-        "current_iteration": current_iteration,
-    }
+    parsed = parse_openfoam_lines(lines, recent, max_points=max_points)
+    # Preserve the Validation Lab schema while the general plotter can still
+    # use OpenFOAM's raw Ux/Uy labels through the common core.
+    for row in parsed.get("residuals") or []:
+        row.pop("raw_field", None)
+    return parsed
 
 
 def _read_log_increment(log: Path, cache: dict[str, Any]) -> tuple[list[str], int]:

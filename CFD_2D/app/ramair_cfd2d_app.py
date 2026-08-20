@@ -43,7 +43,7 @@ from mesh_configuration import (
 )
 
 
-EXPECTED_BACKEND_API_VERSION = 24
+EXPECTED_BACKEND_API_VERSION = 25
 _REQUIRED_BACKEND_SYMBOLS = {
     "BACKEND_API_VERSION",
     "batch_postprocess_command",
@@ -2604,7 +2604,7 @@ def job_console() -> None:
     previous_token = st.session_state.get("last-observed-job-status")
     st.session_state["last-observed-job-status"] = token
     terminal = job.status in {
-        "COMPLETED", "FAILED", "UNKNOWN_FINISHED", "PAUSED_RESTARTABLE",
+        "COMPLETED", "FAILED", "PAUSED_RECOVERABLE", "REVIEW_REQUIRED", "APPROVED", "REJECTED",
     }
     if terminal and previous_token and previous_token != token:
         message = "Tarea finalizada correctamente." if job.status == "COMPLETED" else f"Tarea finalizada con estado {job.status}."
@@ -2620,7 +2620,7 @@ def job_console() -> None:
     st.code(tail_file(Path(job.log_path), 180) or "Esperando salida...", language="text")
     st.caption("Estado y log actualizados cada 2 segundos.")
     action_cols = st.columns([1, 6])
-    if job.status == "RUNNING" and action_cols[0].button("Solicitar parada", key="stop-job"):
+    if job.status == "RUNNING" and not job.stop_requested_at and action_cols[0].button("Solicitar parada", key="stop-job"):
         validation_rans_stages = {
             "validation_lab_rans_run_all",
             "validation_lab_rans_run_one",
@@ -2674,7 +2674,7 @@ def job_console() -> None:
         else:
             MANAGER.stop(job)
             st.warning("Se solicito la terminacion del proceso activo.")
-    elif job.status in {"STOP_REQUESTED", "STOPPING"}:
+    elif job.status == "RUNNING" and job.stop_requested_at:
         action_cols[1].warning(
             "Parada en curso. OpenFOAM conserva el ultimo estado escrito; use la "
             "accion forzada solo si no responde tras el periodo de gracia."
@@ -2706,7 +2706,7 @@ def solver_live_monitor_panel() -> None:
             f"muestras forceCoeffs: {monitor_status.get('force_rows', 0)}. "
             "Imagen actualizada cada 30 segundos."
         )
-    elif job.status in {"RUNNING", "STOP_REQUESTED"}:
+    elif job.status == "RUNNING":
         st.info("El monitor integrado se iniciara cuando PyFoam cree el log del solver.")
 
 

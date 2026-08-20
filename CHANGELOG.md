@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### EXEC-RUNTIME / EXEC-MONITOR: transactional lifecycle and shared scalar monitor
+
+- Added the eight-state schema-1 execution lifecycle with atomic transitions,
+  PID identity, restart evidence, a bounded journal and idempotency keys. Old
+  runtime labels remain readable but new public state uses one vocabulary.
+- Unified single-run, sequential queue and frozen phase orchestration around
+  recoverable checkpoints. A stale process with a valid time becomes
+  `PAUSED_RECOVERABLE`; without one it becomes `FAILED`, and completed queue
+  entries are skipped idempotently.
+- Consolidated the general and Validation Lab parsers into one bounded monitor
+  core for residuals, linear iterations, `deltaT`, Courant, continuity and
+  execution time. Forces, probes, logs and solverInfo are inventoried outside
+  volume-field retention.
+- Bumped the application backend to API 25 and verified one real OpenFOAM 14
+  step both serially and with two MPI ranks in disposable tutorial copies.
+
 ### UI-OPENFOAM / OF-SCIENCE: solver schema 15
 
 - Rebuilt the OpenFOAM editor as General, Solver Settings, Writing &

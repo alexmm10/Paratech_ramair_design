@@ -720,11 +720,12 @@ def test_codex_context_and_changelog_contract() -> None:
     context = (ROOT / "PROJECT_CONTEXT_FOR_CODEX.md").read_text(encoding="utf-8")
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    assert "Application backend API: 24" in context
+    assert "Application backend API: 25" in context
     launcher = (ROOT / "run_ramair_cfd2d_app.py").read_text(encoding="utf-8")
     bootstrap = (ROOT / "Documents and Manuals/Application/bootstrap_cfd2d_app_wsl.sh").read_text(encoding="utf-8")
-    assert "BACKEND_API_VERSION = 24" in launcher
-    assert "expected API 24" in bootstrap
+    assert "BACKEND_API_VERSION = 25" in launcher
+    assert "expected API 25" in bootstrap
+    assert "BACKEND_API_VERSION != 25" in bootstrap
     assert "PROJECT_CONTEXT_FOR_CODEX.md" in agents
     assert "CHANGELOG.md" in agents
     assert "## [Unreleased]" in changelog

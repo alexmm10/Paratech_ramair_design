@@ -15,7 +15,7 @@ import webbrowser
 from pathlib import Path
 
 
-BACKEND_API_VERSION = 24
+BACKEND_API_VERSION = 25
 BOOTSTRAP = Path("Documents and Manuals/Application/bootstrap_cfd2d_app_wsl.sh")
 CANONICAL_WSL_ROOT = "~/ramair_cfd/DESIGN_APP"
 

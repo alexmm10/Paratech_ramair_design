@@ -455,16 +455,18 @@ def test_job_manager_manual_stop_remains_visible_and_restartable(tmp_path: Path)
     manager = JobManager(tmp_path)
     job = manager.start("unit_stop", [sys.executable, "-c", "import time; time.sleep(30)"])
     job = manager.mark_stop_requested(job)
-    assert job.status == "STOP_REQUESTED"
+    assert job.status == "RUNNING"
+    assert job.stop_requested_at
     job = manager.stop(job)
-    assert job.status == "STOPPING"
+    assert job.status == "RUNNING"
+    assert job.stop_stage == "orchestrator_sigint"
     deadline = time.time() + 10
     while time.time() < deadline:
         job = manager.poll(job)
-        if job.status not in {"RUNNING", "STOP_REQUESTED", "STOPPING"}:
+        if job.status != "RUNNING":
             break
         time.sleep(0.05)
-    assert job.status == "PAUSED_RESTARTABLE"
+    assert job.status == "PAUSED_RECOVERABLE"
     assert manager.active_jobs() == []
 
 

@@ -26,6 +26,10 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from openfoam_history import read_recent_force_coefficient_history  # noqa: E402
+from ramair_monitor_core import (  # noqa: E402
+    SolverLogAccumulator as SharedSolverLogAccumulator,
+    solver_plot_series,
+)
 from ramair_scientific_plot_style import apply_scientific_style  # noqa: E402
 
 apply_scientific_style()
@@ -95,31 +99,7 @@ def read_log_tail(path: Path, max_bytes: int = 12_000_000) -> str:
 
 def parse_solver_monitor_data(text: str, max_points: int = 1200) -> dict[str, Any]:
     """Parse residual and linear-iteration series without modifying the log."""
-    current_abscissa = 0.0
-    series: dict[str, list[tuple[float, float]]] = {}
-    iterations: dict[str, list[tuple[float, float]]] = {}
-    for line in text.splitlines():
-        time_match = re.match(r"^\s*Time\s*=\s*([0-9.eE+\-]+)\s*s?\s*$", line)
-        if time_match:
-            current_abscissa = float(time_match.group(1))
-            continue
-        match = RESIDUAL_RE.search(line)
-        if not match:
-            continue
-        field = match.group(1).strip()
-        try:
-            residual = float(match.group(2))
-            count = float(match.group(3))
-        except ValueError:
-            continue
-        if math.isfinite(residual) and residual > 0.0:
-            series.setdefault(field, []).append((current_abscissa, residual))
-        if math.isfinite(count):
-            iterations.setdefault(field, []).append((current_abscissa, count))
-    return {
-        "residuals": {name: values[-max_points:] for name, values in series.items()},
-        "linear_iterations": {name: values[-max_points:] for name, values in iterations.items()},
-    }
+    return solver_plot_series(text, max_points=max_points)
 
 
 class SolverLogAccumulator:
@@ -190,6 +170,12 @@ class SolverLogAccumulator:
             },
             "log_bytes_consumed": self.offset,
         }
+
+
+# All current monitor entry points use the common incremental parser.  The
+# local class remains above only as a source-compatible fallback for old
+# pickled/imported application sessions during a hot reload.
+SolverLogAccumulator = SharedSolverLogAccumulator
 
 
 def draw_monitor_axes(

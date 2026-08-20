@@ -1,7 +1,7 @@
 # RamAir Project Context for Codex
 
 Context version: 2026-08-20
-Application backend API: 24  
+Application backend API: 25
 Validation Lab schema: 10  
 Solver configuration schema: 15
 Work Case manifest schema: 3
@@ -9,6 +9,7 @@ Active workspace schema: 4
 Geometry DTO schema: 1
 Profile catalogue schema: 1
 Mesh-science report schema: 1
+Execution lifecycle schema: 1
 Canonical Windows source: `C:\Users\alejm\Desktop\PRACTICAS_INVICSA\3D design\DESIGN APP`  
 Canonical WSL runtime: `/home/alejm/ramair_cfd/DESIGN_APP`
 
@@ -40,11 +41,18 @@ future work and must not be inferred from diagnostic placeholders.
 - `Generate_RamAir_Canopy_MAIN.CATScript`: CATIA V5 model generation.
 - `run_ramair_cfd2d_app.py`: official Windows-to-WSL application launcher.
 - `CFD_2D/app/ramair_cfd2d_app.py`: Streamlit shell.
-- `CFD_2D/app/workflow_backend.py`: API 24 orchestration boundary.
+- `CFD_2D/app/workflow_backend.py`: API 25 orchestration boundary.
 - `CFD_2D/app/validation_convergence_page.py`: isolated Validation Lab UI.
 
 The UI orchestrates. Geometry, meshing, solver and postprocess algorithms live
 under `CFD_2D/scripts`.
+
+All new runtime publications use the schema-1 lifecycle states `PREPARED`,
+`RUNNING`, `PAUSED_RECOVERABLE`, `FAILED`, `COMPLETED`, `REVIEW_REQUIRED`,
+`APPROVED` and `REJECTED`. Legacy spellings remain readable. Each case stores
+an atomic `.ramair_execution_state.json` with phase, idempotency key, process
+identity, restart evidence and a bounded transition history. Solver logs and
+the scalar function-object trees are never governed by `purgeWrite`.
 
 The normal workflow requires a selected persistent Work Case. `Estado`, `Caso
 de trabajo`, `Validation & Convergence Lab` and file/log inspection remain

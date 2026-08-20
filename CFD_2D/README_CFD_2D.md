@@ -3,7 +3,7 @@
 ## Validation & Convergence Lab
 
 The isolated laboratory uses registry schema 10 while the general solver
-configuration uses schema 15 and backend API 24. It keeps the
+configuration uses schema 15 and backend API 25. It keeps the
 closed/open coarse-medium-fine study separate from the normal active
 workspace. Its six main sections cover meshes/conditions, solver strategy,
 RANS, URANS, space-time convergence and reports/workspace. One collapsed

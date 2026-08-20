@@ -3,18 +3,226 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import signal
 import threading
 import time
 import uuid
+from enum import Enum
 from pathlib import Path
 from typing import Any, Iterable
 
 
 PROCESS_RECORD = ".ramair_solver_process.json"
 STOP_REQUEST = ".ramair_stop_request.json"
+EXECUTION_STATE_RECORD = ".ramair_execution_state.json"
 _JSON_WRITE_LOCK = threading.RLock()
+
+
+class ExecutionState(str, Enum):
+    """Canonical lifecycle shared by UI, queues, solvers and post-processing."""
+
+    PREPARED = "PREPARED"
+    RUNNING = "RUNNING"
+    PAUSED_RECOVERABLE = "PAUSED_RECOVERABLE"
+    FAILED = "FAILED"
+    COMPLETED = "COMPLETED"
+    REVIEW_REQUIRED = "REVIEW_REQUIRED"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
+_STATE_ALIASES = {
+    "READY": ExecutionState.PREPARED,
+    "PREPARING": ExecutionState.PREPARED,
+    "QUEUED": ExecutionState.PREPARED,
+    "NOT_STARTED": ExecutionState.PREPARED,
+    "RUNNING_RANS": ExecutionState.RUNNING,
+    "RUNNING_URANS": ExecutionState.RUNNING,
+    "POSTPROCESSING": ExecutionState.RUNNING,
+    "STOP_REQUESTED": ExecutionState.RUNNING,
+    "STOPPING": ExecutionState.RUNNING,
+    "PAUSED": ExecutionState.PAUSED_RECOVERABLE,
+    "PAUSED_RESTARTABLE": ExecutionState.PAUSED_RECOVERABLE,
+    "STOPPED_PARTIAL": ExecutionState.PAUSED_RECOVERABLE,
+    "STOPPED_FORCED_PARTIAL": ExecutionState.PAUSED_RECOVERABLE,
+    "TIMEOUT_PARTIAL": ExecutionState.PAUSED_RECOVERABLE,
+    "INTERRUPTED": ExecutionState.PAUSED_RECOVERABLE,
+    "CONVERGED_STATISTICALLY": ExecutionState.REVIEW_REQUIRED,
+    "ANALYSIS_PENDING": ExecutionState.REVIEW_REQUIRED,
+    "RANS_COMPLETED": ExecutionState.REVIEW_REQUIRED,
+    "URANS_COMPLETED": ExecutionState.REVIEW_REQUIRED,
+    "POSTPROCESSED": ExecutionState.REVIEW_REQUIRED,
+    "AWAITING_USER_DECISION": ExecutionState.REVIEW_REQUIRED,
+    "ERROR": ExecutionState.FAILED,
+    "DIVERGED": ExecutionState.FAILED,
+    "SOLVER_DIVERGED": ExecutionState.FAILED,
+    "RUN_DIVERGED": ExecutionState.FAILED,
+    "PREPARATION_FAILED": ExecutionState.FAILED,
+    "RUN_SETUP_FAILED": ExecutionState.FAILED,
+    "RUN_COMMAND_FAILED": ExecutionState.FAILED,
+    "SOLVER_FAILED": ExecutionState.FAILED,
+    "STOPPED_INCOMPLETE": ExecutionState.FAILED,
+    "UNKNOWN_FINISHED": ExecutionState.FAILED,
+}
+
+_ALLOWED_TRANSITIONS = {
+    None: set(ExecutionState),
+    ExecutionState.PREPARED: {ExecutionState.RUNNING, ExecutionState.FAILED, ExecutionState.REJECTED},
+    ExecutionState.RUNNING: {
+        ExecutionState.PAUSED_RECOVERABLE,
+        ExecutionState.FAILED,
+        ExecutionState.COMPLETED,
+        ExecutionState.REVIEW_REQUIRED,
+    },
+    ExecutionState.PAUSED_RECOVERABLE: {ExecutionState.RUNNING, ExecutionState.FAILED, ExecutionState.REJECTED},
+    ExecutionState.FAILED: {ExecutionState.PREPARED, ExecutionState.RUNNING, ExecutionState.REJECTED},
+    ExecutionState.COMPLETED: {ExecutionState.REVIEW_REQUIRED, ExecutionState.APPROVED, ExecutionState.REJECTED},
+    ExecutionState.REVIEW_REQUIRED: {ExecutionState.APPROVED, ExecutionState.REJECTED, ExecutionState.RUNNING},
+    ExecutionState.APPROVED: {ExecutionState.REJECTED},
+    ExecutionState.REJECTED: {ExecutionState.PREPARED, ExecutionState.RUNNING},
+}
+
+
+def normalize_execution_state(
+    value: str | ExecutionState | None,
+    *,
+    restartable: bool | None = None,
+) -> ExecutionState:
+    """Map all legacy spellings to the eight-state public contract."""
+    if isinstance(value, ExecutionState):
+        return value
+    normalized = str(value or "PREPARED").strip().upper()
+    try:
+        return ExecutionState(normalized)
+    except ValueError:
+        if normalized in _STATE_ALIASES:
+            state = _STATE_ALIASES[normalized]
+            if state == ExecutionState.PAUSED_RECOVERABLE and restartable is False:
+                return ExecutionState.FAILED
+            return state
+        if any(token in normalized for token in ("FAIL", "ERROR", "DIVERG", "MISSING")):
+            return ExecutionState.FAILED
+        if "APPROV" in normalized:
+            return ExecutionState.APPROVED
+        if "REJECT" in normalized:
+            return ExecutionState.REJECTED
+        if any(token in normalized for token in ("PAUS", "STOP", "TIMEOUT", "INTERRUPT")):
+            return ExecutionState.PAUSED_RECOVERABLE if restartable is not False else ExecutionState.FAILED
+        if any(token in normalized for token in ("REVIEW", "AWAIT", "ANALYSIS", "POSTPROCESS")):
+            return ExecutionState.REVIEW_REQUIRED
+        if "COMPLETE" in normalized or "FINISHED" in normalized:
+            return ExecutionState.COMPLETED
+        if "RUNNING" in normalized:
+            return ExecutionState.RUNNING
+        if any(token in normalized for token in ("READY", "PREPAR", "QUEUE")):
+            return ExecutionState.PREPARED
+        raise ValueError(f"Unsupported execution state: {value!r}")
+
+
+def execution_idempotency_key(
+    case_dir: Path,
+    command: Iterable[object] | None = None,
+    *,
+    phase: str | None = None,
+) -> str:
+    material = json.dumps(
+        {
+            "case_dir": str(Path(case_dir).resolve()),
+            "command": [str(value) for value in command or ()],
+            "phase": str(phase or ""),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def load_execution_state(case_dir: Path) -> dict[str, Any]:
+    return read_json(Path(case_dir).resolve() / EXECUTION_STATE_RECORD, {}) or {}
+
+
+def transition_execution_state(
+    case_dir: Path,
+    state: str | ExecutionState,
+    *,
+    phase: str | None = None,
+    run_id: str | None = None,
+    idempotency_key: str | None = None,
+    reason: str | None = None,
+    evidence: dict[str, Any] | None = None,
+    pid: int | None = None,
+    returncode: int | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Persist one legal transition atomically and suppress duplicate launches."""
+    case = Path(case_dir).resolve()
+    path = case / EXECUTION_STATE_RECORD
+    with _JSON_WRITE_LOCK:
+        previous = read_json(path, {}) or {}
+        previous_state = (
+            normalize_execution_state(previous.get("state"), restartable=previous.get("restartable"))
+            if previous
+            else None
+        )
+        requested = normalize_execution_state(state)
+        key = str(idempotency_key or previous.get("idempotency_key") or "") or None
+        if (
+            requested == ExecutionState.RUNNING
+            and previous_state == ExecutionState.RUNNING
+            and key
+            and key == previous.get("idempotency_key")
+        ):
+            return {**previous, "duplicate_suppressed": True}
+        if not force and requested != previous_state and requested not in _ALLOWED_TRANSITIONS[previous_state]:
+            raise RuntimeError(
+                f"Illegal execution transition {previous_state.value if previous_state else 'NONE'} -> {requested.value}"
+            )
+        now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        event = {
+            "sequence": int(previous.get("sequence") or 0) + 1,
+            "from": previous_state.value if previous_state else None,
+            "to": requested.value,
+            "phase": phase if phase is not None else previous.get("phase"),
+            "reason": reason,
+            "at": now,
+            "returncode": returncode,
+        }
+        history = [*list(previous.get("history") or []), event][-256:]
+        payload = {
+            **previous,
+            "schema_version": 1,
+            "case_dir": str(case),
+            "run_id": run_id or previous.get("run_id") or uuid.uuid4().hex,
+            "state": requested.value,
+            "phase": event["phase"],
+            "sequence": event["sequence"],
+            "idempotency_key": key,
+            "pid": int(pid) if pid else previous.get("pid"),
+            "pid_start_token": process_start_token(int(pid)) if pid else previous.get("pid_start_token"),
+            "returncode": returncode,
+            "reason": reason,
+            "evidence": dict(evidence or previous.get("evidence") or {}),
+            "history": history,
+            "updated_at": now,
+            "updated_unix": time.time(),
+            "duplicate_suppressed": False,
+        }
+        if requested == ExecutionState.RUNNING:
+            payload["started_at"] = previous.get("started_at") or now
+            payload.pop("finished_at", None)
+        elif requested in {
+            ExecutionState.PAUSED_RECOVERABLE,
+            ExecutionState.FAILED,
+            ExecutionState.COMPLETED,
+            ExecutionState.REVIEW_REQUIRED,
+            ExecutionState.APPROVED,
+            ExecutionState.REJECTED,
+        }:
+            payload["finished_at"] = now
+        write_json_atomic(path, payload)
+        return payload
 
 
 def write_json_atomic(path: Path, payload: dict[str, Any]) -> Path:
@@ -114,7 +322,25 @@ def publish_solver_process(
         payload["started_at"] = payload["updated_at"]
     if status != "RUNNING":
         payload["finished_at"] = payload["updated_at"]
-    return write_json_atomic(path, payload)
+    written = write_json_atomic(path, payload)
+    try:
+        canonical = normalize_execution_state(status)
+        transition_execution_state(
+            case_dir,
+            canonical,
+            phase=str(previous.get("phase") or "SOLVER"),
+            idempotency_key=execution_idempotency_key(case_dir, command or payload.get("command")),
+            reason=outcome or str(status),
+            pid=effective_pid,
+            returncode=returncode,
+            evidence=restart_evidence(case_dir) if canonical != ExecutionState.RUNNING else {},
+            force=canonical == ExecutionState.RUNNING and bool(load_execution_state(case_dir)),
+        )
+    except (OSError, RuntimeError, ValueError):
+        # The legacy process record remains authoritative for older packages.
+        # Lifecycle publication must never mask the real solver outcome.
+        pass
+    return written
 
 
 def load_solver_process(case_dir: Path) -> dict[str, Any]:
@@ -187,7 +413,7 @@ def reconcile_solver_record(case_dir: Path) -> dict[str, Any]:
         return {**record, **evidence, "live": True}
     previous_status = str(record.get("status") or "UNKNOWN")
     if previous_status in {"RUNNING", "STOP_REQUESTED", "STOPPING"}:
-        status = "PAUSED_RESTARTABLE" if evidence["restartable"] else "STOPPED_INCOMPLETE"
+        status = "PAUSED_RECOVERABLE" if evidence["restartable"] else "FAILED"
         publish_solver_process(
             case_dir,
             status=status,
@@ -195,4 +421,20 @@ def reconcile_solver_record(case_dir: Path) -> dict[str, Any]:
             returncode=record.get("returncode"),
         )
         record = load_solver_process(case_dir)
-    return {**record, **evidence, "live": False}
+    state = load_execution_state(case_dir)
+    if state and str(state.get("state")) == ExecutionState.RUNNING.value:
+        recovered = (
+            ExecutionState.PAUSED_RECOVERABLE
+            if evidence["restartable"]
+            else ExecutionState.FAILED
+        )
+        state = transition_execution_state(
+            case_dir,
+            recovered,
+            phase=state.get("phase"),
+            idempotency_key=state.get("idempotency_key"),
+            reason="reconciled_stale_process_record",
+            evidence=evidence,
+            returncode=record.get("returncode"),
+        )
+    return {**record, **evidence, "execution_state": state, "live": False}

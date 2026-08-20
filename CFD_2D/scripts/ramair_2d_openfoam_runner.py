@@ -631,7 +631,7 @@ def run_script_with_timeout(
         external_stop_thread.join(timeout=2.0)
         external_stop_path.unlink(missing_ok=True)
         if outcome in {"stopped_partial", "stopped_forced", "timeout_partial"}:
-            status = "PAUSED_RESTARTABLE"
+            status = "PAUSED_RECOVERABLE"
         else:
             status = "COMPLETED" if int(proc.returncode or 0) == 0 else "FAILED"
         publish_solver_process(

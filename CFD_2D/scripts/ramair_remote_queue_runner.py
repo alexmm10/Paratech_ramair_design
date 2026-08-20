@@ -13,7 +13,15 @@ import time
 from pathlib import Path
 from typing import Any
 
-from ramair_execution_control import load_solver_process, signal_solver_process
+from ramair_execution_control import (
+    ExecutionState,
+    execution_idempotency_key,
+    load_execution_state,
+    load_solver_process,
+    reconcile_solver_record,
+    signal_solver_process,
+    transition_execution_state,
+)
 from ramair_2d_openfoam_runner import update_control_dict_stop_at
 
 
@@ -124,7 +132,30 @@ def run_queue(resume: bool = False) -> int:
         if STOP.is_file():
             break
         case = (ROOT / str(entry["case"])).resolve()
-        command = staged_command(entry, resume or previous.get("status") == "PAUSED_RESTARTABLE")
+        lifecycle = load_execution_state(case)
+        if lifecycle.get("state") == ExecutionState.RUNNING.value:
+            reconcile_solver_record(case)
+            lifecycle = load_execution_state(case)
+        if lifecycle.get("state") == ExecutionState.COMPLETED.value:
+            status["cases"][case_id] = {
+                **previous,
+                "status": ExecutionState.COMPLETED.value,
+                "case": str(case),
+                "reason": "idempotent_completed_case_skip",
+            }
+            write_json(STATUS, status)
+            continue
+        command = staged_command(entry, resume or previous.get("status") == "PAUSED_RECOVERABLE")
+        key = execution_idempotency_key(case, command, phase="QUEUE")
+        transition_execution_state(
+            case,
+            ExecutionState.PREPARED,
+            phase="QUEUE",
+            run_id=case_id,
+            idempotency_key=key,
+            reason="sequential_queue_dispatch",
+            force=bool(lifecycle),
+        )
         log_path = LOGS / f"{index + 1:03d}_{case_id}.log"
         payload = {
             "status": "RUNNING",
@@ -139,6 +170,15 @@ def run_queue(resume: bool = False) -> int:
         write_json(STATUS, status)
         with log_path.open("a", encoding="utf-8") as log:
             process = subprocess.Popen(command, cwd=str(ROOT), stdout=log, stderr=subprocess.STDOUT)
+            transition_execution_state(
+                case,
+                ExecutionState.RUNNING,
+                phase="QUEUE",
+                run_id=case_id,
+                idempotency_key=key,
+                reason="sequential_queue_started",
+                pid=process.pid,
+            )
             while process.poll() is None:
                 if STOP.is_file():
                     (case / ".ramair_stop_request.json").write_text(
@@ -149,7 +189,16 @@ def run_queue(resume: bool = False) -> int:
                 write_json(RUNTIME, {**payload, "orchestrator_pid": process.pid, "solver": solver, "heartbeat": time.time()})
                 time.sleep(2.0)
         stopped = STOP.is_file()
-        terminal = "PAUSED_RESTARTABLE" if stopped else "COMPLETED" if process.returncode == 0 else "FAILED"
+        terminal = "PAUSED_RECOVERABLE" if stopped else "COMPLETED" if process.returncode == 0 else "FAILED"
+        transition_execution_state(
+            case,
+            terminal,
+            phase="QUEUE",
+            run_id=case_id,
+            idempotency_key=key,
+            reason="user_stop" if stopped else "queue_case_exit",
+            returncode=int(process.returncode or 0),
+        )
         finished = {**payload, "status": terminal, "returncode": int(process.returncode or 0), "finished_at": time.time()}
         status["cases"][case_id] = finished
         write_json(STATUS, status)

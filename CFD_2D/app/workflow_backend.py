@@ -66,7 +66,7 @@ from ramair_2d_urans_cases import (  # noqa: E402
 )
 
 
-BACKEND_API_VERSION = 24
+BACKEND_API_VERSION = 25
 SOLVER_CONFIG_SCHEMA_VERSION = 15
 
 
@@ -1184,7 +1184,7 @@ def reconcile_validation_runtime(project_root: Path) -> dict[str, Any] | None:
         runtime_pid, runtime_token
     ):
         runtime.update(
-            status=("PAUSED_RESTARTABLE" if result.get("restartable") else "STOPPED_INCOMPLETE"),
+            status=("PAUSED_RECOVERABLE" if result.get("restartable") else "FAILED"),
             reconciled_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             restart_evidence={
                 key: result.get(key)
@@ -2011,7 +2011,7 @@ class JobManager:
         active = [
             job
             for job in self.list_jobs(limit=20)
-            if self.poll(job).status in {"RUNNING", "STOP_REQUESTED", "STOPPING"}
+            if self.poll(job).status == "RUNNING"
         ]
         if active:
             raise RuntimeError(f"Another workflow job is still running: {active[0].stage} ({active[0].job_id})")
@@ -2072,8 +2072,8 @@ class JobManager:
         except Exception:
             current = job
         current.returncode = int(returncode)
-        if current.status in {"STOP_REQUESTED", "STOPPING"}:
-            current.status = "PAUSED_RESTARTABLE"
+        if current.stop_requested_at:
+            current.status = "PAUSED_RECOVERABLE"
         else:
             current.status = "COMPLETED" if returncode == 0 else "FAILED"
         current.finished_at = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -2097,13 +2097,13 @@ class JobManager:
         if entry is not None:
             process, handle = entry
             returncode = process.poll()
-            if returncode is not None and job.status in {"RUNNING", "STOP_REQUESTED", "STOPPING"}:
+            if returncode is not None and job.status == "RUNNING":
                 handle.flush()
                 handle.close()
                 self._processes.pop(job.job_id, None)
                 job.returncode = int(returncode)
-                if job.status in {"STOP_REQUESTED", "STOPPING"}:
-                    job.status = "PAUSED_RESTARTABLE"
+                if job.stop_requested_at:
+                    job.status = "PAUSED_RECOVERABLE"
                 else:
                     job.status = "COMPLETED" if returncode == 0 else "FAILED"
                 job.finished_at = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -2118,17 +2118,13 @@ class JobManager:
                 return persisted
         except Exception:
             pass
-        if job.status in {"RUNNING", "STOP_REQUESTED", "STOPPING"} and job.pid:
+        if job.status == "RUNNING" and job.pid:
             if not _pid_is_alive(job.pid, job.pid_start_token):
                 # The monitor thread writes the return code immediately after
                 # process exit. Avoid racing it and mislabelling a successful
                 # job as UNKNOWN_FINISHED.
                 if time.time() - Path(job.status_path).stat().st_mtime > 5.0:
-                    job.status = (
-                        "PAUSED_RESTARTABLE"
-                        if job.status in {"STOP_REQUESTED", "STOPPING"}
-                        else "UNKNOWN_FINISHED"
-                    )
+                    job.status = "PAUSED_RECOVERABLE" if job.stop_requested_at else "FAILED"
                     job.finished_at = time.strftime("%Y-%m-%d %H:%M:%S")
                     self._write(job)
             else:
@@ -2144,39 +2140,37 @@ class JobManager:
                         candidate in command_line or Path(candidate).name in command_line
                         for candidate in identity_candidates[:2]
                     ):
-                        job.status = "UNKNOWN_FINISHED"
+                        job.status = "FAILED"
                         job.finished_at = time.strftime("%Y-%m-%d %H:%M:%S")
                         self._write(job)
         return job
 
     def mark_stop_requested(self, job: Job) -> Job:
         if job.status == "RUNNING":
-            job.status = "STOP_REQUESTED"
             job.stop_requested_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
             job.stop_stage = "controlDict_writeNow"
             self._write(job)
         return job
 
     def stop(self, job: Job) -> Job:
-        if job.status not in {"RUNNING", "STOP_REQUESTED"} or not job.pid:
+        if job.status != "RUNNING" or not job.pid:
             return job
         try:
             if os.name != "nt":
                 os.killpg(int(job.process_group_id or job.pid), signal.SIGINT)
             else:
                 os.kill(job.pid, signal.SIGTERM)
-            job.status = "STOPPING"
             job.stop_requested_at = job.stop_requested_at or time.strftime("%Y-%m-%dT%H:%M:%S%z")
             job.stop_stage = "orchestrator_sigint"
             self._write(job)
         except ProcessLookupError:
-            job.status = "UNKNOWN_FINISHED"
+            job.status = "PAUSED_RECOVERABLE" if job.stop_requested_at else "FAILED"
             self._write(job)
         return job
 
     def force_stop(self, job: Job) -> Job:
         """Escalate a requested stop to the recorded solver, then orchestrator."""
-        if job.status not in {"RUNNING", "STOP_REQUESTED", "STOPPING"}:
+        if job.status != "RUNNING":
             return job
         case_dir = openfoam_case_from_command(job.command) or validation_runtime_case(self.project_root)
         solver_result: dict[str, Any] | None = None
@@ -2184,7 +2178,6 @@ class JobManager:
             solver_result = _signal_solver_process(case_dir, signal.SIGINT)
         if not solver_result or solver_result.get("status") != "SIGNALLED":
             self.stop(job)
-        job.status = "STOPPING"
         job.stop_stage = "solver_sigint" if solver_result else "orchestrator_sigint"
         job.stop_requested_at = job.stop_requested_at or time.strftime("%Y-%m-%dT%H:%M:%S%z")
         self._write(job)
@@ -2195,7 +2188,7 @@ class JobManager:
         return [
             job
             for job in self.list_jobs(limit=100)
-            if self.poll(job).status in {"RUNNING", "STOP_REQUESTED", "STOPPING"}
+            if self.poll(job).status == "RUNNING"
         ]
 
 

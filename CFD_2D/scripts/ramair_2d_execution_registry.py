@@ -13,6 +13,7 @@ from ramair_2d_study_registry import (
     utc_stamp,
     write_json_atomic,
 )
+from ramair_execution_control import normalize_execution_state
 
 
 MODES = {"RANS", "URANS", "PIMPLE_SENSITIVITY"}
@@ -31,8 +32,8 @@ def registry_path(project_root: Path) -> Path:
 
 def load_registry(project_root: Path) -> dict[str, Any]:
     data = read_json(registry_path(project_root), {}) or {}
-    data.setdefault("schema_version", 2)
-    data["schema_version"] = 2
+    data.setdefault("schema_version", 3)
+    data["schema_version"] = 3
     for key, value in (
         ("active_run_id", None),
         ("active_mode", None),
@@ -73,6 +74,13 @@ def _normalized_entry(entry: dict[str, Any]) -> dict[str, Any]:
     run_id = str(entry.get("run_id") or "").strip()
     if not run_id:
         raise ValueError("execution_registry entry requires run_id")
+    legacy_status = str(entry.get("legacy_status") or entry.get("status") or "READY")
+    try:
+        status = normalize_execution_state(
+            entry.get("status"), restartable=entry.get("restartable")
+        ).value
+    except ValueError:
+        status = "PREPARED"
     return {
         "run_id": run_id,
         "case_id": entry.get("case_id"),
@@ -82,7 +90,8 @@ def _normalized_entry(entry: dict[str, Any]) -> dict[str, Any]:
         "mesh_level": entry.get("mesh_level"),
         "mesh_id": entry.get("mesh_id"),
         "stage": entry.get("stage"),
-        "status": entry.get("status", "READY"),
+        "status": status,
+        "legacy_status": legacy_status,
         "started_at": entry.get("started_at"),
         "updated_at": entry.get("updated_at") or utc_stamp(),
         "log_path": entry.get("log_path"),

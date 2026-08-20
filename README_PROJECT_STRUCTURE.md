@@ -37,7 +37,7 @@ versiones cacheadas.
 como enlaces de compatibilidad a `DESIGN_APP`. OpenFOAM no admite espacios en
 el nombre del caso; no se debe usar la ruta antigua como raiz real.
 
-Las ejecuciones generales usan el esquema de solver 14. El paso temporal se
+Las ejecuciones generales usan el esquema de solver 15. El paso temporal se
 limita por `maxDeltaT*` para conservar la resolucion fisica y mantiene una
 salvaguarda adaptativa de Courant. Las paradas solicitadas escriben un
 checkpoint reiniciable y la interfaz reconcilia procesos interrumpidos al
@@ -53,7 +53,7 @@ python .\run_ramair_cfd2d_app.py --check-only
 
 El laboratorio aislado usa las seis mallas `closed/open` en niveles `coarse`,
 `medium` y `fine`. Su configuracion es schema 10 y la aplicacion/backend usan API
-23. Cada combinacion de topologia, malla, angulo y `deltaT` posee una unica
+25. Cada combinacion de topologia, malla, angulo y `deltaT` posee una unica
 linea temporal URANS mutable. La interfaz ofrece solo `Caso unico` y
 `Ejecucion secuencial`; no usa pilotos, intentos, archivados ni bypass.
 

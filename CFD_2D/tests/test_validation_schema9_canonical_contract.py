@@ -97,7 +97,7 @@ def test_api_schema_and_migration_remove_legacy_policy() -> None:
             "pilot_policy": "required", "attempts": [1], "retention": {}, "archive": True,
         }},
     })
-    assert BACKEND_API_VERSION == 24
+    assert BACKEND_API_VERSION == 25
     assert STUDY_CONFIG_SCHEMA_VERSION == 10
     urans = migrated["validation_study"]["urans"]
     assert not ({"pilot_policy", "attempts", "retention", "archive"} & set(urans))
@@ -488,7 +488,8 @@ def test_registry_discards_noncanonical_pimple_keys(tmp_path: Path) -> None:
     registry = load_registry(tmp_path)
     assert registry["active_mode"] is None
     assert registry["active_stage"] is None
-    assert registry["runs"][0]["status"] == "READY"
+    assert registry["runs"][0]["status"] == "PREPARED"
+    assert registry["runs"][0]["legacy_status"] == "READY"
     assert "pilot_required" not in registry["runs"][0]
     assert "attempt_id" not in registry["runs"][0]
 

@@ -21,6 +21,12 @@ from pathlib import Path
 from typing import Any
 
 from ramair_2d_execution_registry import upsert_execution
+from ramair_execution_control import (
+    ExecutionState as CanonicalExecutionState,
+    execution_idempotency_key,
+    load_execution_state,
+    transition_execution_state,
+)
 from ramair_2d_study_registry import read_json, utc_stamp, write_json_atomic
 from ramair_2d_urans_cases import (
     ExecutionOutcome,
@@ -619,6 +625,15 @@ def execute(
         restart,
     )
     if start_index >= len(stages):
+        transition_execution_state(
+            case,
+            CanonicalExecutionState.COMPLETED,
+            phase=str(stages[-1]["stage"]),
+            run_id=case_id,
+            reason="all_frozen_phases_already_complete",
+            evidence=restart,
+            force=bool(load_execution_state(case)),
+        )
         return 0
 
     commands = []
@@ -654,6 +669,31 @@ def execute(
     if not run:
         print(json.dumps(execution_plan, indent=2))
         return 0
+
+    lifecycle_key = execution_idempotency_key(
+        case,
+        [item for command in commands for item in command],
+        phase=str(stages[start_index]["stage"]),
+    )
+    transition_execution_state(
+        case,
+        CanonicalExecutionState.PREPARED,
+        phase=str(stages[start_index]["stage"]),
+        run_id=case_id,
+        idempotency_key=lifecycle_key,
+        reason="frozen_phase_plan_ready",
+        evidence=restart,
+        force=bool(load_execution_state(case)),
+    )
+    transition_execution_state(
+        case,
+        CanonicalExecutionState.RUNNING,
+        phase=str(stages[start_index]["stage"]),
+        run_id=case_id,
+        idempotency_key=lifecycle_key,
+        reason="phase_orchestrator_started",
+        pid=os.getpid(),
+    )
 
     manifest.update(
         execution_outcome=ExecutionOutcome.RUNNING.value,
@@ -709,6 +749,20 @@ def execute(
     try:
         for index in range(start_index, len(stages)):
             stage = stages[index]
+            phase_key = execution_idempotency_key(
+                case,
+                commands[index - start_index],
+                phase=str(stage["stage"]),
+            )
+            transition_execution_state(
+                case,
+                CanonicalExecutionState.RUNNING,
+                phase=str(stage["stage"]),
+                run_id=case_id,
+                idempotency_key=phase_key,
+                reason="phase_started_or_resumed",
+                pid=os.getpid(),
+            )
             start_mode = first_mode if index == start_index else CONTINUE_STAGE
             input_checkpoint = restart_time_evidence(case)
             if start_mode != FRESH_FROM_CHECKPOINT and not input_checkpoint["valid"]:
@@ -871,6 +925,21 @@ def execute(
                 manifest["execution_outcome"] = ExecutionOutcome.RUNNING.value
             write_json_atomic(run_root / "case_manifest.json", manifest)
             if manifest["execution_outcome"] != ExecutionOutcome.RUNNING.value:
+                canonical_terminal = (
+                    CanonicalExecutionState.PAUSED_RECOVERABLE
+                    if manifest["execution_outcome"] == ExecutionOutcome.PAUSED.value
+                    else CanonicalExecutionState.FAILED
+                )
+                transition_execution_state(
+                    case,
+                    canonical_terminal,
+                    phase=str(stage["stage"]),
+                    run_id=case_id,
+                    idempotency_key=phase_key,
+                    reason=terminal_reason,
+                    evidence=output_checkpoint,
+                    returncode=returncode,
+                )
                 clear_active_runtime(project_root, {**runtime_base, "phase": str(stage["stage"]), "status": manifest["execution_outcome"], "terminal_reason": terminal_reason})
                 return 2 if numerical_divergence or manifest["execution_outcome"] == ExecutionOutcome.ERROR.value else 0
             if index + 1 < len(stages) and not output_checkpoint["valid"]:
@@ -885,6 +954,16 @@ def execute(
             updated_at=utc_stamp(),
         )
         write_json_atomic(run_root / "case_manifest.json", manifest)
+        transition_execution_state(
+            case,
+            CanonicalExecutionState.COMPLETED,
+            phase=str(stages[-1]["stage"]),
+            run_id=case_id,
+            idempotency_key=execution_idempotency_key(case, commands[-1], phase=str(stages[-1]["stage"])),
+            reason="target_end_time_reached",
+            evidence=restart_time_evidence(case),
+            returncode=0,
+        )
         clear_active_runtime(project_root, {**runtime_base, "phase": str(stages[-1]["stage"]), "status": "COMPLETED", "terminal_reason": "TARGET_END_TIME_REACHED"})
         upsert_execution(project_root, {"run_id": case_id, "case_id": case_id, "mode": "URANS", "run_kind": "CANONICAL", "status": "COMPLETED", "case_path": str(case), "stage": str(stages[-1]["stage"]), "mesh_id": manifest.get("mesh_id")}, activate=True)
         return 0
@@ -904,6 +983,22 @@ def execute(
         except Exception as secondary:
             secondary_errors.append(f"manifest_update: {type(secondary).__name__}: {secondary}")
         try:
+            recovery = restart_time_evidence(case)
+            transition_execution_state(
+                case,
+                (
+                    CanonicalExecutionState.PAUSED_RECOVERABLE
+                    if recovery.get("valid")
+                    else CanonicalExecutionState.FAILED
+                ),
+                phase=str(manifest.get("current_phase") or stages[start_index]["stage"]),
+                run_id=case_id,
+                idempotency_key=lifecycle_key,
+                reason=primary,
+                evidence=recovery,
+                returncode=2,
+                force=True,
+            )
             clear_active_runtime(project_root, {
                 **runtime_base, "phase": manifest.get("current_phase"),
                 "status": "ERROR", "terminal_reason": "ORCHESTRATION_ERROR",
