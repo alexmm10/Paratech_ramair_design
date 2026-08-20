@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### UI-MESH: compatible catalogue, drafts and revision approval
+
+- Reordered the Mesh page around the active geometry: its profile preview and
+  compatible saved meshes appear first, while incompatible revisions remain
+  visible with an explicit reason and are never loaded silently.
+- New configurations can start from reviewed defaults, Coarse/Medium/Fine
+  presets or the exact configuration of a compatible saved mesh. These sources
+  are starting points rather than identities; editing writes an active draft
+  and does not mutate the immutable saved source revision.
+- Renamed the detailed parameter families to General, Closed and Open while
+  preserving all active Gmsh, sizing, transfinite and boundary-layer controls.
+  Quality review and a collapsed boundary-layer thickness review now precede
+  approval.
+- Separated the technical active-output eligibility flag from durable Work Case
+  approval. Approve/reject/pending decisions now target the selected saved mesh
+  revision with actor and evidence and survive later reuse.
+
 ### UI-GEOMETRY: Work Case gate and shared geometry DTO
 
 - Added a dedicated Work Case page and blocked the normal geometry-to-results

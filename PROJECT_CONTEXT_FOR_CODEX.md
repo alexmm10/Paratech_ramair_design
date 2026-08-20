@@ -84,6 +84,15 @@ dependent packages become `stale`; they remain visible with warnings and are
 never silently restored. Selection order is active compatible revision, most
 recent compatible revision, then explicit creation by the caller.
 
+The Mesh UI resolves reusable packages against the exact active geometry
+entity/revision. Compatible saved meshes can be loaded or used as a
+configuration base; incompatible ones remain visible with warnings. Mesh
+configuration edits are active drafts (`sync_workcase=False`) until the real
+mesh is explicitly saved/replaced as a Work Case package, preventing a draft
+from changing an approved artifact revision. `MESH_APPROVED.flag` remains the
+technical eligibility of the active output; schema-3 package approval is the
+durable human decision with actor and evidence.
+
 Schemas 1 and 2 are accepted through a read-only adapter. An explicit
 `ramair_case_library.py migrate --apply` creates a manifest backup under
 `Previous Versions/Results Library Manifest Backups`, writes schema 3

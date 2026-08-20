@@ -374,10 +374,17 @@ def set_workcase_selection(project_root: Path, case_name: str | None) -> Path:
     return path
 
 
-def save_config(project_root: Path, name: str, data: dict[str, Any]) -> Path | None:
+def save_config(
+    project_root: Path,
+    name: str,
+    data: dict[str, Any],
+    *,
+    sync_workcase: bool = True,
+) -> Path | None:
     normalized = _canonicalize_config_layout_paths(data, project_root)
     backup = write_json_with_backup(config_path(project_root, name), normalized, project_root)
-    sync_active_workcase_config(project_root, name)
+    if sync_workcase:
+        sync_active_workcase_config(project_root, name)
     return backup
 
 
@@ -1768,6 +1775,9 @@ def case_library_command(
     description: str = "",
     existing_action: str = "archive",
     package_name: str | None = None,
+    approval_status: str | None = None,
+    actor: str = "local-user",
+    evidence: str | None = None,
 ) -> list[str]:
     command = python_command(
         project_root,
@@ -1807,6 +1817,21 @@ def case_library_command(
             "--existing-action", existing_action,
         ])
         return command
+    if action == "approve":
+        if not stage or not case_name or not package_name or not approval_status:
+            raise ValueError(
+                "Case-library approve requires stage, case_name, package_name and approval_status."
+            )
+        command.extend([
+            "--case-name", case_name,
+            "--stage", stage,
+            "--package-name", package_name,
+            "--status", approval_status,
+            "--actor", actor,
+        ])
+        if evidence:
+            command.extend(["--evidence", evidence])
+        return command
     if not stage or not case_name:
         raise ValueError("Case-library save/restore requires stage and case_name.")
     command.extend(["--stage", stage, "--case-name", case_name, "--existing-action", existing_action])
@@ -1834,6 +1859,86 @@ def saved_cases(project_root: Path) -> list[dict[str, Any]]:
         except Exception:
             continue
     return cases
+
+
+def _saved_mesh_package_path(project_root: Path, case_name: str, package_name: str) -> tuple[Path, dict[str, Any]]:
+    case = next((item for item in saved_cases(project_root) if item.get("folder") == case_name), None)
+    if not case:
+        raise FileNotFoundError(f"Unknown Work Case: {case_name}")
+    mesh_stage = (case.get("stages") or {}).get("mesh") or {}
+    packages = mesh_stage.get("packages") or {}
+    package = packages.get(package_name)
+    if not isinstance(package, dict):
+        raise FileNotFoundError(f"Unknown mesh package: {case_name}/{package_name}")
+    relative = Path(str(package.get("folder") or f"Meshes/{package_name}"))
+    if relative.is_absolute() or ".." in relative.parts:
+        raise ValueError("Unsafe mesh package path in manifest.")
+    return project_path(project_root, "results_library", case_name) / relative, package
+
+
+def saved_mesh_configuration(project_root: Path, case_name: str, package_name: str) -> dict[str, Any]:
+    package_root, _ = _saved_mesh_package_path(project_root, case_name, package_name)
+    path = package_root / "Configurations/cfd2d_mesh_config.json"
+    data = read_json(path, {}) or {}
+    if not isinstance(data, dict) or not data:
+        raise FileNotFoundError(f"Saved mesh configuration does not exist: {path}")
+    return data
+
+
+def saved_mesh_catalog(project_root: Path, active_case_name: str) -> list[dict[str, Any]]:
+    """Return saved meshes classified against the active geometry revision."""
+    cases = saved_cases(project_root)
+    active_case = next((item for item in cases if item.get("folder") == active_case_name), {})
+    active_entity = str((active_case.get("active_entities") or {}).get("geometry") or "")
+    active_revision = str(((active_case.get("entities") or {}).get(active_entity) or {}).get("revision_id") or "")
+    active_variant = str(active_case.get("variant") or active_case.get("main_profile") or "")
+    rows: list[dict[str, Any]] = []
+    for case in cases:
+        mesh_stage = (case.get("stages") or {}).get("mesh") or {}
+        for package_name, package in (mesh_stage.get("packages") or {}).items():
+            if not isinstance(package, dict):
+                continue
+            dependencies = list(package.get("dependencies") or [])
+            geometry_dependency = next(
+                (item for item in dependencies if item.get("role") == "geometry"), {}
+            )
+            exact_dependency = bool(
+                active_entity and active_revision
+                and geometry_dependency.get("entity_id") == active_entity
+                and geometry_dependency.get("revision_id") == active_revision
+            )
+            legacy_variant_match = bool(
+                not geometry_dependency
+                and active_variant
+                and str(case.get("variant") or case.get("main_profile") or "") == active_variant
+            )
+            compatibility = dict(package.get("compatibility") or {})
+            compatible = (exact_dependency or legacy_variant_match) and compatibility.get("status", "compatible") == "compatible"
+            package_root, _ = _saved_mesh_package_path(project_root, str(case.get("folder")), str(package_name))
+            quality_path = package_root / "Mesh Data/mesh_quality_report.json"
+            quality = read_json(quality_path, {}) or {}
+            rows.append({
+                "case_name": case.get("folder"),
+                "package_name": package_name,
+                "entity_id": package.get("entity_id"),
+                "revision_id": package.get("revision_id"),
+                "variant": case.get("variant") or case.get("main_profile"),
+                "compatible": compatible,
+                "compatibility_reason": (
+                    "exact_geometry_revision" if exact_dependency else
+                    "legacy_variant_match" if legacy_variant_match else
+                    "different_geometry_revision"
+                ),
+                "approval": dict(package.get("approval") or {}),
+                "saved_at": package.get("saved_at"),
+                "file_count": package.get("file_count"),
+                "size_bytes": package.get("size_bytes"),
+                "checkMesh_status": quality.get("checkMesh_status") or quality.get("status") or "NOT_REVIEWED",
+                "quality_report": str(quality_path) if quality_path.is_file() else "",
+                "package_path": str(package_root),
+                "active_in_case": str(mesh_stage.get("active_package") or "") == str(package_name),
+            })
+    return sorted(rows, key=lambda item: (not bool(item["compatible"]), str(item.get("case_name")), str(item.get("package_name"))))
 
 
 def command_text(command: Iterable[object]) -> str:

@@ -16,6 +16,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from ramair_profile_utils import read_and_canonicalize_profile_2d
 
 
@@ -231,6 +233,7 @@ def geometry_dto(project_config: dict[str, Any], inlet_config: dict[str, Any] | 
 def preview_series(root: Path, dto: dict[str, Any]) -> dict[str, list[dict[str, float]]]:
     root = Path(root)
     series: dict[str, list[dict[str, float]]] = {}
+    active_profile = None
     for key in ("base_closed", "active_open"):
         relative = (dto.get("profiles") or {}).get(key)
         if not relative:
@@ -241,8 +244,62 @@ def preview_series(root: Path, dto: dict[str, Any]) -> dict[str, list[dict[str, 
         )
         if profile.errors:
             continue
-        contour = profile.closed_contour if key == "base_closed" else profile.open_contour
-        series[key] = [
-            {"x": float(row.x_norm), "z": float(row.z_norm)} for row in contour.itertuples()
-        ]
+        if key == "active_open":
+            active_profile = profile
+        for branch_name, contour in (("upper", profile.upper), ("lower", profile.lower)):
+            series[f"{key}_{branch_name}"] = [
+                {"x": float(row.x_norm), "z": float(row.z_norm)} for row in contour.itertuples()
+            ]
+        if key == "base_closed":
+            start = len(profile.upper)
+            stop = len(profile.closed_contour) - len(profile.lower)
+            te = profile.closed_contour.iloc[start:stop]
+            if te.empty:
+                te = profile.closed_contour.iloc[[len(profile.upper) - 1, stop]]
+            series["base_closed_final_te"] = [
+                {"x": float(row.x_norm), "z": float(row.z_norm)} for row in te.itertuples()
+            ]
+        elif profile.inlet_segment:
+            series["active_open_inlet_cut"] = [
+                {"x": float(point["x_norm"]), "z": float(point["z_norm"])}
+                for point in profile.inlet_segment
+            ]
+    if active_profile is not None and bool((dto.get("crossports") or {}).get("enabled", True)):
+        upper = active_profile.upper.sort_values("x_norm")
+        lower = active_profile.lower.sort_values("x_norm")
+        cp = dto.get("crossports") or {}
+        clearance_fraction = float(cp.get("edge_clearance_fraction_local_thickness", 0.22))
+        centerline = str(cp.get("centerline_mode", "chordline"))
+        for index, hole in enumerate(cp.get("holes") or [], start=1):
+            x0 = float(hole["x"])
+            z_high = float(np.interp(x0, upper.x_norm, upper.z_norm))
+            z_low = float(np.interp(x0, lower.x_norm, lower.z_norm))
+            if z_low > z_high:
+                z_low, z_high = z_high, z_low
+            thickness = max(z_high - z_low, 1e-9)
+            requested_fraction = hole.get("z_center_fraction")
+            if requested_fraction is not None:
+                zc = z_low + min(1.0, max(0.0, float(requested_fraction))) * thickness
+            elif centerline == "chordline":
+                zc = min(z_high, max(z_low, 0.0))
+            else:
+                zc = 0.5 * (z_low + z_high)
+            admissible_height = max(1e-9, thickness * (1.0 - 2.0 * clearance_fraction))
+            radius = hole.get("radius_chord_frac")
+            width = 2.0 * float(radius) if radius is not None else float(hole.get("width_chord_frac", 0.08))
+            height = min(float(hole.get("height_thickness_frac", 0.15)) * thickness, admissible_height)
+            if hole.get("shape") == "circle":
+                width = height = min(width, admissible_height)
+            elif hole.get("orientation") == "horizontal" and height > width:
+                width, height = height, width
+            elif hole.get("orientation") == "vertical" and width > height:
+                width, height = height, width
+            points = max(12, int(hole.get("points_per_loop", 32)))
+            series[f"crossport_{index}"] = [
+                {
+                    "x": x0 + 0.5 * width * math.cos(2.0 * math.pi * step / points),
+                    "z": zc + 0.5 * height * math.sin(2.0 * math.pi * step / points),
+                }
+                for step in range(points + 1)
+            ]
     return series

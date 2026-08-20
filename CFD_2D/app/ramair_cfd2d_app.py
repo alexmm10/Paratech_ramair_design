@@ -64,6 +64,8 @@ _REQUIRED_BACKEND_SYMBOLS = {
     "request_validation_pimple_stop",
     "reconcile_validation_runtime",
     "saved_cases",
+    "saved_mesh_catalog",
+    "saved_mesh_configuration",
     "set_workcase_selection",
     "results_library_locations",
     "start_application_idle_watchdog",
@@ -137,6 +139,8 @@ from workflow_backend import (
     staged_runner_command,
     save_config,
     saved_cases,
+    saved_mesh_catalog,
+    saved_mesh_configuration,
     set_workcase_selection,
     start_application_idle_watchdog,
     tail_file,
@@ -1820,9 +1824,23 @@ def geometry_2d_workspace_editor(selected_case_manifest: dict[str, Any]) -> None
     preview = preview_series(ROOT, dto)
     chart_rows = []
     for name, rows in preview.items():
-        chart_rows.extend({"x/c": row["x"], "z/c": row["z"], "serie": name} for row in rows)
+        chart_rows.extend(
+            {"x/c": row["x"], "z/c": row["z"], "serie": name, "orden": order}
+            for order, row in enumerate(rows)
+        )
     if chart_rows:
-        st.line_chart(pd.DataFrame(chart_rows), x="x/c", y="z/c", color="serie", height=360)
+        st.vega_lite_chart(
+            pd.DataFrame(chart_rows),
+            {"mark": {"type": "line", "clip": True}, "height": 360,
+             "encoding": {
+                 "x": {"field": "x/c", "type": "quantitative", "scale": {"zero": False}},
+                 "y": {"field": "z/c", "type": "quantitative", "scale": {"zero": False}},
+                 "color": {"field": "serie", "type": "nominal"},
+                 "detail": {"field": "serie", "type": "nominal"},
+                 "order": {"field": "orden", "type": "quantitative"},
+             }},
+            width="stretch",
+        )
     st.caption(
         f"TE: {dto['trailing_edge']['label']} | crossports: {len(dto['crossports']['holes'])} | "
         f"centerline: {dto['crossports']['centerline_mode']}"
@@ -2161,14 +2179,14 @@ def mesh_config_editor(variant: str) -> dict[str, Any]:
     if data.get("open_geometry_representation") != "zero_thickness_base_profile":
         global_boundary_keys.insert(2, "fabric_thickness_chord")
     layout = {
-        "Global": [
+        "General": [
             ("Dominio", domain_keys),
             ("Objetivo de capa limite y extrusion", global_boundary_keys),
             ("Ejecucion de Gmsh", ["gmsh_backend", "gmsh_threads", "gmsh_mesh_algorithm_2d", "gmsh_random_factor", "gmsh_random_seed"]),
             ("Limites y salvaguardas", ["max_cells", "max_internal_parse_mesh_size_mb", "max_internal_parse_elements", "min_cells_warning", "stop_if_negative_cells", "stop_if_geometry_invalid", "wake_refinement_enabled"]),
             ("Compatibilidad avanzada", ["config_schema_version", "geometry_mode"]),
         ],
-        "Perfil cerrado": [
+        "Closed": [
             ("Boundary Layer", ["closed_use_yplus_first_cell_height", "closed_first_cell_height_m", "closed_boundary_layer_layers", "closed_boundary_layer_growth", "closed_boundary_layer_total_thickness_chord", "closed_recombine_boundary_layer", "closed_boundary_layer_aniso_max_deg", "closed_boundary_layer_intersect_metrics"]),
             ("Curvas Gmsh de la pared", ["closed_wall_curve_method", "closed_wall_target_nodes"]),
             ("Preprocesado geometrico del perfil", ["closed_profile_preprocess_enabled", "closed_profile_target_points", "closed_profile_min_spacing_chord"]),
@@ -2176,7 +2194,7 @@ def mesh_config_editor(variant: str) -> dict[str, Any]:
             ("Discretizacion de malla en el TE", ["closed_te_target_nodes", "closed_te_transition_min_nodes", "closed_te_bump_strength"]),
             ("Sizes y transicion", ["closed_near_wall_size_from_bl", "closed_near_wall_size_chord", "closed_near_wall_size_bl_factor", "closed_nearfield_enabled", "closed_nearfield_dist_min_chord", "closed_nearfield_intermediate_dist_chord", "closed_nearfield_dist_max_chord", "closed_nearfield_intermediate_size_chord", "closed_nearfield_outer_size_chord", "closed_farfield_transition_dist_chord", "closed_farfield_size_chord"]),
         ],
-        "Perfil abierto": open_sections,
+        "Open": open_sections,
     }
     section_captions = {
         "Dominio": "Unica fuente de la forma y dimensiones del farfield. Todas las distancias se expresan en cuerdas; cambiar el nivel de malla no las modifica.",
@@ -2222,9 +2240,9 @@ def mesh_config_editor(variant: str) -> dict[str, Any]:
         label_visibility="collapsed",
     ) or tab_names[0]
     tab_intro = {
-        "Global": "Opciones comunes de Gmsh, coste, capa limite y extrusion OpenFOAM.",
-        "Perfil cerrado": "Discretizacion del contorno cerrado, cierre tangente del TE y crecimiento desde la capa prismatica al farfield.",
-        "Perfil abierto": "Malla exterior/interior conectada, BL solo en el exterior y puente no fisico a traves del inlet.",
+        "General": "Opciones comunes de Gmsh, coste, capa limite y extrusion OpenFOAM.",
+        "Closed": "Discretizacion del contorno cerrado, cierre tangente del TE y crecimiento desde la capa prismatica al farfield.",
+        "Open": "Malla exterior/interior conectada, BL solo en el exterior y puente no fisico a traves del inlet.",
     }
     st.caption(tab_intro[tab_name])
     st.caption("Guarda esta seccion antes de cambiar a otra; las claves no visibles se conservan sin modificacion.")
@@ -2309,9 +2327,9 @@ def mesh_config_editor(variant: str) -> dict[str, Any]:
                             )
                         rendered.add(key)
             st.divider()
-        prefix = "closed_" if tab_name == "Perfil cerrado" else "open_" if tab_name == "Perfil abierto" else ""
+        prefix = "closed_" if tab_name == "Closed" else "open_" if tab_name == "Open" else ""
         zero_thickness_open_editor = (
-            tab_name == "Perfil abierto"
+            tab_name == "Open"
             and data.get("open_geometry_representation") == "zero_thickness_base_profile"
         )
         ungrouped = [
@@ -2359,7 +2377,7 @@ def mesh_config_editor(variant: str) -> dict[str, Any]:
         ):
             edited.pop(legacy_key, None)
         edited["mesh_configuration_mode"] = "custom"
-        backup = save_config(ROOT, "mesh", edited)
+        backup = save_config(ROOT, "mesh", edited, sync_workcase=False)
         update_workflow_sections(
             geometry={"variant": variant, "domain": str(edited.get("domain_type", "circular_50c"))},
             mesh={"mesh_level": "custom"},
@@ -2367,7 +2385,7 @@ def mesh_config_editor(variant: str) -> dict[str, Any]:
         st.success("Parametros de malla guardados. El builder los releera al iniciar el siguiente mallado.")
         if backup:
             st.caption(f"Copia anterior: {backup}")
-    if chord_m and tab_name in {"Perfil cerrado", "Perfil abierto"}:
+    if chord_m and tab_name in {"Closed", "Open"}:
         prefix = "open" if variant_has_open_inlet(variant) else "closed"
         conditions = (load_config(ROOT, "workflow").get("case_conditions") or {})
         try:
@@ -2938,8 +2956,8 @@ if (
         f"Perfil: {active_workspace.get('variant')} | alpha: {active_workspace.get('alpha_deg')}"
     )
     st.caption(
-        "Al guardar una configuracion desde cualquier pestana, su JSON se sincroniza "
-        "automaticamente con los paquetes activos de este caso."
+        "Las configuraciones del caso se versionan con sus paquetes. En Malla, los cambios permanecen "
+        "como borrador activo hasta guardar o sustituir explicitamente una malla real."
     )
 results_locations = results_library_locations(ROOT)
 with st.sidebar.expander("Ubicacion real de Results", expanded=False):
@@ -3482,7 +3500,73 @@ if active_page == "Malla" and workflow_case_ready:
     level_origin = str(mesh_config.get("mesh_level_origin", "fine"))
     level = level_origin if config_mode == "level_base" and level_origin in CHOICES["mesh_level"] else "custom"
 
-    st.subheader("Preparar, generar o regenerar")
+    st.subheader("Geometria activa y mallas compatibles")
+    project_geometry = geometry_dto(load_config(ROOT, "project"), load_config(ROOT, "inlet_design"))
+    geometry_rows = []
+    for series_name, points in preview_series(ROOT, project_geometry).items():
+        geometry_rows.extend(
+            {"x/c": point["x"], "z/c": point["z"], "serie": series_name, "orden": order}
+            for order, point in enumerate(points)
+        )
+    if geometry_rows:
+        st.vega_lite_chart(
+            pd.DataFrame(geometry_rows),
+            {"mark": {"type": "line", "clip": True}, "height": 280,
+             "encoding": {
+                 "x": {"field": "x/c", "type": "quantitative", "scale": {"zero": False}},
+                 "y": {"field": "z/c", "type": "quantitative", "scale": {"zero": False}},
+                 "color": {"field": "serie", "type": "nominal", "legend": None},
+                 "detail": {"field": "serie", "type": "nominal"},
+                 "order": {"field": "orden", "type": "quantitative"},
+             }},
+            width="stretch",
+        )
+    profile_kind = "Open" if variant_has_open_inlet(variant) else "Closed"
+    st.caption(
+        f"Perfil/geometria: {variant} | tipo: {profile_kind}. Solo las revisiones enlazadas a la "
+        "geometria activa se ofrecen para reutilizacion silenciosa."
+    )
+    mesh_catalog = saved_mesh_catalog(ROOT, library_case_selection)
+    compatible_meshes = [item for item in mesh_catalog if item.get("compatible")]
+    if compatible_meshes:
+        render_records_table([{
+            "caso": item["case_name"], "malla": item["package_name"],
+            "revision": item.get("revision_id"), "checkMesh": item.get("checkMesh_status"),
+            "aprobacion": (item.get("approval") or {}).get("status", "pending"),
+            "guardada": item.get("saved_at"),
+        } for item in compatible_meshes], max_rows=50)
+        mesh_labels = [f"{item['case_name']} / {item['package_name']}" for item in compatible_meshes]
+        selected_saved_mesh_label = st.selectbox("Malla guardada compatible", mesh_labels)
+        selected_saved_mesh = compatible_meshes[mesh_labels.index(selected_saved_mesh_label)]
+        saved_actions = st.columns([1, 1, 3])
+        if saved_actions[0].button("Cargar malla", type="primary"):
+            start_job(
+                "library_restore_mesh",
+                case_library_command(
+                    ROOT, "restore", stage="mesh", case_name=str(selected_saved_mesh["case_name"]),
+                    package_name=str(selected_saved_mesh["package_name"]), existing_action="archive",
+                ),
+                completion_action={
+                    "kind": "reload_configuration", "case": selected_saved_mesh["case_name"],
+                    "stage": "mesh", "package": selected_saved_mesh["package_name"],
+                },
+            )
+        saved_actions[1].caption("Abrir/revisar: carga el paquete y usa los visores e informes inferiores.")
+        if selected_saved_mesh.get("quality_report"):
+            saved_actions[2].caption(str(selected_saved_mesh["quality_report"]))
+    else:
+        selected_saved_mesh = None
+        st.info("No hay mallas guardadas compatibles con la revision geometrica activa. Crea una configuracion nueva.")
+    incompatible_count = len(mesh_catalog) - len(compatible_meshes)
+    if incompatible_count:
+        with st.expander(f"Mallas incompatibles visibles ({incompatible_count})", expanded=False):
+            render_records_table([{
+                "caso": item["case_name"], "malla": item["package_name"],
+                "motivo": item.get("compatibility_reason"),
+                "estado": (item.get("approval") or {}).get("status", "pending"),
+            } for item in mesh_catalog if not item.get("compatible")], max_rows=100)
+
+    st.subheader("Nueva configuracion")
     st.caption(
         "El nivel carga una base editable una sola vez. Una configuracion restaurada o cualquier guardado manual "
         "tiene prioridad y pasa a modo personalizado; Gmsh usa siempre el JSON activo mostrado debajo."
@@ -3494,29 +3578,52 @@ if active_page == "Malla" and workflow_case_ready:
     status_cols[3].metric("Paquete cargado", str(active_workspace_mesh.get("package") or "-") if active_workspace_mesh else "-")
 
     with st.form("mesh-level-base-form"):
-        base_cols = st.columns([2, 4])
-        base_level = base_cols[0].selectbox(
-            "Valores base para una malla nueva",
+        base_cols = st.columns([2, 2, 3])
+        base_sources = ["defaults", "preset"] + (["saved_mesh"] if selected_saved_mesh else [])
+        base_source = base_cols[0].selectbox(
+            "Partir de",
+            base_sources,
+            format_func=lambda value: {
+                "defaults": "Defaults revisables", "preset": "Preset Coarse/Medium/Fine",
+                "saved_mesh": "Malla guardada seleccionada",
+            }[value],
+        )
+        base_level = base_cols[1].selectbox(
+            "Preset inicial",
             CHOICES["mesh_level"],
             index=CHOICES["mesh_level"].index(level_origin) if level_origin in CHOICES["mesh_level"] else 2,
             format_func=lambda value: {"coarse": "Coarse - 20 capas", "medium": "Medium - 40 capas", "fine": "Fine - 50 capas"}[value],
             help="Solo se aplican al pulsar el boton. Conservan forma/dimensiones del dominio y estandarizan geometria, TE y discretizacion tangencial.",
+            disabled=base_source != "preset",
         )
-        base_cols[1].info(
-            "Coarse, medium y fine comparten limpieza geometrica, cierre TE, nodos de pared, y1/growth y transicion BL-triangulos. "
-            "Varian capas normales, tamanos del campo exterior/interior y rapidez de crecimiento hacia el farfield."
+        base_cols[2].info(
+            "Los presets y las mallas guardadas son puntos de partida, no identidades. La edicion se guarda como "
+            "borrador activo y no altera la revision aprobada de la malla de origen."
         )
-        apply_level_base = st.form_submit_button("Cargar valores base en la configuracion editable")
+        apply_level_base = st.form_submit_button("Crear configuracion editable desde esta base")
     if apply_level_base:
-        updated_mesh_config = apply_mesh_level(mesh_config, base_level)
+        if base_source == "saved_mesh" and selected_saved_mesh:
+            updated_mesh_config = saved_mesh_configuration(
+                ROOT, str(selected_saved_mesh["case_name"]), str(selected_saved_mesh["package_name"])
+            )
+            updated_mesh_config["mesh_configuration_mode"] = "saved_mesh_base"
+            updated_mesh_config["mesh_source_entity_id"] = selected_saved_mesh.get("entity_id")
+            updated_mesh_config["mesh_source_revision_id"] = selected_saved_mesh.get("revision_id")
+        elif base_source == "preset":
+            updated_mesh_config = apply_mesh_level(mesh_config, base_level)
+        else:
+            updated_mesh_config = dict(mesh_level_values("fine"))
+            for key, value in MESH_UI_DEFAULTS.items():
+                updated_mesh_config.setdefault(key, value)
+            updated_mesh_config["mesh_configuration_mode"] = "defaults_base"
         updated_mesh_config["domain_type"] = domain
-        save_config(ROOT, "mesh", updated_mesh_config)
+        save_config(ROOT, "mesh", updated_mesh_config, sync_workcase=False)
         update_workflow_sections(
             geometry={"variant": variant, "domain": domain},
-            mesh={"mesh_level": base_level},
+            mesh={"mesh_level": base_level if base_source == "preset" else "custom"},
         )
         st.session_state["_config_ui_revision"] = int(st.session_state.get("_config_ui_revision", 0)) + 1
-        st.success(f"Base {base_level} aplicada. Revisa o modifica los valores antes de generar.")
+        st.success("Base aplicada como borrador. Revisa los valores antes de generar.")
         st.rerun()
 
     with st.form("mesh-run-form"):
@@ -3632,6 +3739,25 @@ if active_page == "Malla" and workflow_case_ready:
             st.code(tail_file(viewer_log, 80), language="text")
     show_json_report(mesh_root / "mesh_quality_report.json", "Informe de calidad")
     render_mesh_quality_summary(mesh_root / "mesh_quality_report.json")
+    with st.expander("Revision de espesor de Boundary Layer", expanded=False):
+        try:
+            bl_prefix = "open" if variant_has_open_inlet(variant) else "closed"
+            bl_conditions = workflow.get("case_conditions") or {}
+            bl_review = boundary_layer_comparison(
+                chord_m=float(active_variant_chord_m(variant) or 1.0),
+                reynolds=float(bl_conditions.get("reynolds", 4.0e6)),
+                target_y_plus=float(mesh_config.get("target_y_plus", 1.0)),
+                rho_kg_m3=float(bl_conditions.get("rho_kg_m3", 1.225)),
+                mu_pa_s=float(bl_conditions.get("mu_pa_s", 1.81e-5)),
+                layers=int(mesh_config.get(f"{bl_prefix}_boundary_layer_layers", 50)),
+                growth_rate=float(mesh_config.get(f"{bl_prefix}_boundary_layer_growth", 1.075)),
+                manual_y1_m=float(mesh_config.get(f"{bl_prefix}_first_cell_height_m", 2.5e-5)),
+                use_yplus_y1=bool(mesh_config.get(f"{bl_prefix}_use_yplus_first_cell_height", True)),
+            )
+            render_records_table([bl_review], max_rows=1)
+            st.caption("Revision informativa del borrador activo; no cambia automaticamente y1, capas ni growth.")
+        except (TypeError, ValueError) as exc:
+            st.warning(f"No se pudo calcular la revision de BL: {exc}")
     show_json_report(mesh_root / "checkMesh_problem_locations.json", "Localizacion de celdas/caras problematicas")
     problem_vtks = list((mesh_root / "checkMesh_problem_locations").glob("*.vtk"))
     quality_report_path = mesh_root / "mesh_quality_report.json"
@@ -3673,13 +3799,46 @@ if active_page == "Malla" and workflow_case_ready:
         mesh_root / "mesh_preview_te.png",
         mesh_root / "mesh_preview_inlet.png",
     ], 3)
+    st.subheader("Aprobacion")
+    st.caption(
+        "La habilitacion tecnica de la salida activa y la decision persistente del paquete guardado son controles distintos. "
+        "La aprobacion persistente pertenece a una revision inmutable y sobrevive a su reutilizacion."
+    )
     approve_cols = st.columns([1, 1, 4])
-    if approve_cols[0].button("Aprobar malla"):
+    if approve_cols[0].button("Habilitar malla activa"):
         start_job("approve_mesh", approve_mesh_command(ROOT, variant, force=False))
     force = approve_cols[1].checkbox("Habilitar force-debug")
     if approve_cols[2].button("Forzar aprobacion de debug", disabled=not force):
         start_job("force_approve_mesh", approve_mesh_command(ROOT, variant, force=True))
     approve_cols[2].caption("Forzar solo permite continuar el debugging; no valida calidad aerodinamica.")
+    if selected_saved_mesh:
+        current_approval = dict(selected_saved_mesh.get("approval") or {})
+        st.caption(
+            f"Paquete seleccionado: {selected_saved_mesh['case_name']} / {selected_saved_mesh['package_name']} | "
+            f"revision {selected_saved_mesh.get('revision_id')} | estado {current_approval.get('status', 'pending')}"
+        )
+        with st.form("persistent-mesh-approval-form"):
+            decision_cols = st.columns([1, 1, 3])
+            decision = decision_cols[0].selectbox("Decision", ["approved", "rejected", "pending"])
+            actor = decision_cols[1].text_input("Responsable", value="local-user")
+            evidence = decision_cols[2].text_input(
+                "Evidencia / comentario",
+                value=str(selected_saved_mesh.get("quality_report") or "Revision visual y de calidad pendiente"),
+            )
+            record_decision = st.form_submit_button("Registrar decision persistente", type="primary")
+        if record_decision:
+            start_job(
+                "library_approve_mesh",
+                case_library_command(
+                    ROOT, "approve", stage="mesh",
+                    case_name=str(selected_saved_mesh["case_name"]),
+                    package_name=str(selected_saved_mesh["package_name"]),
+                    approval_status=decision, actor=actor, evidence=evidence,
+                ),
+                completion_action={"kind": "select_case", "case": selected_saved_mesh["case_name"]},
+            )
+    else:
+        st.info("Guarda la malla en el Caso de trabajo para registrar una aprobacion persistente.")
     case_library_panel(
         "mesh",
         variant,

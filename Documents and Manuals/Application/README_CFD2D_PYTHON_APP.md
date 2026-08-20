@@ -14,7 +14,9 @@ that every command, convergence result and cut decision is reproducible.
 
 ## Flujo de uso
 
-La pagina `Estado` resume el orden de trabajo y verifica el entorno. Cada
+La pagina `Estado` resume el orden de trabajo y verifica el entorno. Selecciona
+primero un contenedor persistente en `Caso de trabajo`; el flujo normal desde
+Geometria hasta Postproceso permanece bloqueado sin esa identidad. Cada
 editor guarda un JSON concreto y los scripts lo releen al comenzar su etapa;
 cambiar una pestaña sin pulsar `Guardar` no modifica el caso. Los trabajos de
 preproceso, mallado y solver se lanzan en segundo plano y dejan comando, PID,
@@ -40,12 +42,20 @@ muestra inmediatamente los valores recuperados para poder modificarlos.
 4. La app invalida los widgets anteriores y muestra inmediatamente los valores
    recuperados. Para una malla restaurada, usa `Configuracion editable activa`; no selecciones
    el preset si quieres conservar exactamente la base cargada.
-5. Edita y pulsa `Guardar` en cada pagina. El JSON activo y el paquete del caso
-   se actualizan atomica y simultaneamente, por lo que esos valores vuelven a
-   cargarse en la siguiente apertura.
+5. Edita y pulsa `Guardar` en cada pagina. En `Malla`, la configuracion se
+   conserva primero como borrador activo: no modifica el paquete guardado ni su
+   aprobacion hasta que una malla real se guarda o sustituye explicitamente.
 6. Regenera sobre el mismo paquete o guarda una nueva variante para comparar.
    Las cargas aisladas de `geometry`, `case`, `mesh`, `simulation` o
    `postprocess` permanecen en `Carga avanzada por etapa`.
+
+La pagina `Geometria` separa `Geometria 2D` (diseno XFOIL, catalogo/importacion
+de perfiles, TE, crossports y preview del DTO ejecutable) de `Geometria 3D`
+(canopy, tejido, CATIA y sistema). La pagina `Malla` muestra primero las mallas
+compatibles con la revision geometrica activa. Una configuracion nueva puede
+partir de defaults, presets o una malla guardada; General, Closed y Open
+conservan los controles efectivos. La habilitacion tecnica de la salida activa
+es independiente de la aprobacion persistente de la revision guardada.
 
 La procedencia activa se muestra en la barra lateral y queda registrada en
 `CFD_2D/app_state/active_workspace.json`. Abrir Gmsh, los informes y los VTK de

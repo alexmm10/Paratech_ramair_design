@@ -28,8 +28,11 @@ from ramair_case_library import (  # noqa: E402
     save_stage,
 )
 from workflow_backend import (  # noqa: E402
+    case_library_command,
     load_config,
     save_config,
+    saved_mesh_catalog,
+    saved_mesh_configuration,
     set_workcase_selection,
     touch_application_heartbeat,
 )
@@ -274,6 +277,61 @@ def test_revision_approval_is_preserved_when_package_is_edited(project: Path) ->
     assert current["revision_history"][-1]["revision_id"] == old_revision
     assert current["revision_history"][-1]["approval"]["status"] == "approved"
     assert current["revision_history"][-1]["archived_path"]
+
+
+def test_saved_mesh_catalog_loads_exact_config_and_persistent_approval(project: Path) -> None:
+    mesh_config = {"config_schema_version": 8, "gmsh_mesh_algorithm_2d": 6, "marker": "saved"}
+    write(
+        project / "CFD_2D/CFD_2D_inputs/config/cfd2d_mesh_config.json",
+        json.dumps(mesh_config),
+    )
+    write(
+        project / "CFD_2D/meshes/reference_uncut/mesh_quality_report.json",
+        json.dumps({"checkMesh_status": "PASS"}),
+    )
+    for stage in ("geometry", "case", "mesh"):
+        save_stage(project, stage, "mesh_catalog_case", "reference_uncut", 4.0, "catalog", "archive", "baseline")
+    approve_stage_package(
+        project, "mesh_catalog_case", "mesh", "baseline", "approved",
+        actor="mesh-reviewer", evidence="checkMesh PASS",
+    )
+
+    catalog = saved_mesh_catalog(project, "mesh_catalog_case")
+    assert len(catalog) == 1
+    assert catalog[0]["compatible"] is True
+    assert catalog[0]["approval"]["status"] == "approved"
+    assert catalog[0]["checkMesh_status"] == "PASS"
+    assert saved_mesh_configuration(project, "mesh_catalog_case", "baseline")["marker"] == "saved"
+
+
+def test_mesh_draft_save_does_not_mutate_saved_revision(project: Path) -> None:
+    write(
+        project / "CFD_2D/CFD_2D_inputs/config/cfd2d_mesh_config.json",
+        json.dumps({"marker": "original"}),
+    )
+    for stage in ("geometry", "case", "mesh"):
+        save_stage(project, stage, "mesh_draft_case", "reference_uncut", 4.0, "draft", "archive", "baseline")
+    set_workcase_selection(project, "mesh_draft_case")
+    manifest_path = project / "Results/mesh_draft_case/case_manifest.json"
+    before = json.loads(manifest_path.read_text(encoding="utf-8"))["stages"]["mesh"]["packages"]["baseline"]["revision_id"]
+
+    save_config(project, "mesh", {"marker": "draft"}, sync_workcase=False)
+
+    after = json.loads(manifest_path.read_text(encoding="utf-8"))["stages"]["mesh"]["packages"]["baseline"]["revision_id"]
+    assert after == before
+    assert load_config(project, "mesh")["marker"] == "draft"
+
+
+def test_case_library_approval_command_contains_revision_decision(project: Path) -> None:
+    command = case_library_command(
+        project, "approve", stage="mesh", case_name="case", package_name="fine",
+        approval_status="approved", actor="reviewer", evidence="quality PASS",
+    )
+    assert command[-12:] == [
+        "--case-name", "case", "--stage", "mesh", "--package-name", "fine",
+        "--status", "approved", "--actor", "reviewer",
+        "--evidence", "quality PASS",
+    ]
 
 
 def test_upstream_revision_change_marks_dependents_stale_and_blocks_restore(
