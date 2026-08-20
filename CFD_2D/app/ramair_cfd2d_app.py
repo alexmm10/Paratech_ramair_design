@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import streamlit as st
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
@@ -24,6 +25,13 @@ from boundary_layer_estimates import (  # noqa: E402
     turbulent_flat_plate_delta99,
 )
 from ramair_2d_timestep_advisor import temporal_frequency_budget  # noqa: E402
+from ramair_geometry_workspace import (  # noqa: E402
+    TE_LABELS,
+    geometry_dto,
+    import_profile,
+    load_profile_catalog,
+    preview_series,
+)
 
 import workflow_backend as _workflow_backend
 from mesh_configuration import (
@@ -555,6 +563,7 @@ MESH_FIELD_LABELS = {
 
 TAB_INTROS = {
     "Estado": "Comprueba las dependencias de Python, Gmsh y OpenFOAM antes de lanzar etapas. El resultado esperado es un inventario reproducible del entorno WSL, sin ejecutar CATIA ni el solver.",
+    "Caso de trabajo": "Selecciona o crea el contenedor versionado que enlaza geometria, caso CFD, malla, solver y resultados. Cada revision conserva dependencias y su propia decision de aprobacion.",
     "Geometria": "Define el perfil, la planta y las transformaciones de costillas que alimentan el preprocesador, junto con crossports, tejido, estabilizadores, suspension y exportaciones CATIA. Guarda primero la configuracion y ejecuta despues el preprocesador para regenerar CATIA/Inputs y las geometrias CFD 2D.",
     "Caso CFD": "Construye el paquete de una geometria ya preprocesada y le asocia Reynolds, Mach, densidad, viscosidad y barrido de angulos. Esta etapa valida contratos y unidades; todavia no genera malla ni ejecuta OpenFOAM.",
     "Malla": "Ajusta la discretizacion de pared, capa limite, transiciones y dominio. Cada ejecucion genera una malla nueva segun la politica elegida; despues puedes abrir mesh_final.msh en Gmsh, inspeccionarla y decidir si aprobarla.",
@@ -1589,12 +1598,13 @@ def render_selected_sections(
     return edited
 
 
-def project_config_editor() -> dict[str, Any]:
+def project_config_editor(tab_layout: list[tuple[str, list[str]]] | None = None) -> dict[str, Any]:
     name = "project"
     data = load_config(ROOT, name)
     st.subheader("Preprocesador y geometria CATIA")
     st.caption(str(config_path(ROOT, name)))
-    tab_labels = [label for label, _ in PROJECT_TAB_LAYOUT]
+    layout = tab_layout or PROJECT_TAB_LAYOUT
+    tab_labels = [label for label, _ in layout]
     selected_label = st.segmented_control(
         "Seccion de geometria",
         tab_labels,
@@ -1602,7 +1612,7 @@ def project_config_editor() -> dict[str, Any]:
         key=revisioned_widget_key("project-config-section"),
         label_visibility="collapsed",
     ) or tab_labels[0]
-    selected_sections = dict(PROJECT_TAB_LAYOUT)[selected_label]
+    selected_sections = dict(layout)[selected_label]
     st.caption(PROJECT_TAB_INTROS.get(selected_label, ""))
     system_data = load_config(ROOT, "catia_system")
     suspension_data = dict(system_data.get("suspension") or {})
@@ -1653,6 +1663,174 @@ def project_config_editor() -> dict[str, Any]:
         if backup:
             st.caption(f"Copia anterior: {backup}")
     return edited
+
+
+def geometry_2d_workspace_editor(selected_case_manifest: dict[str, Any]) -> None:
+    """Edit the exact profile/TE/crossport DTO consumed by preprocessing."""
+    project = load_config(ROOT, "project")
+    inlet = load_config(ROOT, "inlet_design")
+    catalogue = load_profile_catalog(ROOT)
+    entries = list(catalogue.get("profiles") or [])
+    by_path = {str(item.get("source_path")): item for item in entries if item.get("source_path")}
+    profile_paths = sorted(by_path)
+    profiles = dict(project.get("profile_inputs") or {})
+    airfoil = dict(project.get("airfoil_processing") or {})
+    crossports = dict(project.get("crossports") or {})
+
+    st.subheader("Perfil, trailing edge y crossports")
+    st.caption(
+        "La vista previa y el preprocesador resuelven el mismo DTO. Los perfiles de validacion se muestran "
+        "para trazabilidad y no se sustituyen al importar un perfil nuevo."
+    )
+    uploaded = st.file_uploader("Importar coordenadas al catalogo", type=["dat", "csv", "txt"])
+    if uploaded is not None and st.button("Validar e importar perfil", type="primary"):
+        try:
+            entry = import_profile(
+                ROOT,
+                uploaded.name,
+                uploaded.getvalue(),
+                work_case_id=str(selected_case_manifest.get("work_case_id") or "") or None,
+            )
+            st.success(f"Perfil importado sin modificar el original: {entry['display_name']}")
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
+
+    def profile_index(value: str) -> int:
+        return profile_paths.index(value) if value in profile_paths else 0
+
+    if not profile_paths:
+        st.error("No hay perfiles validos en el catalogo del proyecto.")
+        return
+    current_dto = geometry_dto(project, inlet)
+    holes = list((current_dto.get("crossports") or {}).get("holes") or [])
+    hole_rows = [{
+        "x/c": item.get("x"),
+        "shape": item.get("shape"),
+        "orientation": item.get("orientation"),
+        "radius/c": item.get("radius_chord_frac"),
+        "width/c": item.get("width_chord_frac"),
+        "height/local thickness": item.get("height_thickness_frac"),
+        "z fraction (optional)": item.get("z_center_fraction"),
+        "points": item.get("points_per_loop"),
+    } for item in holes]
+
+    with st.form("geometry-2d-dto-form"):
+        cols = st.columns(2)
+        main_profile = cols[0].selectbox(
+            "Perfil abierto en uso", profile_paths,
+            index=profile_index(str(profiles.get("main_profile", profile_paths[0]))),
+            format_func=lambda value: str(by_path[value].get("display_name") or value),
+        )
+        base_profile = cols[1].selectbox(
+            "Perfil base cerrado", profile_paths,
+            index=profile_index(str(inlet.get("base_profile") or profiles.get("reference_uncut_profile", profile_paths[0]))),
+            format_func=lambda value: str(by_path[value].get("display_name") or value),
+        )
+        validation_cols = st.columns(4)
+        validation_cols[0].text_input("Validacion LS open", value=str(profiles.get("main_profile", "")), disabled=True)
+        validation_cols[1].text_input("Validacion LS closed", value=str(profiles.get("reference_uncut_profile", "")), disabled=True)
+        validation_cols[2].text_input("Ross standard", value=str(profiles.get("ross_standard_profile", "")), disabled=True)
+        validation_cols[3].text_input("Ross minimum", value=str(profiles.get("ross_minimum_profile", "")), disabled=True)
+
+        st.markdown("**Trailing edge**")
+        te_modes = list(TE_LABELS)
+        te_mode = st.segmented_control(
+            "Tratamiento TE", te_modes,
+            default=str(airfoil.get("te_closure_mode", "rounded")),
+            format_func=lambda value: TE_LABELS[value],
+        ) or "rounded"
+        te_cols = st.columns(3)
+        te_points = te_cols[0].number_input("Puntos de redondeo", min_value=5, value=int(airfoil.get("te_rounding_points", 20)), disabled=te_mode != "rounded")
+        thin_solid = te_cols[1].toggle("Tela como solido fino", value=bool(airfoil.get("model_zero_thickness_as_thin_solid", True)))
+        fabric_thickness = te_cols[2].number_input("Espesor tela / cuerda", min_value=1e-9, value=float(airfoil.get("fabric_thickness_chord", 1e-5)), format="%.6g", disabled=not thin_solid)
+        with st.expander("Salvaguardas TE avanzadas", expanded=False):
+            sharp_cols = st.columns(3)
+            sharp_max = sharp_cols[0].number_input("Interseccion sharp maxima x/c", value=float(airfoil.get("sharp_te_intersection_max_x_c", 1.08)), format="%.6g")
+            sharp_gap = sharp_cols[1].number_input("Gap seguro sharp / cuerda", min_value=1e-9, value=float(airfoil.get("sharp_te_safe_gap_chord", 1e-5)), format="%.6g")
+            min_distance = sharp_cols[2].number_input("Distancia minima entre puntos [mm]", min_value=0.0, value=float(airfoil.get("min_spline_point_distance_mm", 0.01)), format="%.6g")
+
+        st.markdown("**Crossports**")
+        general = st.columns(4)
+        enabled = general[0].toggle("Activar", value=bool(crossports.get("enable_crossports", True)))
+        apply_to = general[1].selectbox("Apply to", ["all_internal", "loaded", "nonloaded"], index=["all_internal", "loaded", "nonloaded"].index(str(crossports.get("apply_to", "all_internal"))) if str(crossports.get("apply_to", "all_internal")) in ["all_internal", "loaded", "nonloaded"] else 0)
+        centerline = general[2].selectbox("Centerline mode", ["chordline", "profile_midline"], index=["chordline", "profile_midline"].index(str(crossports.get("centerline_mode", "chordline"))) if str(crossports.get("centerline_mode", "chordline")) in ["chordline", "profile_midline"] else 0)
+        clearance = general[3].number_input("Edge clearance / local thickness", min_value=0.0, max_value=0.49, value=float(crossports.get("edge_clearance_fraction_local_thickness", 0.22)), format="%.5g")
+        with st.expander("Generador de distribucion", expanded=False):
+            generator = st.columns(4)
+            position_mode = generator[0].selectbox("Modo", ["standard_3", "equidistant", "custom"], index=["standard_3", "equidistant", "custom"].index(str(crossports.get("position_mode", "standard_3"))))
+            count = generator[1].number_input("Numero de agujeros", min_value=1, max_value=20, value=int(crossports.get("count", 3)))
+            x_start = generator[2].number_input("X start", min_value=0.02, max_value=0.98, value=float(crossports.get("x_start_chord", 0.25)), format="%.5g")
+            x_end = generator[3].number_input("X end", min_value=0.02, max_value=0.98, value=float(crossports.get("x_end_chord", 0.70)), format="%.5g")
+            st.caption("El generador conserva la distribucion reproducible; la tabla inferior es el DTO explicito ejecutado por el backend.")
+        edited_holes = st.data_editor(
+            pd.DataFrame(hole_rows), num_rows="dynamic", width="stretch", hide_index=True,
+            column_config={
+                "shape": st.column_config.SelectboxColumn(options=["circle", "ellipse"], required=True),
+                "orientation": st.column_config.SelectboxColumn(options=["horizontal", "vertical", "auto"], required=True),
+                "points": st.column_config.NumberColumn(min_value=12, step=1, required=True),
+            },
+        )
+        save_geometry = st.form_submit_button("Guardar configuracion 2D", type="primary")
+    if save_geometry:
+        custom_specs = []
+        for index, row in edited_holes.iterrows():
+            if pd.isna(row.get("x/c")):
+                continue
+            spec = {
+                "hole_id": f"crossport-{index + 1}", "x": float(row["x/c"]),
+                "shape": str(row.get("shape") or "ellipse"),
+                "orientation": str(row.get("orientation") or "horizontal"),
+                "width_chord_frac": float(row.get("width/c") or 0.08),
+                "height_thickness_frac": float(row.get("height/local thickness") or 0.15),
+                "points_per_loop": int(row.get("points") or 32),
+            }
+            if not pd.isna(row.get("radius/c")):
+                spec["radius_chord_frac"] = float(row["radius/c"])
+            if not pd.isna(row.get("z fraction (optional)")):
+                spec["z_center_fraction"] = float(row["z fraction (optional)"])
+            custom_specs.append(spec)
+        profiles["main_profile"] = main_profile
+        profiles["reference_uncut_profile"] = base_profile
+        airfoil.update({
+            "te_closure_mode": te_mode, "te_rounding_points": int(te_points),
+            "model_zero_thickness_as_thin_solid": bool(thin_solid),
+            "fabric_thickness_chord": float(fabric_thickness),
+            "sharp_te_intersection_max_x_c": float(sharp_max),
+            "sharp_te_safe_gap_chord": float(sharp_gap),
+            "min_spline_point_distance_mm": float(min_distance),
+        })
+        crossports.update({
+            "enable_crossports": bool(enabled), "apply_to": apply_to,
+            "centerline_mode": centerline,
+            "edge_clearance_fraction_local_thickness": float(clearance),
+            "position_mode": position_mode, "count": int(count),
+            "x_start_chord": float(x_start), "x_end_chord": float(x_end),
+            "custom_specs": custom_specs,
+        })
+        project.update({"profile_inputs": profiles, "airfoil_processing": airfoil, "crossports": crossports})
+        inlet["base_profile"] = base_profile
+        save_config(ROOT, "project", project)
+        save_config(ROOT, "inlet_design", inlet)
+        st.success("Geometria 2D guardada como una nueva revision pendiente del caso activo.")
+        st.rerun()
+
+    dto = geometry_dto(project, inlet)
+    st.markdown("**Vista previa ejecutable**")
+    preview = preview_series(ROOT, dto)
+    chart_rows = []
+    for name, rows in preview.items():
+        chart_rows.extend({"x/c": row["x"], "z/c": row["z"], "serie": name} for row in rows)
+    if chart_rows:
+        st.line_chart(pd.DataFrame(chart_rows), x="x/c", y="z/c", color="serie", height=360)
+    st.caption(
+        f"TE: {dto['trailing_edge']['label']} | crossports: {len(dto['crossports']['holes'])} | "
+        f"centerline: {dto['crossports']['centerline_mode']}"
+    )
+    with st.expander("Project Paths", expanded=False):
+        render_records_table([{"nombre": key, "ruta": value} for key, value in (project.get("project_paths") or {}).items()])
+    with st.expander("DTO exacto de geometria", expanded=False):
+        st.json(dto)
 
 
 def inlet_design_editor() -> None:
@@ -2874,6 +3052,7 @@ with st.sidebar:
 
 page_names = [
     "Estado",
+    "Caso de trabajo",
     "Geometria",
     "Caso CFD",
     "Malla",
@@ -2906,6 +3085,16 @@ if active_page in {"Caso OpenFOAM", "Ejecucion", "Postproceso"}:
 reload_notice = st.session_state.pop("_configuration_reload_notice", None)
 if reload_notice:
     st.success(str(reload_notice))
+
+workflow_pages_requiring_case = {
+    "Geometria", "Caso CFD", "Malla", "Caso OpenFOAM", "Ejecucion", "Postproceso",
+}
+workflow_case_ready = library_case_selection in saved_case_map
+if active_page in workflow_pages_requiring_case and not workflow_case_ready:
+    st.warning(
+        "Selecciona un Caso de trabajo en Contexto activo o crea uno desde la barra lateral. "
+        "El flujo normal permanece bloqueado para evitar configuraciones y resultados sin identidad persistente."
+    )
 
 if active_page == "Estado":
     st.info(TAB_INTROS["Estado"])
@@ -3019,11 +3208,60 @@ Los botones inician trabajos en segundo plano. La consola y **Archivos y logs** 
             st.error(str(exc))
     workflow_safeguards_editor()
 
-if active_page == "Geometria":
+if active_page == "Caso de trabajo":
+    st.info(TAB_INTROS["Caso de trabajo"])
+    if not workflow_case_ready:
+        st.subheader("Selecciona o crea un caso")
+        st.caption(
+            "La seleccion activa habilita Geometria, Caso CFD, Malla, OpenFOAM, Ejecucion y Postproceso. "
+            "Validation & Convergence Lab conserva su workspace independiente."
+        )
+    else:
+        manifest = saved_case_map[library_case_selection]
+        header = st.columns(4)
+        header[0].metric("Caso", str(manifest.get("case_name") or library_case_selection))
+        header[1].metric("Schema", str(manifest.get("schema_version", "-")))
+        header[2].metric("Perfil", str(manifest.get("variant") or manifest.get("main_profile") or "-"))
+        header[3].metric("Revisado", str(manifest.get("updated_at") or "-"))
+        st.caption(f"UUID: {manifest.get('work_case_id', '-')}")
+        rows = []
+        for stage, stage_entry in (manifest.get("stages") or {}).items():
+            for package_name, package in manifest_stage_packages(manifest, stage).items():
+                approval = dict(package.get("approval") or {})
+                rows.append({
+                    "etapa": stage,
+                    "paquete": package_name,
+                    "revision": package.get("revision_id"),
+                    "compatibilidad": (package.get("compatibility") or {}).get("status", "unknown"),
+                    "aprobacion": approval.get("status", "pending"),
+                    "dependencias": len(package.get("dependencies") or []),
+                    "activo": package_name == str(stage_entry.get("active_package") or ""),
+                })
+        if rows:
+            render_records_table(rows, max_rows=100)
+        else:
+            st.info("El caso aun no contiene paquetes. Comienza por Geometria.")
+        with st.expander("Manifest versionado", expanded=False):
+            st.json(manifest)
+
+if active_page == "Geometria" and workflow_case_ready:
     st.info(TAB_INTROS["Geometria"])
-    inlet_design_editor()
-    project_config_editor()
-    catia_system_config_editor()
+    geometry_view = st.segmented_control(
+        "Dimension de geometria", ["Geometria 2D", "Geometria 3D"],
+        default="Geometria 2D", key=revisioned_widget_key("geometry-dimension"),
+        label_visibility="collapsed",
+    ) or "Geometria 2D"
+    if geometry_view == "Geometria 2D":
+        inlet_design_editor()
+        geometry_2d_workspace_editor(saved_case_map[library_case_selection])
+    else:
+        project_config_editor([
+            ("Canopy", ["canopy_geometry", "rib_and_cell_geometry"]),
+            ("Tejido y lineas", ["fabric_and_lines"]),
+            ("CATIA", ["catia_generation", "catia_exports", "optional_modules"]),
+            ("CFD 2D y plots", ["cfd_2d_exports", "cfd_2d", "debug_plots"]),
+        ])
+        catia_system_config_editor()
     cols = st.columns([1, 4])
     if cols[0].button("Ejecutar preprocesador", type="primary"):
         start_job("preprocess", preprocessor_command(ROOT))
@@ -3065,7 +3303,7 @@ if active_page == "Geometria":
     preview_paths = latest_files(ROOT / "CFD_2D/CFD_2D_inputs", ["previews/*.png", "geometry/*/*preview*.png"], 8)
     show_images(preview_paths, 3)
 
-if active_page == "Caso CFD":
+if active_page == "Caso CFD" and workflow_case_ready:
     st.info(TAB_INTROS["Caso CFD"])
     st.subheader("Perfil CFD del caso")
     profile_columns = st.columns([3, 1])
@@ -3227,7 +3465,7 @@ if active_page == "Caso CFD":
     show_json_report(ROOT / "CFD_2D/CFD_2D_inputs/case_package" / variant / "manifest.json", "Manifest de geometria")
     show_json_report(ROOT / "CFD_2D/CFD_2D_inputs/case_package" / variant / "mesh_input_contract.json", "Contrato de entrada de malla")
 
-if active_page == "Malla":
+if active_page == "Malla" and workflow_case_ready:
     st.info(TAB_INTROS["Malla"])
     mesh_config = load_config(ROOT, "mesh")
     for key, value in MESH_UI_DEFAULTS.items():
@@ -3448,7 +3686,7 @@ if active_page == "Malla":
         alpha,
         library_case_selection,
     )
-if active_page == "Caso OpenFOAM":
+if active_page == "Caso OpenFOAM" and workflow_case_ready:
     st.info(TAB_INTROS["Caso OpenFOAM"])
     st.caption(
         "La aplicacion usa automaticamente la version mas reciente del esquema interno. "
@@ -3510,7 +3748,7 @@ if active_page == "Caso OpenFOAM":
     st.caption(str(cdir))
     show_json_report(cdir / "case_config.json", "Descripcion completa del caso")
 
-if active_page == "Ejecucion":
+if active_page == "Ejecucion" and workflow_case_ready:
     st.info(TAB_INTROS["Ejecucion"])
     solver_cfg = load_config(ROOT, "solver")
     execution_cfg = workflow.get("execution", {})
@@ -4072,7 +4310,7 @@ if active_page == "Ejecucion":
         3,
     )
 
-if active_page == "Postproceso":
+if active_page == "Postproceso" and workflow_case_ready:
     st.info(TAB_INTROS["Postproceso"])
     post_cfg = workflow.get("postprocess", {})
     solver_cfg = load_config(ROOT, "solver")

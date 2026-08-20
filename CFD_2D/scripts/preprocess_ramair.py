@@ -57,6 +57,7 @@ if _ROOT_SCRIPT_HELPER_DIR.exists() and str(_ROOT_SCRIPT_HELPER_DIR) not in sys.
     sys.path.insert(0, str(_ROOT_SCRIPT_HELPER_DIR))
 
 from ramair_profile_utils import read_and_canonicalize_profile_2d
+from ramair_geometry_workspace import crossport_specs
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -950,35 +951,19 @@ def _crossport_x_positions(cfg: Config) -> list[float]:
 
 def _base_crossport_specs(cfg: Config) -> list[dict]:
     """Return user-facing crossport specs with defaults expanded."""
-    if cfg.crossport_custom_specs:
-        specs = [dict(item) for item in cfg.crossport_custom_specs]
-    else:
-        specs = []
-        for x in _crossport_x_positions(cfg):
-            specs.append(
-                {
-                    "x": float(x),
-                    "shape": cfg.crossport_shape,
-                    "orientation": cfg.crossport_ellipse_orientation,
-                    "width_chord_frac": cfg.crossport_width_fraction_chord,
-                    "height_thickness_frac": cfg.crossport_height_fraction_local_thickness,
-                    "z_center_fraction": 0.5,
-                }
-            )
-
-    expanded = []
-    for i, raw in enumerate(specs, start=1):
-        d = dict(raw)
-        if "x" not in d:
-            raise ValueError(f"CROSSPORT_CUSTOM_SPECS item {i} is missing required key 'x'.")
-        d["x"] = float(d["x"])
-        d["shape"] = str(d.get("shape", cfg.crossport_shape)).lower().strip()
-        d["orientation"] = str(d.get("orientation", cfg.crossport_ellipse_orientation)).lower().strip()
-        d["width_chord_frac"] = float(d.get("width_chord_frac", cfg.crossport_width_fraction_chord))
-        d["height_thickness_frac"] = float(d.get("height_thickness_frac", cfg.crossport_height_fraction_local_thickness))
-        d["z_center_fraction"] = float(d.get("z_center_fraction", 0.5))
-        expanded.append(d)
-    return expanded
+    return crossport_specs({
+        "custom_specs": cfg.crossport_custom_specs,
+        "position_mode": cfg.crossport_position_mode,
+        "count": cfg.crossport_count,
+        "x_positions_chord": cfg.crossport_x_positions_chord,
+        "x_start_chord": cfg.crossport_x_start_chord,
+        "x_end_chord": cfg.crossport_x_end_chord,
+        "shape": cfg.crossport_shape,
+        "ellipse_orientation": cfg.crossport_ellipse_orientation,
+        "width_fraction_chord": cfg.crossport_width_fraction_chord,
+        "height_fraction_local_thickness": cfg.crossport_height_fraction_local_thickness,
+        "points_per_loop": cfg.crossport_points_per_loop,
+    })
 
 
 def _size_for_crossport(spec: dict, cfg: Config, local_thickness: float) -> tuple[float, float, str, str]:
@@ -989,7 +974,8 @@ def _size_for_crossport(spec: dict, cfg: Config, local_thickness: float) -> tupl
     if orientation not in {"horizontal", "vertical", "auto"}:
         raise ValueError(f"Crossport orientation must be 'horizontal', 'vertical' or 'auto', got {orientation!r}.")
 
-    width = max(1e-6, float(spec["width_chord_frac"]))
+    radius = spec.get("radius_chord_frac")
+    width = max(1e-6, 2.0 * float(radius) if radius is not None else float(spec["width_chord_frac"]))
     height = max(1e-6, float(spec["height_thickness_frac"]) * local_thickness)
 
     clearance = max(0.0, cfg.crossport_edge_clearance_fraction_local_thickness) * local_thickness
@@ -997,7 +983,7 @@ def _size_for_crossport(spec: dict, cfg: Config, local_thickness: float) -> tupl
     height = min(height, admissible_height)
 
     if shape == "circle":
-        diameter = min(width, height)
+        diameter = min(width, admissible_height)
         return diameter, diameter, shape, "circle"
 
     # For an ellipse, horizontal/vertical define which axis should be larger.
@@ -1046,7 +1032,6 @@ def make_crossport_table(cfg: Config, upper: pd.DataFrame, lower: pd.DataFrame) 
     if not cfg.enable_crossports:
         return pd.DataFrame(columns=columns)
 
-    npts = max(12, int(cfg.crossport_points_per_loop))
     specs = _base_crossport_specs(cfg)
     rows = []
     loop_id = 1
@@ -1064,8 +1049,16 @@ def make_crossport_table(cfg: Config, upper: pd.DataFrame, lower: pd.DataFrame) 
         if local_thickness <= 1e-6:
             raise ValueError(f"Crossport at x={x0:.4f} has nearly zero local profile thickness.")
 
-        zfrac = max(0.0, min(1.0, float(spec.get("z_center_fraction", 0.5))))
-        zc = z_low + zfrac * local_thickness
+        requested_zfrac = spec.get("z_center_fraction")
+        if requested_zfrac is not None:
+            zfrac = max(0.0, min(1.0, float(requested_zfrac)))
+            zc = z_low + zfrac * local_thickness
+        elif str(cfg.crossport_centerline_mode).lower().strip() == "chordline":
+            zc = min(z_high, max(z_low, 0.0))
+            zfrac = (zc - z_low) / local_thickness
+        else:
+            zfrac = 0.5
+            zc = z_low + zfrac * local_thickness
 
         width, height, shape, orientation = _size_for_crossport(spec, cfg, local_thickness)
         rx = 0.5 * width
@@ -1086,6 +1079,7 @@ def make_crossport_table(cfg: Config, upper: pd.DataFrame, lower: pd.DataFrame) 
                 rz = 0.5 * max(1e-6, local_thickness * (1.0 - 2.0 * cfg.crossport_edge_clearance_fraction_local_thickness))
                 height = 2.0 * rz
 
+        npts = max(12, int(spec.get("points_per_loop", cfg.crossport_points_per_loop)))
         for k in range(npts):
             a = 2.0 * math.pi * k / npts
             rows.append(

@@ -80,7 +80,7 @@
     "edge_clearance_fraction_local_thickness": 0.22,
     "points_per_loop": 32,
     "apply_to": "all_internal",
-    "centerline_mode": "profile_midline",
+    "centerline_mode": "chordline",
     "custom_specs": []
   },
   "fabric_and_lines": {

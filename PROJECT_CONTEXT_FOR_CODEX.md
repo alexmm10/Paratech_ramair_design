@@ -6,6 +6,8 @@ Validation Lab schema: 10
 Solver configuration schema: 14  
 Work Case manifest schema: 3
 Active workspace schema: 4
+Geometry DTO schema: 1
+Profile catalogue schema: 1
 Canonical Windows source: `C:\Users\alejm\Desktop\PRACTICAS_INVICSA\3D design\DESIGN APP`  
 Canonical WSL runtime: `/home/alejm/ramair_cfd/DESIGN_APP`
 
@@ -42,6 +44,13 @@ future work and must not be inferred from diagnostic placeholders.
 
 The UI orchestrates. Geometry, meshing, solver and postprocess algorithms live
 under `CFD_2D/scripts`.
+
+The normal workflow requires a selected persistent Work Case. `Estado`, `Caso
+de trabajo`, `Validation & Convergence Lab` and file/log inspection remain
+available without one. Geometry uses `ramair_geometry_workspace.py` as the
+shared schema-1 DTO/catalogue boundary: imported sources retain their original
+bytes under `Airfoil Profiles/Imported/<uuid>/original`, and crossport geometry
+is expanded into explicit per-hole records before preprocessing.
 
 ## 4. Data ownership
 

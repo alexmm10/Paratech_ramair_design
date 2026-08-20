@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+### UI-GEOMETRY: Work Case gate and shared geometry DTO
+
+- Added a dedicated Work Case page and blocked the normal geometry-to-results
+  workflow until a persistent Work Case is selected. Validation Lab remains
+  isolated and available without changing its scientific workspaces.
+- Split Geometry into explicit 2-D and 3-D views. The 2-D view now groups inlet
+  design, profile selection/import, TE treatment, parameterized crossports and
+  an actionable preview; 3-D retains canopy, CATIA, fabric and system controls
+  without duplicating profile, TE or crossport inputs.
+- Added a persistent profile catalogue with UUID, SHA-256, provenance and
+  validation metadata. Imported coordinates preserve their original bytes and
+  do not replace protected validation profiles automatically.
+- Added a shared geometry DTO used by the UI and crossport preprocessor. TE
+  `straight_gap` is displayed as `No modification`; crossports support explicit
+  per-hole shape, orientation, size and point count while retaining X-start,
+  X-end and edge-clearance generation controls.
+- Implemented the selectable chordline/profile-midline centerline behavior in
+  both supported preprocessor entry points. Chordline is the default for new
+  project configurations; existing saved configurations retain their value.
+
 ## [2026-08-20]
 
 ### Work Case architecture: manifest schema 3 / active workspace schema 4
