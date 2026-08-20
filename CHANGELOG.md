@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### T13 BUG-URANS-REVIEW / BUG-VALIDATION-PLOTS / startup fragment
+
+- Fixed backward-history validation to use OpenFOAM's exact persisted
+  `uniform/time value` instead of rounded directory labels. The historical
+  Closed Fine run was reclassified metadata-only from orchestration error to
+  recoverable phase E; no solver was launched and all case-field hashes stayed
+  identical.
+- Extended URANS review discovery to the real
+  `postprocess/URANS/forceCoeffs_raw.csv` layout. The preserved data is now
+  classified honestly as partial because stage E has insufficient samples,
+  rather than being reported missing.
+- Reproduced repeated validation-point publication in regression tests. It is
+  idempotent and both lift and drag plots remain valid, so production plot code
+  was not changed.
+- Removed the full-app rerun issued from the two-second job-console fragment.
+  Terminal state is read from disk on subsequent fragment ticks, avoiding the
+  stale-fragment-ID message during app startup/completion transitions.
+
 ### T12 performance: fixed-numerics CPU/MPI/GPU decision
 
 - Added a bounded 1/2/4/8-rank benchmark that works only on temporary case

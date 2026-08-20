@@ -775,9 +775,15 @@ def test_validation_update_is_scoped_to_selected_work_case(tmp_path: Path) -> No
 
     output = update_active_workspace_validation(tmp_path, "reference_uncut", 4.0)
 
+    # Re-publishing the same real point is idempotent and keeps both plots.
+    repeated = update_active_workspace_validation(tmp_path, "reference_uncut", 4.0)
+
     assert output == workspace / "Validation"
+    assert repeated == output
     points = pd.read_csv(output / "ramair_validation_points.csv")
     assert list(points["alpha_deg"]) == [4.0]
+    assert (output / "LS1_0417_CL_alpha_validation.png").is_file()
+    assert (output / "LS1_0417_CD_CL_validation.png").is_file()
     assert not (tmp_path / "CFD_2D/results/validation").exists()
 
 

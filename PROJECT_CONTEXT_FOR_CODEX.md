@@ -239,6 +239,20 @@ No CUDA device or `nvcc` is visible. The installed OpenFOAM 14 solver and Gmsh
 GPU integration is rejected until a supported backend demonstrates a measured
 benefit without changing numerics; Docker remains non-production.
 
+### Historical phase-D recovery
+
+The Closed Fine `deltaT=6.25e-5` run reached phase D normally. Its last three
+folder labels are rounded, but their OpenFOAM `uniform/time` values are exactly
+`0.39604688000002819`, `0.396109380000028211` and
+`0.396171880000028231`. The staged runner now uses these persisted values and
+has reclassified the case metadata-only to `PAUSED`, next phase E. All fields
+and the original `forceCoeffs_raw.csv` retained identical aggregate hashes.
+
+URANS review searches the canonical `postprocess/URANS` raw CSV layout. The
+historical run is `URANS_PARTIAL` because phase E has not yet accumulated 16
+samples per signal; it is not a missing-data failure. Repeated validation-point
+publication remains idempotent and both validation plots pass regression.
+
 ### Canonical URANS identity
 
 Exactly one mutable production case exists for each structured key:

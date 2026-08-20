@@ -57,6 +57,15 @@ def test_application_sources_are_valid_python() -> None:
         ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
+def test_auto_fragment_does_not_request_a_full_rerun_on_job_completion() -> None:
+    source = (APP_DIR / "ramair_cfd2d_app.py").read_text(encoding="utf-8")
+    job_console = source.split("def job_console()", 1)[1].split(
+        "def solver_live_monitor_panel()", 1
+    )[0]
+    assert "st.rerun()" not in job_console
+    assert "does not exist" in job_console
+
+
 def test_project_root_and_stage_commands_use_existing_scripts() -> None:
     assert find_project_root(APP_DIR) == ROOT.resolve()
     case_command = case_builder_command(

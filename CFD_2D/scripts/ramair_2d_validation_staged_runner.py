@@ -87,12 +87,20 @@ def _latest_time_index(case: Path) -> tuple[Decimal, int] | None:
             if value == 0:
                 return value, 0
             continue
+        text = time_file.read_text(encoding="utf-8", errors="replace")
         match = re.search(
             r"(?m)^\s*index\s+([0-9]+)\s*;",
-            time_file.read_text(encoding="utf-8", errors="replace"),
+            text,
         )
         if match:
-            return value, int(match.group(1))
+            exact = re.search(
+                r"(?m)^\s*value\s+([-+0-9.eE]+)\s*;",
+                text,
+            )
+            return (
+                Decimal(exact.group(1)) if exact else value,
+                int(match.group(1)),
+            )
     return None
 
 
@@ -260,7 +268,11 @@ def _phase_complete(row: dict[str, Any]) -> bool:
 def _history_evidence(case: Path, target_dt_s: float) -> dict[str, Any]:
     base_history = complete_time_history(case)
     available = list(base_history.get("times_s") or [])
-    latest_path = case / f"{available[-1]:g}" if available else None
+    direct_records = list(base_history.get("direct_records") or [])
+    latest_path = (
+        Path(str(direct_records[-1]["directory"]))
+        if direct_records else None
+    )
     required_fields = ["U", "p", "nuTilda"]
     if latest_path is not None:
         for optional in ("phi", "nut"):
@@ -562,7 +574,7 @@ def _stages_for_mode(
 
 
 def repair_legacy_classification(run_root: Path) -> dict[str, Any]:
-    """Repair a proven normal-SIGFPE false positive without running a solver."""
+    """Repair proven legacy false positives without running a solver."""
     run_root = Path(run_root).resolve()
     manifest = read_json(run_root / "case_manifest.json", {}) or {}
     plan = read_json(run_root / "stage_plan.json", {}) or {}
@@ -572,12 +584,74 @@ def repair_legacy_classification(run_root: Path) -> dict[str, Any]:
     if not stages:
         return manifest
     journal = _journal(run_root, case_id)
-    if not journal.get("classification_corrections"):
-        return manifest
     restart = restart_time_evidence(run_root / "case")
     if not restart.get("valid"):
         return manifest
     start_index, _ = _resume_cursor(run_root / "case", stages, journal)
+    temporal_false_positive = (
+        str(manifest.get("terminal_reason") or "") == "ORCHESTRATION_ERROR"
+        and "TEMPORAL_HISTORY_MISSING" in str(manifest.get("primary_error") or "")
+        and start_index < len(stages)
+        and str(stages[start_index].get("scheme") or "").lower() == "backward"
+    )
+    if temporal_false_positive:
+        history = _history_evidence(
+            run_root / "case",
+            float(stages[start_index]["dt_s"]),
+        )
+        if history.get("valid"):
+            original = {
+                "execution_outcome": manifest.get("execution_outcome"),
+                "restartable": manifest.get("restartable"),
+                "current_phase": manifest.get("current_phase"),
+                "terminal_reason": manifest.get("terminal_reason"),
+                "primary_error": manifest.get("primary_error"),
+            }
+            correction = {
+                "reason": "ROUNDED_DIRECTORY_LABELS_REPLACED_BY_PERSISTED_OPENFOAM_TIME",
+                "corrected_at": utc_stamp(),
+                "original": original,
+                "history_evidence": history,
+                "next_phase": str(stages[start_index]["stage"]),
+            }
+            corrections = list(journal.get("classification_corrections") or [])
+            corrections.append(correction)
+            journal["classification_corrections"] = corrections
+            journal["updated_at"] = utc_stamp()
+            write_json_atomic(run_root / "stage_journal.json", journal)
+            manifest.update(
+                execution_outcome=ExecutionOutcome.PAUSED.value,
+                restartable=True,
+                current_phase=str(stages[start_index]["stage"]),
+                current_time_s=restart.get("time_s"),
+                terminal_reason="TEMPORAL_HISTORY_RECOVERED",
+                primary_error=None,
+                classification_correction=correction,
+                updated_at=utc_stamp(),
+            )
+            write_json_atomic(run_root / "case_manifest.json", manifest)
+            write_json_atomic(
+                run_root / "classification_correction.json",
+                {
+                    "schema_version": 1,
+                    "case_id": case_id,
+                    "status": "RECLASSIFIED_WITHOUT_SOLVER_EXECUTION",
+                    "restart_time": restart,
+                    **correction,
+                },
+            )
+            transition_execution_state(
+                run_root / "case",
+                CanonicalExecutionState.PAUSED_RECOVERABLE,
+                phase=str(stages[start_index]["stage"]),
+                run_id=case_id,
+                reason="temporal_history_recovered_from_uniform_time",
+                evidence=history,
+                force=bool(load_execution_state(run_root / "case")),
+            )
+            return manifest
+    if not journal.get("classification_corrections"):
+        return manifest
     return _persist_classification_repair(
         run_root,
         manifest,

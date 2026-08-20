@@ -173,6 +173,8 @@ def review_run(run_root: Path) -> dict[str, Any]:
     metadata = read_json(run_root / "case_metadata.json", {}) or {}
     plan = read_json(run_root / "stage_plan.json", {}) or {}
     candidates = (
+        run_root / "postprocess/URANS/forceCoeffs_raw.csv",
+        run_root / "postprocess/forceCoeffs_raw.csv",
         run_root / "postprocess/force_coeffs.csv",
         run_root / "force_coeffs.csv",
         run_root / "case/postProcessing/forceCoeffs.csv",

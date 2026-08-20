@@ -44,8 +44,10 @@ from ramair_2d_urans_cases import (  # noqa: E402
     inspect_canonical_case,
     restart_canonical_case,
     restart_time_evidence,
+    complete_time_history,
     write_case_manifest,
 )
+from ramair_2d_urans_review import review_run  # noqa: E402
 from ramair_2d_validation_report import _rans_scalar_change_records  # noqa: E402
 from ramair_2d_validation_schema9_migration import apply, preview  # noqa: E402
 from ramair_2d_validation_staged_runner import (  # noqa: E402
@@ -76,6 +78,23 @@ def write_time(case: Path, value: float, fields=("U", "p", "nuTilda")) -> None:
     target.mkdir(parents=True, exist_ok=True)
     for field in fields:
         (target / field).write_text("field\n", encoding="utf-8")
+
+
+def write_exact_time(
+    case: Path,
+    folder: str,
+    exact: str,
+    index: int,
+    fields=("U", "p", "nuTilda"),
+) -> None:
+    target = case / folder
+    (target / "uniform").mkdir(parents=True, exist_ok=True)
+    for field in fields:
+        (target / field).write_text(f"{field}-preserved\n", encoding="utf-8")
+    (target / "uniform/time").write_text(
+        f"value {exact};\nindex {index};\ndeltaT 6.25e-05;\n",
+        encoding="utf-8",
+    )
 
 
 def mesh_registry() -> dict[str, object]:
@@ -170,6 +189,90 @@ def test_legacy_sigfpe_false_positive_is_repaired_without_solver_run(tmp_path: P
     automatic = repair_legacy_classification(run_root)
     assert automatic["execution_outcome"] == "PAUSED"
     assert automatic["current_phase"] == "B"
+
+
+def test_rounded_time_directories_use_uniform_time_and_recover_phase_e(
+    tmp_path: Path,
+) -> None:
+    run_root = tmp_path / "closed_fine_a08_dt6p25em05"
+    case = run_root / "case"
+    write_exact_time(case, "0.396047", "0.39604688000002819", 6337)
+    write_exact_time(case, "0.396109", "0.396109380000028211", 6338)
+    write_exact_time(case, "0.396172", "0.396171880000028231", 6339)
+    before = {
+        str(path.relative_to(case)): path.read_bytes()
+        for path in case.rglob("*") if path.is_file()
+    }
+    phases = [
+        {"stage": "A", "scheme": "Euler", "dt_s": 1.5625e-5},
+        {"stage": "B", "scheme": "Euler", "dt_s": 3.125e-5},
+        {"stage": "C", "scheme": "Euler", "dt_s": 6.25e-5},
+        {"stage": "D", "scheme": "backward", "dt_s": 6.25e-5},
+        {"stage": "E", "scheme": "backward", "dt_s": 6.25e-5},
+    ]
+    write_json_atomic(run_root / "stage_plan.json", {"stages": phases})
+    write_json_atomic(run_root / "stage_journal.json", {
+        "schema_version": 2,
+        "phases": [
+            {
+                "phase": row["stage"],
+                "terminal_reason": "PHASE_TARGET_REACHED",
+                "returncode": 0,
+                "output_checkpoint": {"valid": True},
+            }
+            for row in phases[:4]
+        ],
+    })
+    write_json_atomic(run_root / "case_manifest.json", {
+        "case_id": run_root.name,
+        "startup_mode": "progressive",
+        "execution_outcome": "ERROR",
+        "restartable": True,
+        "current_phase": "D",
+        "terminal_reason": "ORCHESTRATION_ERROR",
+        "primary_error": (
+            "RuntimeError: TEMPORAL_HISTORY_MISSING: backward requires "
+            "the current state and two previous states"
+        ),
+    })
+
+    history = complete_time_history(case)
+    assert history["times_s"] == pytest.approx([
+        0.39604688000002819,
+        0.396109380000028211,
+        0.396171880000028231,
+    ])
+    assert _history_evidence(case, 6.25e-5)["valid"] is True
+    repaired = repair_legacy_classification(run_root)
+    assert repaired["execution_outcome"] == "PAUSED"
+    assert repaired["current_phase"] == "E"
+    assert repaired["terminal_reason"] == "TEMPORAL_HISTORY_RECOVERED"
+    assert (case / ".ramair_execution_state.json").is_file()
+    after = {
+        str(path.relative_to(case)): path.read_bytes()
+        for path in case.rglob("*")
+        if path.is_file() and path.name != ".ramair_execution_state.json"
+    }
+    assert after == before
+
+
+def test_urans_review_finds_existing_raw_csv_layout(tmp_path: Path) -> None:
+    run_root = tmp_path / "run"
+    source = run_root / "postprocess/URANS/forceCoeffs_raw.csv"
+    source.parent.mkdir(parents=True)
+    rows = ["Time,Cl,Cd,Cm"]
+    for index in range(128):
+        time_s = index * 0.01
+        rows.append(f"{time_s},{1 + 0.01 * (index % 4)},0.1,-0.05")
+    source.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    write_json_atomic(run_root / "case_metadata.json", {
+        "sampling_start_s": 0.0,
+        "sampling_end_s": 1.27,
+        "operating_condition": {"chord_m": 1.0, "velocity_m_s": 10.0},
+    })
+    report = review_run(run_root)
+    assert report["source_csv"] == str(source)
+    assert (run_root / "review.json").is_file()
 
 
 def test_phase_commands_use_each_planned_boundary_not_the_initial_restart_time() -> None:

@@ -30,6 +30,7 @@ from ramair_2d_study_registry import (
 CANONICAL_CASE_SCHEMA_VERSION = 1
 RUNTIME_SCHEMA_VERSION = 1
 REQUIRED_RESTART_FIELDS = ("U", "p", "nuTilda")
+NUMBER = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
 
 
 class CasePresence(str, Enum):
@@ -164,6 +165,21 @@ def _field_exists(time_dir: Path, field: str) -> bool:
     return (time_dir / field).is_file() or (time_dir / f"{field}.gz").is_file()
 
 
+def _persisted_time_value(path: Path, fallback: float) -> float:
+    """Resolve OpenFOAM's exact value instead of its rounded folder label."""
+    time_file = path / "uniform/time"
+    if not time_file.is_file():
+        return fallback
+    match = re.search(
+        rf"(?m)^\s*value\s+({NUMBER})\s*;",
+        time_file.read_text(encoding="utf-8", errors="replace"),
+    )
+    if not match:
+        return fallback
+    value = float(match.group(1))
+    return value if math.isfinite(value) and value > 0.0 else fallback
+
+
 def _time_directories(root: Path) -> dict[float, Path]:
     result: dict[float, Path] = {}
     if not root.is_dir():
@@ -176,7 +192,7 @@ def _time_directories(root: Path) -> dict[float, Path]:
         except ValueError:
             continue
         if math.isfinite(value) and value > 0.0:
-            result[value] = path
+            result[_persisted_time_value(path, value)] = path
     return result
 
 
@@ -227,6 +243,9 @@ def restart_time_evidence(
         "latest_common_processor_time_s": latest_common,
         "processor_count": len(processors),
         "processor_times": per_processor,
+        "latest_direct_directory": (
+            str(direct_valid[latest_direct]) if latest_direct is not None else None
+        ),
     }
 
 
@@ -238,11 +257,12 @@ def complete_time_history(
     """Return complete direct and common decomposed time histories."""
     case = Path(case).resolve()
     fields = tuple(str(value) for value in required_fields)
-    direct = sorted(
-        value
+    direct_map = {
+        value: path
         for value, path in _time_directories(case).items()
         if all(_field_exists(path, field) for field in fields)
-    )
+    }
+    direct = sorted(direct_map)
     processors = sorted(
         path for path in case.glob("processor[0-9]*") if path.is_dir()
     )
@@ -261,6 +281,14 @@ def complete_time_history(
         "source": "direct" if direct else "processor_common" if selected else None,
         "times_s": selected,
         "direct_times_s": direct,
+        "direct_records": [
+            {
+                "time_s": value,
+                "directory": str(direct_map[value]),
+                "directory_name": direct_map[value].name,
+            }
+            for value in direct
+        ],
         "common_processor_times_s": common_values,
         "processor_count": len(processors),
         "required_fields": list(fields),

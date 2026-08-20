@@ -2617,7 +2617,10 @@ def job_console() -> None:
             st.session_state["_pending_configuration_reload"] = action
         elif job.status == "COMPLETED" and isinstance(action, dict) and action.get("kind") == "select_case":
             st.session_state["_preferred_library_case_after_restore"] = action.get("case")
-        st.rerun()
+        # A full rerun from an auto-fragment invalidates the other queued
+        # fragment IDs and makes Streamlit log "fragment ... does not exist
+        # anymore". Both fragments observe the persisted terminal state on
+        # their next independent tick, so no full-app rerun is needed here.
     st.caption(command_text(job.command))
     st.code(tail_file(Path(job.log_path), 180) or "Esperando salida...", language="text")
     st.caption("Estado y log actualizados cada 2 segundos.")
