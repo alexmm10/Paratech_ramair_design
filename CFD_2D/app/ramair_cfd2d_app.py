@@ -303,7 +303,7 @@ CHOICES: dict[str, list[Any]] = {
     "suspension_line_cad_strategy": ["curve_with_properties", "catia_tubes_experimental", "mesh_cylinders_postprocess"],
     "domain": ["circular_50c", "ross_cgrid_like", "rectangular_balaji", "debug_20c"],
     "domain_type": ["circular_50c", "ross_cgrid_like", "rectangular_balaji", "debug_20c"],
-    "mesh_level": ["coarse", "medium", "fine"],
+    "mesh_level": ["coarse", "medium", "fine", "extra_fine"],
     "solver": ["auto", "foamRun", "pimpleFoam"],
     "solver_module": ["incompressibleFluid"],
     "stop_mode": ["writeNow", "nextWrite", "noWriteNow"],
@@ -3584,7 +3584,7 @@ if active_page == "Malla" and workflow_case_ready:
             "Partir de",
             base_sources,
             format_func=lambda value: {
-                "defaults": "Defaults revisables", "preset": "Preset Coarse/Medium/Fine",
+                "defaults": "Defaults revisables", "preset": "Preset Coarse/Medium/Fine/Extra Fine",
                 "saved_mesh": "Malla guardada seleccionada",
             }[value],
         )
@@ -3592,7 +3592,12 @@ if active_page == "Malla" and workflow_case_ready:
             "Preset inicial",
             CHOICES["mesh_level"],
             index=CHOICES["mesh_level"].index(level_origin) if level_origin in CHOICES["mesh_level"] else 2,
-            format_func=lambda value: {"coarse": "Coarse - 20 capas", "medium": "Medium - 40 capas", "fine": "Fine - 50 capas"}[value],
+            format_func=lambda value: {
+                "coarse": "Coarse - y+=1 - 50 capas",
+                "medium": "Medium - y+=2/3 - 50 capas",
+                "fine": "Fine - y+=4/9 - 50 capas",
+                "extra_fine": "Extra Fine - y+=8/27 - 75 capas",
+            }[value],
             help="Solo se aplican al pulsar el boton. Conservan forma/dimensiones del dominio y estandarizan geometria, TE y discretizacion tangencial.",
             disabled=base_source != "preset",
         )

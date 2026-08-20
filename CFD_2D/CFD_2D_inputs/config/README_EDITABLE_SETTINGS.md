@@ -12,6 +12,13 @@ The active WSL debug scripts pause before Gmsh and open this folder. Edit the WS
 
 ## Closed Reference
 
+The reviewed preset ladder uses target `y+=1, 2/3, 4/9, 8/27` for
+Coarse/Medium/Fine/Extra Fine. The first three request 50 layers and Extra Fine
+75; applying a preset creates an editable draft and does not approve or replace
+a saved mesh. When y+-derived height is enabled, the mesh report records the
+project, laminar and turbulent formula candidates and selects the smallest
+positive height.
+
 The standard closed-wall method is now:
 
 ```text

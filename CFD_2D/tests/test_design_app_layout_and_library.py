@@ -660,7 +660,8 @@ def test_mesh_levels_share_geometry_but_change_resolution() -> None:
         "open_lip_transfinite_min_nodes",
     ):
         assert coarse[key] == medium[key] == fine[key]
-    assert [coarse["closed_boundary_layer_layers"], medium["closed_boundary_layer_layers"], fine["closed_boundary_layer_layers"]] == [20, 40, 50]
+    assert [coarse["closed_boundary_layer_layers"], medium["closed_boundary_layer_layers"], fine["closed_boundary_layer_layers"]] == [50, 50, 50]
+    assert [coarse["target_y_plus"], medium["target_y_plus"], fine["target_y_plus"]] == pytest.approx([1.0, 2.0 / 3.0, 4.0 / 9.0])
     assert coarse["closed_farfield_size_chord"] > fine["closed_farfield_size_chord"]
     assert fine["domain_type"] == "rectangular_balaji"
 

@@ -74,6 +74,13 @@ failed report once; the manual button remains available for later inspection.
 
 ## Diagnostico de calidad
 
+The reviewed mesh ladder is Coarse `y+=1`, Medium `2/3`, Fine `4/9` and Extra
+Fine `8/27`. The first three use 50 boundary-layer layers; Extra Fine uses 75
+for comparison. The versioned diagnostic runner
+`scripts/ramair_2d_mesh_science.py` compares Gmsh algorithms 5/6 and the
+curvature/transfinite interaction without touching active outputs. See
+`Documents and Manuals/CFD 2D/MESH_SCIENCE_DECISION_TAREA_05.md`.
+
 El builder ejecuta `checkMesh -allTopology -allGeometry`. Ante un fallo repite
 la comprobacion con `-writeSets -writeSurfaces -setFormat vtk` y conserva:
 

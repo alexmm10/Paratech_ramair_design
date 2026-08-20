@@ -34,6 +34,7 @@ import pandas as pd
 
 from openfoam_environment import activate_openfoam_environment
 from mesh_configuration import DOMAIN_DEFAULTS, domain_parameters, mesh_level_values
+from ramair_2d_mesh_science import first_cell_height_audit
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -60,7 +61,7 @@ SUPPORTED_VARIANTS = {
 }
 VARIANT_ALIASES = {"standard": "open_ramair", "optimized": "open_ramair"}
 DOMAINS = set(DOMAIN_DEFAULTS)
-MESH_LEVELS = {"debug", "coarse", "medium", "fine", "ross_like", "custom"}
+MESH_LEVELS = {"debug", "coarse", "medium", "fine", "extra_fine", "ross_like", "custom"}
 CATIA_INPUTS_DIR_NAME = "CATIA/Inputs"
 CFD_ROOT_DIR_NAME = "CFD_2D"
 CFD_INPUTS_DIR_NAME = "CFD_2D_inputs"
@@ -1178,11 +1179,8 @@ def load_mesh_config(case_root: Path, mesh_level: str, config_override: Path | N
 
 
 def estimate_first_cell_height_from_yplus(Re: float, chord_m: float, target_y_plus: float, rho: float, mu: float) -> float:
-    U = Re * mu / (rho * chord_m)
-    Cf = 0.026 / (Re ** (1.0 / 7.0))
-    tau_w = 0.5 * rho * U * U * Cf
-    u_tau = math.sqrt(max(tau_w / rho, 1e-30))
-    return target_y_plus * mu / (rho * u_tau)
+    audit = first_cell_height_audit(Re, chord_m, target_y_plus, rho, mu)
+    return float(audit["selected_first_cell_height_m"])
 
 
 def polygon_area_xy(coords: Iterable[tuple[float, float]]) -> float:
@@ -8219,6 +8217,9 @@ def build_mesh(args: argparse.Namespace) -> None:
         try:
             phys = read_json(cfd_inputs_root(case_root)/"case_package"/"physical_config.json", {}) or {}
             Re = _as_float(phys.get("reynolds"), 4e6); rho = _as_float(phys.get("rho"), 1.225); mu = _as_float(phys.get("mu"), 1.81e-5); chord_m = _as_float(manifest.get("chord_m"), 1.0)
+            report["first_cell_height_formula_audit"] = first_cell_height_audit(
+                Re, chord_m, _as_float(mesh_cfg.get("target_y_plus"), 0.5), rho, mu
+            )
             if geo_info.get("boundary_layer_first_cell_height_chord"):
                 report["first_cell_height_actual"] = float(geo_info["boundary_layer_first_cell_height_chord"]) * chord_m
             else:

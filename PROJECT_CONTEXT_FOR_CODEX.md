@@ -8,6 +8,7 @@ Work Case manifest schema: 3
 Active workspace schema: 4
 Geometry DTO schema: 1
 Profile catalogue schema: 1
+Mesh-science report schema: 1
 Canonical Windows source: `C:\Users\alejm\Desktop\PRACTICAS_INVICSA\3D design\DESIGN APP`  
 Canonical WSL runtime: `/home/alejm/ramair_cfd/DESIGN_APP`
 
@@ -92,6 +93,16 @@ mesh is explicitly saved/replaced as a Work Case package, preventing a draft
 from changing an approved artifact revision. `MESH_APPROVED.flag` remains the
 technical eligibility of the active output; schema-3 package approval is the
 durable human decision with actor and evidence.
+
+Mesh presets implement the reviewed fractional sequence Coarse `y+=1`, Medium
+`2/3`, Fine `4/9` and Extra Fine `8/27`. Coarse/Medium/Fine use 50 layers;
+Extra Fine retains 75 as a comparison because the cited study reports marginal
+benefit above 50. Growth is 1.10. The builder audits the existing skin-friction
+first-cell estimate against the requested laminar and turbulent formulae and
+uses the smallest positive height when y+-derived height is enabled. Algorithm
+6 remains the general/open baseline while measured closed presets can retain
+algorithm 5. Curvature-aware node counts are calculated before transfinite
+constraints. The bounded fixture runner never replaces an active mesh.
 
 Schemas 1 and 2 are accepted through a read-only adapter. An explicit
 `ramair_case_library.py migrate --apply` creates a manifest backup under

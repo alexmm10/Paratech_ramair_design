@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### MESH-SCIENCE: fractional y+, fixed fixtures and audited first-cell height
+
+- Added bounded Gmsh 4.15.2 fixtures for Delaunay 5 versus
+  Frontal-Delaunay 6 and for curvature sizing versus explicit transfinite
+  counts. Both algorithm meshes passed real `gmshToFoam` and OpenFOAM 14
+  `checkMesh`; no CFD solver or active mesh replacement is involved.
+- Made the paper ladder explicit as Coarse `1`, Medium `2/3`, Fine `4/9` and
+  Extra Fine `8/27`, with 50 layers normally and 75 only for Extra Fine.
+  Existing saved meshes and approvals remain immutable.
+- Audited y+-derived first-cell height against the project skin-friction
+  estimate and the requested laminar/turbulent formulae. New mesh reports
+  record every candidate, the conservative selected height and its source.
+- Documented why transfinite node counts are computed after curvature-based
+  sizing, retained algorithms 5/6 by topology evidence, and recorded the
+  inaccessible Gmsh work item as `NOT_CLAIMED_RESOLVED`.
+
 ### UI-MESH: compatible catalogue, drafts and revision approval
 
 - Reordered the Mesh page around the active geometry: its profile preview and
