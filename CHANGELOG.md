@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### T14 CONV-NOUTER: evidence-based resume selection
+
+- Added legacy-completion evidence for PIMPLE entries using final physical
+  time, force history, normal solver `End` and either execution or completed
+  analysis metadata. This recognizes the complete n=3 run even though its old
+  `execution_status.json` is absent.
+- Resume now records an explicit execute/preserve selection and completely
+  skips writes, cloning and registry updates inside completed n=2/n=3 run
+  folders. Only incomplete n=4 is eligible for execution.
+- Corrected legacy stage-resume parsing to accept both `phase` and `stage`
+  record keys. Analysis remains gated until n=4 supplies real evidence.
+
 ### T13 BUG-URANS-REVIEW / BUG-VALIDATION-PLOTS / startup fragment
 
 - Fixed backward-history validation to use OpenFOAM's exact persisted

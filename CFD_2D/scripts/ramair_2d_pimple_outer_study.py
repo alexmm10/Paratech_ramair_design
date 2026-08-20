@@ -255,6 +255,86 @@ def _positive_times(case: Path) -> list[float]:
     return sorted(values)
 
 
+def _entry_completion_evidence(
+    study_root: Path,
+    entry: dict[str, Any],
+) -> dict[str, Any]:
+    """Recognize completed legacy entries without mutating their metadata."""
+    run_root = Path(study_root) / str(entry["run_id"])
+    case = Path(str(entry["case"]))
+    plan = read_json(run_root / "stage_plan.json", {}) or {}
+    stages = list(plan.get("stages") or [])
+    final_stage = stages[-1] if stages else {}
+    target = float(final_stage.get("end_s") or 0.0)
+    dt_s = float(final_stage.get("dt_s") or entry.get("dt_s") or 0.0)
+    times = _positive_times(case)
+    latest = max(times, default=None)
+    reached_target = bool(
+        latest is not None
+        and target > 0.0
+        and latest >= target - max(2.0 * dt_s, 1.0e-12)
+    )
+    status = read_json(run_root / "execution_status.json", {}) or {}
+    summary = read_json(run_root / "case_summary.json", {}) or {}
+    force_candidates = [
+        run_root / "force_coeffs.csv",
+        *sorted(case.glob("postProcessing/forceCoeffs/*/forceCoeffs.dat")),
+    ]
+    force_path = next(
+        (path for path in force_candidates if path.is_file() and path.stat().st_size > 0),
+        None,
+    )
+    log = case / "log.foamRun"
+    normal_end = bool(
+        log.is_file()
+        and re.search(r"(?m)^End\s*$", log.read_text(encoding="utf-8", errors="replace"))
+    )
+    explicit_complete = str(status.get("status") or "") == "COMPLETED"
+    analyzed_complete = str(summary.get("status") or "") == "COMPLETED"
+    complete = bool(
+        reached_target
+        and force_path is not None
+        and normal_end
+        and (explicit_complete or analyzed_complete)
+    )
+    return {
+        "complete": complete,
+        "run_id": entry.get("run_id"),
+        "nOuterCorrectors": entry.get("nOuterCorrectors"),
+        "explicit_execution_status": status.get("status"),
+        "analysis_status": summary.get("status"),
+        "latest_time_s": latest,
+        "target_time_s": target,
+        "target_tolerance_s": max(2.0 * dt_s, 1.0e-12),
+        "target_reached": reached_target,
+        "normal_solver_end": normal_end,
+        "force_history": str(force_path) if force_path else None,
+    }
+
+
+def _resume_entry_selection(
+    study_root: Path,
+    entries: list[dict[str, Any]],
+) -> dict[str, Any]:
+    evidence = {
+        str(entry["run_id"]): _entry_completion_evidence(study_root, entry)
+        for entry in entries
+    }
+    return {
+        "execute": [
+            str(entry["run_id"])
+            for entry in entries
+            if not evidence[str(entry["run_id"])]["complete"]
+        ],
+        "preserve_completed": [
+            str(entry["run_id"])
+            for entry in entries
+            if evidence[str(entry["run_id"])]["complete"]
+        ],
+        "evidence": evidence,
+    }
+
+
 def _measurement_signature(case: Path) -> str:
     """Hash a clone while normalizing the only permitted PIMPLE variation."""
     digest = hashlib.sha256()
@@ -580,6 +660,16 @@ def execute_study(
         return manifest
 
     if run:
+        resume_selection = (
+            _resume_entry_selection(root, list(manifest["entries"]))
+            if resume else {
+                "execute": [str(entry["run_id"]) for entry in manifest["entries"]],
+                "preserve_completed": [],
+                "evidence": {},
+            }
+        )
+        manifest["resume_selection"] = resume_selection
+        protected_completed = set(resume_selection["preserve_completed"])
         common_times = _positive_times(common_case)
         if len(common_times) < 3:
             raise RuntimeError(
@@ -587,6 +677,8 @@ def execute_study(
             )
         for entry in manifest["entries"]:
             case = Path(entry["case"])
+            if str(entry["run_id"]) in protected_completed:
+                continue
             if not (resume and _positive_times(case)):
                 _clone_temporal_case(common_case, case)
                 _replace_pimple_outer(
@@ -607,16 +699,28 @@ def execute_study(
 
     results: list[dict[str, Any]] = []
     stop_requested = False
+    protected_completed = set(
+        (manifest.get("resume_selection") or {}).get("preserve_completed") or []
+    ) if resume else set()
     for entry in manifest["entries"]:
         if stop_requested:
             break
+        if str(entry["run_id"]) in protected_completed:
+            results.append({
+                "run_id": entry["run_id"],
+                "status": "PRESERVED_COMPLETED",
+                "evidence": (
+                    (manifest.get("resume_selection") or {}).get("evidence") or {}
+                ).get(str(entry["run_id"])),
+            })
+            continue
         run_root = root / entry["run_id"]
         case = Path(entry["case"])
         stages = read_json(run_root / "stage_plan.json", {})["stages"]
         records: list[dict[str, Any]] = []
         previous_status = read_json(run_root / "execution_status.json", {}) or {}
         completed_stages = {
-            str(item.get("stage"))
+            str(item.get("stage") or item.get("phase"))
             for item in previous_status.get("stages", [])
             if item.get("returncode") == 0
         } if resume else set()

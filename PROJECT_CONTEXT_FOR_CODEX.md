@@ -253,6 +253,16 @@ historical run is `URANS_PARTIAL` because phase E has not yet accumulated 16
 samples per signal; it is not a missing-data failure. Repeated validation-point
 publication remains idempotent and both validation plots pass regression.
 
+### PIMPLE nOuter 2/3/4 resume
+
+The sensitivity workspace is Closed Medium at `deltaT=1.25e-4`. n=2 and n=3
+have final physical time, force histories, normal solver termination and
+completed analyses. n=3 lacks a legacy `execution_status.json`, so resume uses
+the combined physical evidence rather than that one file. Completed entries
+are skipped before any clone, configuration write or execution-registry
+update. The only eligible resume target is n=4; scientific comparison remains
+unavailable until n=4 produces real completed evidence.
+
 ### Canonical URANS identity
 
 Exactly one mutable production case exists for each structured key:
