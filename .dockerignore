@@ -6,9 +6,11 @@ Application Support/Logs
 Application Support/Reports
 Application Support/Packages
 Application Support/Temp
+logs
 Previous Versions
 Results
 CFD_2D/app_state
+CFD_2D/logs
 CFD_2D/meshes
 CFD_2D/openfoam_cases
 CFD_2D/results
@@ -17,11 +19,22 @@ CFD_2D/validation_studies
 CFD_2D/CFD_2D_inputs/case_package
 CFD_2D/CFD_2D_inputs/geometry
 CFD_2D/CFD_2D_inputs/previews
+CFD_2D/CFD_2D_inputs/validation
+CFD_2D/CFD_2D_inputs/inlet_design
 CATIA/Inputs
 CATIA/Exports
 Documents and Manuals/**/*.pdf
 Application Support/Tools/xfoil
 *.zip
+*.7z
+*.tar
+*.tar.gz
 *.msh
 *.vtk
+*.vtu
+*.pvtu
+*.foam
+*.OpenFOAM
 processor*
+postProcessing
+VTK

@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### T16 DEV-DOCKER: experimental-only decision
+
+- Audited the existing OpenFOAM 14 Dockerfile and Compose prototype without
+  building an image or launching a solver. The active WSL distribution has no
+  usable Docker server integration.
+- Expanded the Docker build exclusions so generated CFD fields, validation
+  state, archives and visualization products cannot enter the build context.
+- Kept native WSL/OpenFOAM 14 as production. Docker promotion now explicitly
+  requires approval and an identical-numerics serial/MPI comparison.
+
 ### T15 DEV-GIT: gated local publication
 
 - Kept the repository lightweight and local: the artifact audit passes, the

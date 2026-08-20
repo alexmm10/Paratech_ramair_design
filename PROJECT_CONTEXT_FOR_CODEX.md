@@ -271,6 +271,14 @@ remote or push has been inferred. Publication now requires a successful
 dry-run preview for the exact current HEAD, branch and origin. Any subsequent
 change invalidates that preview.
 
+### Container decision
+
+The checked-in Dockerfile/Compose pair remains an experimental headless
+prototype. Its build context excludes generated CFD data, but the current WSL
+runtime has no usable Docker server and container MPI/ABI performance has not
+been demonstrated. Production continues on native WSL/OpenFOAM 14; promotion
+requires explicit approval and a bounded identical-numerics benchmark.
+
 ### Canonical URANS identity
 
 Exactly one mutable production case exists for each structured key:
