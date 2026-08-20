@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Authoritative postprocess inventory for Validation Lab runs."""
+"""Portable authoritative postprocess inventory for general and lab runs."""
 from __future__ import annotations
 
 import argparse
 import math
+import os
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
@@ -114,8 +115,9 @@ def field_scale(
     }
 
 
-def _real_products(paths: Iterable[Path]) -> list[dict[str, Any]]:
+def _real_products(paths: Iterable[Path], output_root: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    output_root = Path(output_root).resolve()
     for source in paths:
         path = Path(source)
         if not path.exists():
@@ -123,7 +125,7 @@ def _real_products(paths: Iterable[Path]) -> list[dict[str, Any]]:
         rows.append(
             {
                 "name": path.name,
-                "path": str(path.resolve()),
+                "path": os.path.relpath(path.resolve(), output_root).replace("\\", "/"),
                 "kind": "directory" if path.is_dir() else "file",
                 "bytes": path.stat().st_size if path.is_file() else None,
                 "modified_at_epoch_s": path.stat().st_mtime,
@@ -148,7 +150,8 @@ def write_postprocess_manifest(
 ) -> dict[str, Any]:
     """Write one manifest only from products that actually exist."""
     output_root = Path(output_root)
-    actual = _real_products(products)
+    output_root = Path(output_root).resolve()
+    actual = _real_products(products, output_root)
     error_rows = [str(value) for value in errors if str(value).strip()]
     if not requested:
         status = "NOT_REQUESTED"
@@ -167,7 +170,8 @@ def write_postprocess_manifest(
         for group in PRODUCT_GROUPS
     }
     manifest = {
-        "schema_version": 2,
+        "schema_version": 3,
+        "path_base": "manifest_directory",
         "run_id": str(run_id),
         "mode": normalized_mode,
         "status": status,

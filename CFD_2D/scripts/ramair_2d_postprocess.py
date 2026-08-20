@@ -26,6 +26,7 @@ from openfoam_history import read_force_coefficient_history
 from openfoam_wall_analysis import analyze_wall_boundary_layer
 from paraview_case_viewer import generate_automatic_paraview_products, launch_paraview_case
 from ramair_2d_postprocess_registry import write_postprocess_manifest
+from ramair_monitor_core import scalar_signal_inventory
 from ramair_scientific_plot_style import apply_scientific_style, save_scientific_figure
 
 apply_scientific_style()
@@ -193,12 +194,70 @@ def parse_solver_log(case_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame, dict[s
     return pd.DataFrame(residual_rows), pd.DataFrame(courant_rows), meta
 
 
-def summarize_force_coeffs(df: pd.DataFrame, average_from_fraction: float = 0.6) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def select_final_force_window(
+    df: pd.DataFrame,
+    average_from_fraction: float = 0.6,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Select the final continuous force segment and an auditable tail window."""
     if "Time" not in df.columns:
         df.insert(0, "Time", np.arange(len(df)))
-    t0 = float(df["Time"].min()); t1 = float(df["Time"].max())
-    start = t0 + float(average_from_fraction) * (t1 - t0)
-    win = df[df["Time"] >= start].copy()
+    clean = df.copy()
+    clean["Time"] = pd.to_numeric(clean["Time"], errors="coerce")
+    clean = clean[np.isfinite(clean["Time"])].copy()
+    clean = clean.drop_duplicates(subset=["Time"], keep="last").sort_values("Time")
+    if clean.empty:
+        raise ValueError("Force history has no finite time samples")
+    differences = clean["Time"].diff()
+    positive = differences[differences > 0.0]
+    median_dt = float(positive.median()) if not positive.empty else None
+    gap_threshold = (
+        max(5.0 * median_dt, 1.0e-12) if median_dt is not None else math.inf
+    )
+    gap_indices = [
+        int(index)
+        for index, value in differences.items()
+        if pd.notna(value) and float(value) > gap_threshold
+    ]
+    final_segment = clean.loc[gap_indices[-1] :].copy() if gap_indices else clean
+    fraction = min(0.99, max(0.0, float(average_from_fraction)))
+    t0 = float(final_segment["Time"].min())
+    t1 = float(final_segment["Time"].max())
+    requested_start = t0 + fraction * (t1 - t0)
+    win = final_segment[final_segment["Time"] >= requested_start].copy()
+    minimum_samples = min(len(final_segment), max(5, min(50, int(math.ceil(0.1 * len(final_segment))))))
+    minimum_applied = len(win) < minimum_samples
+    if minimum_applied:
+        win = final_segment.tail(minimum_samples).copy()
+    manifest = {
+        "schema_version": 1,
+        "selection_mode": "final_continuous_fraction",
+        "configured_average_from_fraction": fraction,
+        "source_samples": int(len(clean)),
+        "continuous_segment_samples": int(len(final_segment)),
+        "selected_samples": int(len(win)),
+        "source_start_time": float(clean["Time"].min()),
+        "source_end_time": float(clean["Time"].max()),
+        "continuous_segment_start_time": t0,
+        "continuous_segment_end_time": t1,
+        "requested_window_start_time": requested_start,
+        "selected_window_start_time": float(win["Time"].min()),
+        "selected_window_end_time": float(win["Time"].max()),
+        "median_sample_delta_t": median_dt,
+        "continuity_gap_threshold": None if not math.isfinite(gap_threshold) else gap_threshold,
+        "detected_large_gaps": len(gap_indices),
+        "minimum_samples": int(minimum_samples),
+        "minimum_samples_override_applied": bool(minimum_applied),
+        "reason": (
+            "last continuous force segment after a detected history gap"
+            if gap_indices
+            else "final fraction of the continuous force history"
+        ),
+    }
+    return win, manifest
+
+
+def summarize_force_coeffs(df: pd.DataFrame, average_from_fraction: float = 0.6) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    win, window_manifest = select_final_force_window(df, average_from_fraction)
     cols = [c for c in ["Cl", "Cd", "Cm"] if c in win.columns]
     if not cols:
         cols = [c for c in win.columns if c != "Time"][:3]
@@ -206,32 +265,49 @@ def summarize_force_coeffs(df: pd.DataFrame, average_from_fraction: float = 0.6)
     std = win[cols].std().to_frame("std").T
     if "Cl" in mean and "Cd" in mean:
         mean["L_D"] = mean["Cl"] / mean["Cd"].replace(0, np.nan)
+    win.attrs["window_manifest"] = window_manifest
     return win, mean, std
+
+
+def readable_axis_limits(values: pd.Series) -> tuple[float, float]:
+    finite = pd.to_numeric(values, errors="coerce")
+    finite = finite[np.isfinite(finite)]
+    if finite.empty:
+        return -1.0, 1.0
+    lower, upper = float(finite.min()), float(finite.max())
+    span = upper - lower
+    pad = 0.08 * span if span > 0.0 else max(abs(lower), 1.0) * 0.08
+    return lower - pad, upper + pad
 
 
 def plot_force_coeffs(win: pd.DataFrame, mean: pd.DataFrame, output: Path) -> None:
     try:
         import matplotlib.pyplot as plt
         if not win.empty:
-            fig, ax = plt.subplots(figsize=(9, 4.8))
-            for c in ["Cl", "Cd", "Cm"]:
-                if c in win.columns:
-                    history_line, = ax.plot(win["Time"], win[c], label=c, linewidth=1.15)
-                    if c in mean.columns:
-                        m = float(mean[c].iloc[0])
-                        if np.isfinite(m):
-                            ax.axhline(
-                                m,
-                                color=history_line.get_color(),
-                                linestyle="--",
-                                linewidth=0.8,
-                                alpha=0.75,
-                                label=f"{c} mean={m:.5g}",
-                            )
-            ax.grid(True, linewidth=0.3)
-            ax.legend(fontsize=8)
-            ax.set_xlabel(r"Physical time, $t$ [s]")
-            ax.set_title("Aerodynamic-coefficient history: averaging window")
+            columns = [name for name in ("Cl", "Cd", "Cm") if name in win.columns]
+            if not columns:
+                return
+            fig, axes = plt.subplots(len(columns), 1, figsize=(9, 2.6 * len(columns)), sharex=True)
+            axes = np.atleast_1d(axes)
+            for ax, c in zip(axes, columns):
+                history_line, = ax.plot(win["Time"], win[c], label=c, linewidth=1.15)
+                if c in mean.columns:
+                    m = float(mean[c].iloc[0])
+                    if np.isfinite(m):
+                        ax.axhline(
+                            m,
+                            color=history_line.get_color(),
+                            linestyle="--",
+                            linewidth=0.8,
+                            alpha=0.75,
+                            label=f"{c} mean={m:.5g}",
+                        )
+                ax.set_ylim(*readable_axis_limits(win[c]))
+                ax.set_ylabel(c)
+                ax.grid(True, linewidth=0.3)
+                ax.legend(fontsize=8, loc="best")
+            axes[-1].set_xlabel(r"Physical time, $t$ [s]")
+            axes[0].set_title("Aerodynamic coefficients: selected final window")
             fig.tight_layout()
             save_scientific_figure(
                 fig, output, data=win,
@@ -607,7 +683,10 @@ def mirror_urans_stage_results(out_dir: Path) -> dict[str, Any]:
         "solver_residuals.png",
         "courant_history.csv",
         "courant_history.png",
+        "deltaT_history.csv",
         "deltaT_history.png",
+        "postprocess_window_manifest.json",
+        "scalar_signal_inventory.json",
         "available_time_directories.csv",
         "written_field_inventory.csv",
         "wall_yplus_vs_xc.csv",
@@ -836,6 +915,7 @@ def postprocess(
             plot_residuals(residuals, out_dir / "solver_residuals.png")
         if not courant.empty and str(simulation_mode).upper() == "URANS":
             courant.to_csv(out_dir / "courant_history.csv", index=False)
+            _delta_t_table(courant).to_csv(out_dir / "deltaT_history.csv", index=False)
             maximum_delta_t_s = case_inputs.get("maxDeltaT_s")
             try:
                 maximum_delta_t_s = float(maximum_delta_t_s)
@@ -883,6 +963,19 @@ def postprocess(
             simulation_mode=simulation_mode,
         )
         pyfoam_diagnostics = copy_pyfoam_diagnostics(case_dir, out_dir)
+        scalar_signals = scalar_signal_inventory(case_dir)
+        (out_dir / "scalar_signal_inventory.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "path_base": "case_directory",
+                    "signals": scalar_signals,
+                    "purge_write_scope": "volume_time_directories_only",
+                },
+                indent=2,
+            ) + "\n",
+            encoding="utf-8",
+        )
         # A zero-byte .foam marker lets ParaView's built-in OpenFOAM reader
         # discover every written time without duplicating data.
         paraview_marker = case_dir / f"{case_dir.name}.foam"
@@ -922,10 +1015,14 @@ def postprocess(
         try:
             df = read_force_coeffs(case_dir)
             win, mean, std = summarize_force_coeffs(df, average_from_fraction)
+            window_manifest = dict(win.attrs.get("window_manifest") or {})
             df.to_csv(out_dir / "forceCoeffs_raw.csv", index=False)
             win.to_csv(out_dir / "forceCoeffs_averaging_window.csv", index=False)
             mean.to_csv(out_dir / "forceCoeffs_mean.csv", index=False)
             std.to_csv(out_dir / "forceCoeffs_std.csv", index=False)
+            (out_dir / "postprocess_window_manifest.json").write_text(
+                json.dumps(window_manifest, indent=2) + "\n", encoding="utf-8"
+            )
             plot_force_coeffs(win, mean, out_dir / "Cl_Cd_Cm_history.png")
             aerodynamic_efficiency = write_aerodynamic_efficiency_products(
                 win,
@@ -954,6 +1051,7 @@ def postprocess(
                 "average_from_fraction": average_from_fraction,
                 "average_from_fraction_explanation": "Ignore the first fraction of the available force history and average the remaining final window; 0.6 means average the last 40%.",
                 "averaging_window": {"start_time": average_start, "end_time": average_end},
+                "automatic_window_selection": window_manifest,
                 "mean": mean.iloc[0].to_dict(),
                 "std": std.iloc[0].to_dict(),
                 "aerodynamic_efficiency": aerodynamic_efficiency,
@@ -974,6 +1072,7 @@ def postprocess(
                 "parallel_reconstruction": reconstruction,
                 "field_inventory": field_inventory,
                 "pyfoam_diagnostics": pyfoam_diagnostics,
+                "scalar_signal_inventory": scalar_signals,
                 "paraview_marker": str(paraview_marker),
                 "openfoam_postprocess": export_results,
                 "wall_boundary_layer_analysis": wall_analysis,
@@ -1018,6 +1117,7 @@ def postprocess(
                 "parallel_reconstruction": reconstruction,
                 "field_inventory": field_inventory,
                 "pyfoam_diagnostics": pyfoam_diagnostics,
+                "scalar_signal_inventory": scalar_signals,
                 "paraview_marker": str(paraview_marker),
                 "openfoam_postprocess": export_results,
                 "wall_boundary_layer_analysis": wall_analysis,
@@ -1085,7 +1185,8 @@ def postprocess(
             else []
         ),
         metadata={
-            "case_summary": str(summary_path),
+            "case_summary": summary_path.name,
+            "case_reference": os.path.relpath(case_dir, out_dir).replace("\\", "/"),
             "separation_method_version": separation.get("separation_method_version"),
             "separation_status": separation.get("status", "NOT_AVAILABLE"),
             "separation_confidence": separation.get("confidence", "UNRESOLVED"),
@@ -1111,7 +1212,9 @@ def postprocess(
         "- `aerodynamic_efficiency.csv/png`: Cl/Cd history over the same stabilized averaging window.\n"
         "- `solver_residuals.csv/png`: residual history parsed from `log.foamRun`/`log.pimpleFoam`.\n"
         "- `courant_history.csv/png`: Courant number history parsed from solver log.\n"
-        "- `deltaT_history.png`: adaptive deltaT with the configured maxDeltaT ceiling.\n"
+        "- `deltaT_history.csv/png`: complete adaptive deltaT history with the configured maxDeltaT ceiling.\n"
+        "- `postprocess_window_manifest.json`: automatic final continuous force window and its evidence.\n"
+        "- `scalar_signal_inventory.json`: force, probe, residual and Courant sources retained outside volume-field purge.\n"
         "- `available_time_directories.csv`: written OpenFOAM time folders available for field inspection.\n"
         "- `written_field_inventory.csv`: availability of U, p, Cp, Co, turbulence, yPlus, wallShearStress and vorticity at each saved time.\n"
         "- `wall_yplus_vs_xc.csv/png`: first-cell wall y+ versus x/c, separated into upper/lower surfaces.\n"

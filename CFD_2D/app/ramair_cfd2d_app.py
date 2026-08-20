@@ -891,7 +891,7 @@ SOLVER_DESCRIPTIONS = {
     "field_write_interval_steps": "Alternativa usada solo con timeStep: iteraciones entre snapshots 3D. Coeficientes y residuos se guardan en cada iteracion.",
     "field_write_step_equivalent": "Cadencia de campos volumetricos expresada como numero aproximado de pasos al techo fisico solicitado. Fuerzas, residuos y Courant se conservan continuamente.",
     "purgeWrite": "Numero maximo de snapshots 3D conservados. Con 24 y Delta(t*)=0.25 se retienen seis tiempos convectivos; cero conserva todo y puede consumir mucho espacio.",
-    "average_from_fraction": "Fraccion inicial del historial de fuerzas ignorada al promediar; 0.6 usa el ultimo 40%. No modifica el solver.",
+    "average_from_fraction": "Tras detectar el ultimo tramo temporal continuo, se ignora esta fraccion inicial; 0.6 usa el ultimo 40% de ese tramo. La evidencia queda en el manifiesto y no modifica el solver.",
     "farfield_boundary_condition": "freestream usa freestreamVelocity/freestreamPressure y permite entrada/salida segun el flujo local en un contorno circular. fixed_velocity_fallback conserva el fallback legado.",
     "steady_initialization_enabled": "Activa por defecto una etapa SIMPLE estacionaria de inicializacion antes del PIMPLE transitorio. No sustituye el resultado transitorio.",
     "steady_max_iterations": "Numero maximo de iteraciones SIMPLE antes de evaluar residuos y estabilidad de Cl/Cd/Cm.",
@@ -4431,7 +4431,14 @@ if active_page == "Postproceso" and workflow_case_ready:
     solver_cfg = load_config(ROOT, "solver")
     with st.form("postprocess-form"):
         cols = st.columns(3)
-        average_fraction = cols[0].number_input("Fraccion inicial para promedio", min_value=0.0, max_value=0.99, value=float(solver_cfg.get("average_from_fraction", 0.6)), key=revisioned_widget_key("post-average-fraction"))
+        average_fraction = cols[0].number_input(
+            "Fraccion final tras detectar continuidad",
+            min_value=0.0,
+            max_value=0.99,
+            value=float(solver_cfg.get("average_from_fraction", 0.6)),
+            help="Primero se selecciona automaticamente el ultimo tramo temporal continuo; despues se ignora esta fraccion inicial de ese tramo y se conserva un minimo auditable de muestras.",
+            key=revisioned_widget_key("post-average-fraction"),
+        )
         configured_export_mode = str(post_cfg.get("export_mode", "openfoam_reader"))
         if configured_export_mode not in CHOICES["export_mode"]:
             configured_export_mode = "openfoam_reader"
@@ -4443,7 +4450,7 @@ if active_page == "Postproceso" and workflow_case_ready:
         open_pv = cols[2].toggle("Abrir ParaView", value=bool(post_cfg.get("open_paraview", False)), key=revisioned_widget_key("post-open-paraview"))
         product_cols = st.columns(2)
         automatic_pv = product_cols[0].toggle(
-            "Generar escenas finales Cp/Co/velocidad y animaciones",
+            "Generar Cp, velocidad, streamlines, contornos, vorticidad, y+ y animaciones",
             value=bool(post_cfg.get("automatic_paraview_products", False)),
             help="Usa pvbatch y el lector OpenFOAM directo. No duplica el volumen completo con foamToVTK.",
             key=revisioned_widget_key("post-automatic-paraview"),
@@ -4583,6 +4590,14 @@ if active_page == "Postproceso" and workflow_case_ready:
         st.caption("Selecciona un caso de trabajo de validacion para habilitar la publicacion manual de puntos.")
     results = result_directory(ROOT, variant, alpha)
     show_json_report(results / "case_summary.json", "Resumen de resultados")
+    show_json_report(
+        results / "postprocess_window_manifest.json",
+        "Ventana final seleccionada automaticamente",
+    )
+    show_json_report(
+        results / "URANS/ParaView/visualization_scales.json",
+        "Escalas compartidas de imagenes y animaciones",
+    )
     result_summary = read_json(results / "case_summary.json", {}) or {}
     temporal = result_summary.get("temporal_animation") or {}
     if temporal:

@@ -10,6 +10,8 @@ Geometry DTO schema: 1
 Profile catalogue schema: 1
 Mesh-science report schema: 1
 Execution lifecycle schema: 1
+Postprocess manifest schema: 3
+ParaView products manifest schema: 1
 Canonical Windows source: `C:\Users\alejm\Desktop\PRACTICAS_INVICSA\3D design\DESIGN APP`  
 Canonical WSL runtime: `/home/alejm/ramair_cfd/DESIGN_APP`
 
@@ -53,6 +55,14 @@ All new runtime publications use the schema-1 lifecycle states `PREPARED`,
 an atomic `.ramair_execution_state.json` with phase, idempotency key, process
 identity, restart evidence and a bounded transition history. Solver logs and
 the scalar function-object trees are never governed by `purgeWrite`.
+
+General postprocess manifests use schema 3 with paths relative to their
+manifest directory. Force statistics use the final continuous history segment
+and record the exact selection in `postprocess_window_manifest.json`.
+ParaView products publish relative case/state references, a portable Python
+loader and one `visualization_scales.json` shared by still images and animation
+frames. Cp, velocity/streamlines/contours, vorticity and y+ are rendered only
+when their real arrays exist.
 
 The normal workflow requires a selected persistent Work Case. `Estado`, `Caso
 de trabajo`, `Validation & Convergence Lab` and file/log inspection remain

@@ -236,6 +236,11 @@ def _postprocess_product_browser(
             key=f"postprocess-browser-group-{key_scope}",
         )
         rows = list(raw_groups.get(selected_group) or [])
+        def product_path(row: dict[str, Any]) -> Path:
+            value = Path(str(row.get("path") or ""))
+            if value.is_absolute() or int(manifest.get("schema_version") or 0) < 3:
+                return value
+            return (manifest_path.parent / value).resolve()
         st.dataframe(
             [
                 {
@@ -278,7 +283,7 @@ def _postprocess_product_browser(
         image_rows = [
             row
             for row in rows
-            if Path(str(row.get("path") or "")).suffix.lower()
+            if product_path(row).suffix.lower()
             in {".png", ".jpg", ".jpeg"}
         ]
         if image_rows and st.checkbox(
@@ -289,7 +294,7 @@ def _postprocess_product_browser(
         ):
             columns = st.columns(2)
             for index, row in enumerate(image_rows):
-                path = Path(str(row.get("path") or ""))
+                path = product_path(row)
                 if path.is_file():
                     columns[index % 2].image(
                         str(path),

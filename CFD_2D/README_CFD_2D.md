@@ -24,6 +24,11 @@ placeholder result. Real execution remains explicit. See
 `Documents and Manuals/Application/VALIDATION_CONVERGENCE_LAB.md` and
 `CFD_2D/validation_studies/README_VALIDATION_CONVERGENCE_LAB.md`.
 
+General postprocessing writes a schema-3 portable product manifest, selects
+the final continuous force-history window automatically and exports its
+evidence. Optional pvbatch products use relative state/case references and one
+shared scale definition for still images and animation frames.
+
 ## 2D inlet design before meshing
 
 Use the app's **Geometria > Diseno 2D del corte ram-air** section or run:

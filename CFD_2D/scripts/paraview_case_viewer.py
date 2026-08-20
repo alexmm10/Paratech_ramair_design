@@ -2,9 +2,9 @@
 """Scripted ParaView launcher for reconstructed OpenFOAM cases.
 
 The launcher deliberately avoids ``paraFoam`` session state and ``--data``.
-Instead, a ParaView Python startup script opens the absolute ``.foam`` marker,
+Instead, a ParaView Python startup script opens the resolved ``.foam`` marker,
 selects ``internalMesh``, advances to the latest written time, frames the data
-and saves both a screenshot and a reusable ``.pvsm`` state.
+and saves both a screenshot and a portable ``.pvsm`` state plus loader.
 """
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ def write_paraview_case_script(
     ready_path: Path | None = None,
     focus_chord_m: float | None = None,
 ) -> Path:
-    """Write a deterministic ParaView startup script using absolute paths."""
+    """Write a deterministic startup script that emits a portable state."""
     script_path = script_path.resolve()
     foam_marker = foam_marker.resolve()
     screenshot_path = (screenshot_path or script_path.with_suffix(".png")).resolve()
@@ -59,6 +59,7 @@ def write_paraview_case_script(
     ready_path = (ready_path or script_path.with_suffix(".ready.json")).resolve()
     script = f'''from paraview.simple import *
 import json
+import os
 from pathlib import Path
 
 try:
@@ -159,9 +160,32 @@ Render(view)
 SaveScreenshot(screenshot_path, view, ImageResolution=[1600, 1000])
 try:
     SaveState(state_path)
+    state_file = Path(state_path)
+    state_base = state_file.parent
+    relative_foam_path = os.path.relpath(foam_path, state_base).replace("\\\\", "/")
+    state_text = state_file.read_text(encoding="utf-8")
+    state_text = state_text.replace(foam_path, relative_foam_path)
+    state_text = state_text.replace(foam_path.replace("/", "\\\\"), relative_foam_path)
+    state_file.write_text(state_text, encoding="utf-8")
+    portable_loader = state_base / ("load_" + state_file.stem + "_portable.py")
+    portable_loader.write_text(
+        "from pathlib import Path\\n"
+        "import os\\n"
+        "from paraview.simple import LoadState\\n"
+        "root = Path(__file__).resolve().parent\\n"
+        "os.chdir(root)\\n"
+        "LoadState(str(root / " + repr(state_file.name) + "))\\n",
+        encoding="utf-8",
+    )
+    state_path = state_file.name
+    portable_loader_path = portable_loader.name
 except Exception:
     state_path = None
+    portable_loader_path = None
+    relative_foam_path = None
 Path(ready_path).write_text(json.dumps({{
+    "schema_version": 2,
+    "path_base": "state_directory",
     "status": "READY",
     "foam_marker": foam_path,
     "animation_time": float(scene.AnimationTime),
@@ -173,6 +197,8 @@ Path(ready_path).write_text(json.dumps({{
     "colored_by": colored_by,
     "screenshot": screenshot_path,
     "state": state_path,
+    "portable_loader": portable_loader_path,
+    "case_reference": relative_foam_path,
 }}, indent=2) + "\\n", encoding="utf-8")
 '''
     script_path.parent.mkdir(parents=True, exist_ok=True)
@@ -266,6 +292,7 @@ def write_automatic_products_script(
     script = f'''from paraview.simple import *
 import json
 import math
+import os
 from pathlib import Path
 
 try:
@@ -568,6 +595,24 @@ def color_courant():
     display.SetScalarBarVisibility(view, True)
     return "Co"
 
+def color_scalar_field(name, vector_magnitude=False):
+    try:
+        display.SetScalarBarVisibility(view, False)
+    except Exception:
+        pass
+    association = available_array(name)
+    if not association:
+        return None
+    if vector_magnitude:
+        ColorBy(display, (association, name, "Magnitude"))
+    else:
+        ColorBy(display, (association, name))
+    lut = GetColorTransferFunction(name)
+    if not apply_field_range(lut, name, association, vector_magnitude):
+        display.RescaleTransferFunctionToDataRange(True, False)
+    display.SetScalarBarVisibility(view, True)
+    return {{"array": name, "association": association, "vector_magnitude": vector_magnitude}}
+
 def save_courant_hotspots(latest):
     association = available_array("Co")
     if association != "CELLS":
@@ -615,9 +660,11 @@ def save_courant_hotspots(latest):
     Hide(hotspot, view)
     Delete(hotspot)
     Show(source, view)
-    return str(path)
+    return str(path.relative_to(output_dir))
 
 products = {{
+    "schema_version": 1,
+    "path_base": "manifest_directory",
     "time_semantics": time_semantics,
     "frame_coordinate_kind": "SIMPLE_iteration" if is_iteration_stage else "physical_time_seconds",
     "selected_times": selected_times,
@@ -700,8 +747,8 @@ if selected_times:
     Render(view)
     cp_final = output_dir / ("Cp_airfoil_%s_final.png" % stage_slug)
     SaveScreenshot(str(cp_final), view, ImageResolution=[1600, 1000])
-    products["cp_final_png"] = str(cp_final)
-    products["cp_streamlines_final_png"] = str(cp_final)
+    products["cp_final_png"] = str(cp_final.relative_to(output_dir))
+    products["cp_streamlines_final_png"] = str(cp_final.relative_to(output_dir))
 
     products["velocity_field"] = color_velocity()
     set_camera("wake")
@@ -711,8 +758,60 @@ if selected_times:
     Render(view)
     velocity_final = output_dir / ("Velocity_%s_final.png" % stage_slug)
     SaveScreenshot(str(velocity_final), view, ImageResolution=[1600, 1000])
-    products["velocity_final_png"] = str(velocity_final)
-    products["velocity_streamlines_final_png"] = str(velocity_final)
+    products["velocity_final_png"] = str(velocity_final.relative_to(output_dir))
+    products["velocity_streamlines_final_png"] = str(velocity_final.relative_to(output_dir))
+
+    velocity_contours = None
+    if available_array("U"):
+        try:
+            velocity_contours = Contour(
+                registrationName="VelocityMagnitudeContours",
+                Input=streamline_source,
+            )
+            velocity_contours.ContourBy = ["POINTS", "U"]
+            velocity_contours.Isosurfaces = [0.5 * velocity_m_s, velocity_m_s]
+            velocity_contours.UpdatePipeline(time=latest)
+            contour_display = Show(velocity_contours, view)
+            try:
+                ColorBy(contour_display, None)
+            except Exception:
+                contour_display.ColorArrayName = [None, ""]
+            contour_display.DiffuseColor = [0.12, 0.12, 0.12]
+            contour_display.LineWidth = 1.4
+            contour_display.Opacity = 0.9
+            set_title("|U| with streamlines and contours", latest)
+            Render(view)
+            contour_final = output_dir / ("Velocity_streamlines_contours_%s_final.png" % stage_slug)
+            SaveScreenshot(str(contour_final), view, ImageResolution=[1600, 1000])
+            products["velocity_contours"] = {{
+                "array": "U",
+                "association": "POINTS",
+                "isovalues_m_s": [0.5 * velocity_m_s, velocity_m_s],
+                "image": str(contour_final.relative_to(output_dir)),
+            }}
+            Hide(velocity_contours, view)
+        except Exception as exc:
+            products["velocity_contours"] = {{"status": "UNAVAILABLE", "reason": str(exc)}}
+
+    vorticity_field = color_scalar_field("vorticity", vector_magnitude=True)
+    if vorticity_field:
+        set_camera("wake")
+        set_title("|vorticity|", latest)
+        Render(view)
+        vorticity_final = output_dir / ("Vorticity_%s_final.png" % stage_slug)
+        SaveScreenshot(str(vorticity_final), view, ImageResolution=[1600, 1000])
+        products["vorticity_field"] = vorticity_field
+        products["vorticity_final_png"] = str(vorticity_final.relative_to(output_dir))
+
+    yplus_field = color_scalar_field("yPlus")
+    if yplus_field:
+        set_camera("airfoil")
+        set_title("y+", latest)
+        Render(view)
+        yplus_final = output_dir / ("yPlus_%s_final.png" % stage_slug)
+        SaveScreenshot(str(yplus_final), view, ImageResolution=[1600, 1000])
+        products["yplus_field"] = yplus_field
+        products["yplus_final_png"] = str(yplus_final.relative_to(output_dir))
 
     products["courant_policy"] = "NOT_APPLICABLE_TO_RANS" if is_iteration_stage else "URANS_ONLY"
     if not is_iteration_stage:
@@ -725,7 +824,7 @@ if selected_times:
             Render(view)
             courant_final = output_dir / ("Courant_%s_final.png" % stage_slug)
             SaveScreenshot(str(courant_final), view, ImageResolution=[1600, 1000])
-            products["courant_final_png"] = str(courant_final)
+            products["courant_final_png"] = str(courant_final.relative_to(output_dir))
             products["courant_hotspots_png"] = save_courant_hotspots(latest)
 
     color_velocity()
@@ -765,9 +864,43 @@ if selected_times:
 products["status"] = "RENDERED" if selected_times else "NO_WRITTEN_TIMES"
 products["frame_count"] = len(selected_times)
 products["applied_scales"] = scale_evidence
+scales_path = output_dir / "visualization_scales.json"
+scales_path.write_text(
+    json.dumps({{
+        "schema_version": 1,
+        "path_base": "manifest_directory",
+        "selected_times": selected_times,
+        "policy": products["scale_policy"],
+        "fields": scale_evidence,
+        "shared_by": ["final_images", "animation_frames"],
+    }}, indent=2) + "\\n",
+    encoding="utf-8",
+)
+products["visualization_scales"] = scales_path.name
 state_path = output_dir / ("final_%s.pvsm" % stage_slug)
 SaveState(str(state_path))
-products["state"] = str(state_path)
+relative_foam_path = os.path.relpath(foam_path, output_dir).replace("\\\\", "/")
+try:
+    state_text = state_path.read_text(encoding="utf-8")
+    state_text = state_text.replace(foam_path, relative_foam_path)
+    state_text = state_text.replace(foam_path.replace("/", "\\\\"), relative_foam_path)
+    state_path.write_text(state_text, encoding="utf-8")
+except Exception:
+    pass
+portable_loader = output_dir / ("load_%s_portable.py" % stage_slug)
+portable_loader.write_text(
+    "from pathlib import Path\\n"
+    "import os\\n"
+    "from paraview.simple import LoadState\\n"
+    "root = Path(__file__).resolve().parent\\n"
+    "os.chdir(root)\\n"
+    "state = root / " + repr(state_path.name) + "\\n"
+    "LoadState(str(state))\\n",
+    encoding="utf-8",
+)
+products["state"] = state_path.name
+products["portable_loader"] = portable_loader.name
+products["case_reference"] = relative_foam_path
 (output_dir / "paraview_products.json").write_text(
     json.dumps(products, indent=2) + "\\n",
     encoding="utf-8",

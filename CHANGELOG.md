@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### POST-GENERAL: portable ParaView views and auditable final window
+
+- Added deterministic selection of the final continuous `forceCoeffs` segment,
+  then applies the configured tail fraction with a minimum sample safeguard.
+  The exact gap, interval and sample evidence is persisted separately.
+- Exported the complete `deltaT` history as CSV and PNG, split Cl/Cd/Cm into
+  independently scaled panels and inventoried forces, probes, residuals and
+  Courant sources that must survive volume-field purging.
+- Migrated postprocess products to a schema-3 manifest with paths relative to
+  the manifest directory. ParaView states replace machine-specific case paths,
+  include a relative loader and publish one scale file shared by images and
+  animations.
+- Extended automatic ParaView products with velocity contours, streamlines,
+  vorticity and y+ views when the corresponding real arrays exist. A bounded
+  ParaView 5.10/pvbatch smoke rendered two times, contours and vorticity and
+  verified that the saved state contains no absolute case path.
+
 ### EXEC-RUNTIME / EXEC-MONITOR: transactional lifecycle and shared scalar monitor
 
 - Added the eight-state schema-1 execution lifecycle with atomic transitions,
