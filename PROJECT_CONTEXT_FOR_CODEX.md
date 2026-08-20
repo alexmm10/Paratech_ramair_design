@@ -225,6 +225,20 @@ recirculation and wake. Divergence or unbounded inlet backflow requires review;
 the diagnostic gate is prohibited from changing geometry, moving the inlet,
 replacing a mesh or launching the URANS matrix.
 
+### CPU/MPI/GPU evidence
+
+The current host is an AMD Ryzen 7 4800H with 8 physical cores / 16 threads;
+WSL exposes 7.5 GiB RAM and Open MPI 4.1.2. A fixed-numerics temporary-copy
+fixture measured one matched OpenFOAM step in 25.46 / 12.52 / 7.95 / 6.52
+solver seconds for 1 / 2 / 4 / 8 ranks. All `fvSchemes` and `fvSolution` hashes
+were identical. Eight ranks is the bounded-fixture recommendation, not a claim
+of full-production scaling.
+
+No CUDA device or `nvcc` is visible. The installed OpenFOAM 14 solver and Gmsh
+4.15.2 production paths are CPU based, so native WSL CPU/MPI remains selected.
+GPU integration is rejected until a supported backend demonstrates a measured
+benefit without changing numerics; Docker remains non-production.
+
 ### Canonical URANS identity
 
 Exactly one mutable production case exists for each structured key:

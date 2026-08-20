@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### T12 performance: fixed-numerics CPU/MPI/GPU decision
+
+- Added a bounded 1/2/4/8-rank benchmark that works only on temporary case
+  copies and verifies identical `fvSchemes` and `fvSolution` hashes for every
+  scenario. Canonical cases and numerical controls are never modified.
+- Measured one matched OpenFOAM 14 step at 25.46, 12.52, 7.95 and 6.52 solver
+  seconds for 1, 2, 4 and 8 ranks respectively on the Ryzen 7 4800H host. The
+  bounded fixture therefore recommends 8 ranks, while explicitly not claiming
+  production-capacity scaling.
+- Published a hardware audit in the Validation Lab: Open MPI 4.1.2 is active,
+  no CUDA device/toolchain is visible, and the installed OpenFOAM/Gmsh path is
+  CPU based. Native WSL CPU/MPI remains production; GPU and Docker integration
+  remain disabled without measured supported benefit.
+
 ### CONV-CLOSED / CONV-OPEN: adaptive evidence gates
 
 - Added pairwise acceptance that rejects unequal physical windows, fewer than

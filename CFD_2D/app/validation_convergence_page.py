@@ -2653,6 +2653,12 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
         else:
             st.info("No hay resultados URANS reales suficientes.")
         _plot_inventory(active / "postprocess/spatial_temporal_urans")
+        if subsection == "Coste y precisión":
+            _json_panel(
+                active / "reports/performance_hardware_audit.json",
+                "Auditoría CPU / MPI / GPU con numerics fijos",
+                inline=True,
+            )
 
     if section == "Frecuencias":
         st.caption(

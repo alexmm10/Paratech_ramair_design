@@ -82,6 +82,20 @@ def scenario_record(root: Path, directory: Path) -> dict[str, Any] | None:
             time_text, rf"Maximum resident set size \(kbytes\):\s*({NUMBER})"
         ),
         "solver_log": str(log_path) if log_path else None,
+        "fvSchemes_sha256": (
+            (root / f"fvSchemes_{directory.name}.sha256").read_text(
+                encoding="utf-8"
+            ).strip()
+            if (root / f"fvSchemes_{directory.name}.sha256").is_file()
+            else None
+        ),
+        "fvSolution_sha256": (
+            (root / f"fvSolution_{directory.name}.sha256").read_text(
+                encoding="utf-8"
+            ).strip()
+            if (root / f"fvSolution_{directory.name}.sha256").is_file()
+            else None
+        ),
     }
 
 
@@ -102,6 +116,10 @@ def main() -> int:
             {
                 "status": "COMPLETE" if records and all(item["status"] for item in records) else "INCOMPLETE",
                 "records": records,
+                "numerics_invariant": bool(records) and len({
+                    (item["fvSchemes_sha256"], item["fvSolution_sha256"])
+                    for item in records
+                }) == 1,
                 "comparison_note": (
                     "Use matched pairs to isolate one effect: previous/optimized at fixed cores/backend, "
                     "6/8 cores at fixed numerics/backend, and native/pyfoam at fixed numerics/cores."
