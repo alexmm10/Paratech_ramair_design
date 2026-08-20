@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### T15 DEV-GIT: gated local publication
+
+- Kept the repository lightweight and local: the artifact audit passes, the
+  working branch is `main`, author identity is project-local and no remote or
+  push was invented.
+- Added an explicit push preview that performs a Git dry-run and binds its
+  approval evidence to the current HEAD, branch and origin. A changed commit,
+  branch or remote invalidates the preview and blocks publication.
+- Exposed preview and publish as separate actions in the Environment page.
+
 ### T14 CONV-NOUTER: evidence-based resume selection
 
 - Added legacy-completion evidence for PIMPLE entries using final physical

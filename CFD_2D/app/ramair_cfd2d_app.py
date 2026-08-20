@@ -3133,14 +3133,16 @@ Los botones inician trabajos en segundo plano. La consola y **Archivos y logs** 
             if git_remote.strip():
                 command.extend(["--remote", git_remote.strip()])
             start_job("git_configure", command)
-    git_columns = st.columns(4)
+    git_columns = st.columns(5)
     if git_columns[0].button("Estado Git"):
         start_job("git_status", [sys.executable, git_tool, "status"])
     if git_columns[1].button("Crear snapshot"):
         start_job("git_snapshot", [sys.executable, git_tool, "snapshot"])
     if git_columns[2].button("Actualizar desde remoto"):
         start_job("git_pull", [sys.executable, git_tool, "pull"])
-    if git_columns[3].button("Publicar snapshots"):
+    if git_columns[3].button("Previsualizar publicación"):
+        start_job("git_push_preview", [sys.executable, git_tool, "preview-push"])
+    if git_columns[4].button("Publicar snapshots"):
         start_job("git_push", [sys.executable, git_tool, "push"])
     st.subheader("Cerrar aplicacion y liberar recursos")
     st.caption(

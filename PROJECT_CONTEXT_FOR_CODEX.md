@@ -263,6 +263,14 @@ are skipped before any clone, configuration write or execution-registry
 update. The only eligible resume target is n=4; scientific comparison remains
 unavailable until n=4 produces real completed evidence.
 
+### Git publication safety
+
+Git tracks only the lightweight source/configuration set and the repository
+artifact audit passes. Local identity is configured, but `origin` is not; no
+remote or push has been inferred. Publication now requires a successful
+dry-run preview for the exact current HEAD, branch and origin. Any subsequent
+change invalidates that preview.
+
 ### Canonical URANS identity
 
 Exactly one mutable production case exists for each structured key:
