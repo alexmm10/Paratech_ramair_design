@@ -96,10 +96,22 @@ def test_requested_adaptive_dt_is_a_ceiling_and_drives_2000_step_writes() -> Non
         time_step_mode="adaptive_physics_limited",
         deltaT_star=0.02,
         maxDeltaT_star=0.005,
+        field_write_control="timeStep",
         field_write_step_equivalent=2000,
     )
     assert cfg.deltaT == pytest.approx(cfg.maxDeltaT)
     assert cfg.field_write_interval == pytest.approx(cfg.maxDeltaT * 2000)
+
+
+def test_adjustable_runtime_writes_use_physical_interval_not_step_equivalent() -> None:
+    cfg = OpenFOAMCaseConfig(
+        velocity_m_s=20.0,
+        chord_m=1.0,
+        field_write_control="adjustableRunTime",
+        field_write_interval_star=0.25,
+        field_write_step_equivalent=2000,
+    )
+    assert cfg.field_write_interval == pytest.approx(0.25 / 20.0)
 
 
 def test_closed_and_open_residual_fields_are_written_exactly(tmp_path: Path) -> None:
@@ -146,5 +158,6 @@ def test_summary_traces_transport_writes_and_physical_ownership(tmp_path: Path) 
 def test_canonical_schema15_json_matches_contract() -> None:
     data = json.loads((ROOT / "CFD_2D/CFD_2D_inputs/config/cfd2d_solver_config.json").read_text(encoding="utf-8"))
     assert data["config_schema_version"] == 15
-    assert data["maxCo"] == pytest.approx(50.0)
-    assert data["topology_profiles"]["open_internal_cavity"]["maxCo"] == pytest.approx(25.0)
+    assert data["time_step_mode"] in {"adaptive_courant", "adaptive_physics_limited", "fixed"}
+    assert float(data["maxCo"]) > 0.0
+    assert float(data["topology_profiles"]["open_internal_cavity"]["maxCo"]) > 0.0

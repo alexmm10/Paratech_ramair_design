@@ -17,6 +17,8 @@ from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Any
 
+from ramair_2d_mesh_numerics import quality_controls_for_mesh
+
 from ramair_2d_timestep_advisor import (
     assessment_markdown,
     build_timestep_assessment,
@@ -144,13 +146,18 @@ def field_block(name: str, role: str, field: str, cfg: OpenFOAMCaseConfig, uvec:
             return f"    {name} {{ type fixedValue; value uniform 0; }}"
         if role == "farfield" and cfg.farfield_boundary_condition == "freestream":
             return (
-                f"    {name} {{ type freestream; freestreamValue uniform {3*cfg.nu:.10g}; "
-                f"value uniform {3*cfg.nu:.10g}; }}"
+                f"    {name} {{ type freestream; freestreamValue uniform {4*cfg.nu:.10g}; "
+                f"value uniform {4*cfg.nu:.10g}; }}"
             )
-        return f"    {name} {{ type fixedValue; value uniform {3*cfg.nu:.10g}; }}"
+        return f"    {name} {{ type fixedValue; value uniform {4*cfg.nu:.10g}; }}"
     if field == "nut":
         if role == "wall":
-            return f"    {name} {{ type nutUSpaldingWallFunction; value uniform 0; }}"
+            return f"    {name} {{ type fixedValue; value uniform 0; }}"
+        if role == "farfield" and cfg.farfield_boundary_condition == "freestream":
+            return (
+                f"    {name} {{ type freestream; freestreamValue uniform {cfg.nu:.10g}; "
+                f"value uniform {cfg.nu:.10g}; }}"
+            )
         return f"    {name} {{ type calculated; value uniform 0; }}"
     raise ValueError(field)
 
@@ -164,7 +171,7 @@ def read_json(path: Path, default: Any = None) -> Any:
 
 def write_json(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
 
 
 def backup_existing_case_dir(case_root: Path, case_dir: Path, variant: str, safe_alpha: str) -> Path | None:
@@ -286,6 +293,7 @@ class OpenFOAMCaseConfig:
     steady_initialization_enabled: bool = False
     steady_max_iterations: int = 20000
     steady_write_interval_iterations: int = 50
+    steady_native_residual_control_enabled: bool = True
     steady_residual_p: float | None = 1.0e-5
     steady_residual_U: float | None = 1.0e-5
     steady_residual_nuTilda: float | None = 1.0e-5
@@ -295,6 +303,14 @@ class OpenFOAMCaseConfig:
     steady_relaxation_nuTilda: float | None = 0.5
     steady_velocity_divergence_scheme: str = "bounded Gauss linearUpwind limited"
     steady_turbulence_divergence_scheme: str = "bounded Gauss upwind"
+    laplacian_scheme: str = "Gauss linear corrected"
+    steady_laplacian_scheme: str = "Gauss linear corrected"
+    transient_relaxation_p: float | None = 0.3
+    transient_relaxation_U: float | None = 0.9
+    transient_relaxation_nuTilda: float | None = 0.7
+    mesh_non_orthogonality_deg: float | None = None
+    mesh_quality_numerics_source: str | None = None
+    mesh_quality_numerics_mode: str = "automatic"
     temporal_accuracy: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -311,7 +327,7 @@ class OpenFOAMCaseConfig:
         return self.endTime_star * self.chord_m / max(self.velocity_m_s, 1e-12)
     @property
     def field_write_interval(self) -> float:
-        if self.field_write_step_equivalent > 0:
+        if self.field_write_control == "timeStep" and self.field_write_step_equivalent > 0:
             step = self.deltaT if self.time_step_mode == "fixed" else self.maxDeltaT
             return step * self.field_write_step_equivalent
         if self.field_write_interval_s is not None:
@@ -348,6 +364,13 @@ def topology_solver_config(
         )
     )
     topology = "open_internal_cavity" if has_open_inlet else "closed_external_airfoil"
+    if bool(raw_solver.get("single_solver_contract", False)):
+        effective = dict(raw_solver)
+        effective.pop("topology_profiles", None)
+        return effective, topology, str(
+            raw_solver.get("preset_id", "single_solver_contract")
+        )
+
     profiles = raw_solver.get("topology_profiles", {})
     if not isinstance(profiles, dict):
         raise ValueError("topology_profiles must be a JSON object")
@@ -398,6 +421,29 @@ def foam_optional_entry(name: str, value: int | float | None, indent: int = 4) -
     return " " * indent + f"{name} {rendered};\n"
 
 
+def apply_mesh_quality_numerics(
+    cfg: OpenFOAMCaseConfig,
+    mesh_root: Path,
+) -> dict[str, Any] | None:
+    """Make SIMPLE/PIMPLE orthogonal correction follow the checked mesh."""
+    if cfg.mesh_quality_numerics_mode == "manual":
+        return None
+    controls = quality_controls_for_mesh(mesh_root)
+    if controls is None:
+        return None
+    correctors = int(controls["n_non_orthogonal_correctors"])
+    scheme = str(controls["laplacian_scheme"])
+    cfg.steady_n_non_orthogonal_correctors = correctors
+    cfg.n_non_orthogonal_correctors = correctors
+    cfg.steady_laplacian_scheme = scheme
+    cfg.laplacian_scheme = scheme
+    cfg.mesh_non_orthogonality_deg = float(
+        controls["maximum_non_orthogonality_deg"]
+    )
+    cfg.mesh_quality_numerics_source = str(controls["source"])
+    return controls
+
+
 def format_optional(value: int | float | None, spec: str = ".6g") -> str:
     return "OpenFOAM default (entry omitted)" if value is None else format(value, spec)
 
@@ -407,6 +453,7 @@ def load_physical(
     alpha: float,
     reynolds: float | None = None,
     variant: str | None = None,
+    solver_config_path: Path | None = None,
 ) -> OpenFOAMCaseConfig:
     phys = read_json(cfd_inputs_root(case_root) / "case_package" / "physical_config.json", {})
     case_template = read_json(cfd_inputs_root(case_root) / "config" / "cfd2d_case_config_template.json", {})
@@ -414,7 +461,12 @@ def load_physical(
     merged_phys = dict(case_template or {})
     merged_phys.update(phys_defaults or {})
     merged_phys.update(phys or {})
-    raw_solver = read_json(cfd_inputs_root(case_root) / "config" / "cfd2d_solver_config.json", {})
+    raw_solver = read_json(
+        solver_config_path.resolve()
+        if solver_config_path is not None
+        else cfd_inputs_root(case_root) / "config" / "cfd2d_solver_config.json",
+        {},
+    )
     mesh_cfg = read_json(cfd_inputs_root(case_root) / "config" / "cfd2d_mesh_config.json", {})
     variant_manifest = read_json(
         cfd_inputs_root(case_root) / "case_package" / str(variant) / "manifest.json",
@@ -425,6 +477,22 @@ def load_physical(
         variant_manifest,
         variant,
     )
+    validation_write_strategy = solver.get("validation_write_strategy")
+    if isinstance(validation_write_strategy, dict) and bool(
+        validation_write_strategy.get("authoritative", True)
+    ):
+        # Validation owns one nondimensional write contract. Legacy seconds or
+        # step fields must not silently override its t* cadence.
+        solver["field_write_control"] = str(
+            validation_write_strategy.get("urans_control", "adjustableRunTime")
+        )
+        solver["field_write_interval_star"] = float(
+            validation_write_strategy.get("urans_interval_time_star", 0.1)
+        )
+        solver["field_write_interval_s"] = None
+        solver["purgeWrite"] = int(
+            validation_write_strategy.get("purge_write", 24)
+        )
     chord = float(variant_manifest.get("chord_m", merged_phys.get("chord_m", 1.0)))
     rho = float(merged_phys.get("rho", merged_phys.get("rho_kg_m3", 1.225)))
     mu = float(merged_phys.get("mu", merged_phys.get("mu_pa_s", 1.81e-5)))
@@ -477,9 +545,31 @@ def load_physical(
     }
     if invalid_relaxation:
         raise ValueError(f"steady_numerics relaxation factors must be in (0, 1]: {invalid_relaxation}")
+    transient_relaxation_raw = solver.get("transient_relaxation", {})
+    if not isinstance(transient_relaxation_raw, dict):
+        raise ValueError("transient_relaxation must be a JSON object")
+    transient_relaxation = {
+        "p": optional_float(transient_relaxation_raw, "p", 0.3),
+        "U": optional_float(transient_relaxation_raw, "U", 0.9),
+        "nuTilda": optional_float(transient_relaxation_raw, "nuTilda", 0.7),
+    }
+    invalid_transient_relaxation = {
+        name: value for name, value in transient_relaxation.items()
+        if value is not None and not (0.0 < value <= 1.0)
+    }
+    if invalid_transient_relaxation:
+        raise ValueError(
+            "transient_relaxation factors must be in (0, 1]: "
+            f"{invalid_transient_relaxation}"
+        )
     farfield_boundary_condition = str(solver.get("farfield_boundary_condition", "freestream"))
     if farfield_boundary_condition not in {"freestream", "fixed_velocity_fallback"}:
         raise ValueError("farfield_boundary_condition must be freestream or fixed_velocity_fallback")
+    mesh_quality_numerics_mode = str(
+        solver.get("mesh_quality_numerics_mode", "automatic")
+    ).strip().lower()
+    if mesh_quality_numerics_mode not in {"automatic", "manual"}:
+        raise ValueError("mesh_quality_numerics_mode must be automatic or manual")
     ddt_scheme = str(solver.get("ddt_scheme", "Euler")).strip()
     if ddt_scheme not in {"Euler", "backward", "CrankNicolson 0.9"}:
         raise ValueError(
@@ -623,6 +713,9 @@ def load_physical(
         steady_initialization_enabled=bool(solver.get("steady_initialization_enabled", False)),
         steady_max_iterations=max(10, int(solver.get("steady_max_iterations", 20000))),
         steady_write_interval_iterations=max(1, int(solver.get("steady_write_interval_iterations", 50))),
+        steady_native_residual_control_enabled=bool(
+            solver.get("steady_native_residual_control_enabled", True)
+        ),
         steady_residual_p=optional_float(steady_residual_control, "p", 1.0e-5),
         steady_residual_U=optional_float(steady_residual_control, "U", 1.0e-5),
         steady_residual_nuTilda=optional_float(steady_residual_control, "nuTilda", 1.0e-5),
@@ -634,6 +727,10 @@ def load_physical(
         steady_relaxation_nuTilda=steady_relaxation["nuTilda"],
         steady_velocity_divergence_scheme=steady_velocity_scheme,
         steady_turbulence_divergence_scheme=steady_turbulence_scheme,
+        transient_relaxation_p=transient_relaxation["p"],
+        transient_relaxation_U=transient_relaxation["U"],
+        transient_relaxation_nuTilda=transient_relaxation["nuTilda"],
+        mesh_quality_numerics_mode=mesh_quality_numerics_mode,
         temporal_accuracy=dict(solver.get("temporal_accuracy") or {}),
     )
 
@@ -673,7 +770,7 @@ boundaryField
 """, encoding="utf-8")
     (case_dir / "0" / "nuTilda").write_text(foam_header("volScalarField", "nuTilda") + f"""
 dimensions      [0 2 -1 0 0 0 0];
-internalField   uniform {3*cfg.nu:.10g};
+internalField   uniform {4*cfg.nu:.10g};
 boundaryField
 {{
 {blocks["nuTilda"]}
@@ -801,7 +898,7 @@ divSchemes
     div(phi,nuTilda) __STEADY_TURBULENCE_SCHEME__;
     div((nuEff*dev2(T(grad(U))))) Gauss linear;
 }
-laplacianSchemes { default Gauss linear corrected; }
+laplacianSchemes { default __STEADY_LAPLACIAN_SCHEME__; }
 interpolationSchemes { default linear; }
 snGradSchemes { default corrected; }
 wallDist { method meshWave; }
@@ -810,6 +907,7 @@ wallDist { method meshWave; }
         steady_schemes
         .replace("__STEADY_U_SCHEME__", cfg.steady_velocity_divergence_scheme)
         .replace("__STEADY_TURBULENCE_SCHEME__", cfg.steady_turbulence_divergence_scheme)
+        .replace("__STEADY_LAPLACIAN_SCHEME__", cfg.steady_laplacian_scheme)
     )
     (directory / "fvSchemes").write_text(
         foam_header("dictionary", "fvSchemes") + steady_schemes,
@@ -828,7 +926,7 @@ wallDist { method meshWave; }
         "    {\n"
         f"{steady_residual_entries}"
         "    }\n"
-        if steady_residual_entries else ""
+        if steady_residual_entries and cfg.steady_native_residual_control_enabled else ""
     )
     steady_algorithm_controls = foam_optional_entry(
         "nNonOrthogonalCorrectors", cfg.steady_n_non_orthogonal_correctors, 4
@@ -892,6 +990,13 @@ SIMPLE
             "U": cfg.steady_residual_U,
             "nuTilda": cfg.steady_residual_nuTilda,
         },
+        "native_residual_control_enabled": cfg.steady_native_residual_control_enabled,
+        "convergence_note": (
+            "Residuals are diagnostic only; the staged runner evaluates residuals together "
+            "with moving coefficient means and fluctuations."
+            if not cfg.steady_native_residual_control_enabled else
+            "OpenFOAM SIMPLE residualControl may stop this stage."
+        ),
         "numerics": {
             "potential_flow_solver": {
                 "field": "Phi",
@@ -935,6 +1040,7 @@ def write_system(case_dir: Path, cfg: OpenFOAMCaseConfig, patches: list[dict[str
         if cfg.time_step_mode != "fixed"
         else "adjustTimeStep  no;"
     )
+    average_start_time = max(0.0, min(cfg.endTime, cfg.average_from_fraction * cfg.endTime))
     (case_dir / "system" / "controlDict").write_text(foam_header("dictionary", "controlDict") + f"""
 application     {cfg.solver};
 solver          {cfg.solver_module};
@@ -1029,6 +1135,43 @@ functions
         executeControl  writeTime;
         writeControl    writeTime;
     }}
+    Q
+    {{
+        type            Q;
+        libs            ("libfieldFunctionObjects.so");
+        result          Q;
+        executeControl  writeTime;
+        writeControl    writeTime;
+    }}
+    productionFieldAverage
+    {{
+        type            fieldAverage;
+        libs            ("libfieldFunctionObjects.so");
+        writeControl    writeTime;
+        timeStart       {average_start_time:.10g};
+        cleanRestart    no;
+        fields
+        (
+            U
+            {{
+                mean        on;
+                prime2Mean  on;
+                base        time;
+            }}
+            p
+            {{
+                mean        on;
+                prime2Mean  on;
+                base        time;
+            }}
+            nuTilda
+            {{
+                mean        on;
+                prime2Mean  off;
+                base        time;
+            }}
+        );
+    }}
 }}
 """, encoding="utf-8")
     # OpenFOAM 13/14 read fvModels/fvConstraints as top-level dictionaries of
@@ -1054,13 +1197,14 @@ divSchemes
     div(phi,nuTilda) __TRANSIENT_TURBULENCE_SCHEME__;
     div((nuEff*dev2(T(grad(U))))) Gauss linear;
 }
-laplacianSchemes { default Gauss linear corrected; }
+laplacianSchemes { default __TRANSIENT_LAPLACIAN_SCHEME__; }
 interpolationSchemes { default linear; }
 snGradSchemes { default corrected; }
 wallDist { method meshWave; }
 """
         .replace("__TRANSIENT_U_SCHEME__", cfg.transient_velocity_divergence_scheme)
-        .replace("__TRANSIENT_TURBULENCE_SCHEME__", cfg.transient_turbulence_divergence_scheme),
+        .replace("__TRANSIENT_TURBULENCE_SCHEME__", cfg.transient_turbulence_divergence_scheme)
+        .replace("__TRANSIENT_LAPLACIAN_SCHEME__", cfg.laplacian_scheme),
         encoding="utf-8",
     )
     fv_solution = """
@@ -1080,10 +1224,7 @@ __PIMPLE_CONTROLS__
     pRefValue 0;
 __OUTER_RESIDUAL_CONTROL__
 }
-relaxationFactors
-{
-    equations { ".*" 1; }
-}
+__TRANSIENT_RELAXATION__
 """
     pimple_controls = (
         foam_optional_entry("nOuterCorrectors", cfg.n_outer_correctors, 4)
@@ -1111,10 +1252,28 @@ relaxationFactors
             *field_blocks,
             "    }",
         ])
+    transient_relaxation_entries = " ".join(
+        f"{name} {value:.10g};"
+        for name, value in (
+            ("p", cfg.transient_relaxation_p),
+            ("U", cfg.transient_relaxation_U),
+            ("nuTilda", cfg.transient_relaxation_nuTilda),
+        )
+        if value is not None
+    )
+    transient_relaxation = (
+        "relaxationFactors\n"
+        "{\n"
+        f"    equations {{ {transient_relaxation_entries} "
+        "pFinal 1; UFinal 1; nuTildaFinal 1; }}\n"
+        "}\n"
+        if transient_relaxation_entries else ""
+    )
     fv_solution = (
         fv_solution
         .replace("__PIMPLE_CONTROLS__", pimple_controls)
         .replace("__OUTER_RESIDUAL_CONTROL__", outer_residual_control)
+        .replace("__TRANSIENT_RELAXATION__", transient_relaxation)
     )
     (case_dir / "system" / "fvSolution").write_text(
         foam_header("dictionary", "fvSolution") + fv_solution,
@@ -1212,6 +1371,13 @@ def case_input_summary(cfg: OpenFOAMCaseConfig, mesh_root: Path, poly_src: Path 
             "pressure_velocity": cfg.n_correctors,
             "non_orthogonal": cfg.n_non_orthogonal_correctors,
         },
+        "mesh_quality_numerics": {
+            "maximum_non_orthogonality_deg": cfg.mesh_non_orthogonality_deg,
+            "n_non_orthogonal_correctors": cfg.n_non_orthogonal_correctors,
+            "laplacian_scheme": cfg.laplacian_scheme,
+            "source": cfg.mesh_quality_numerics_source,
+            "automatic": cfg.mesh_quality_numerics_source is not None,
+        },
         "outer_corrector_residual_control": cfg.outer_corrector_residual_control,
         "transport_correction": {
             "transportCorrectionFinal": cfg.transport_correction_final,
@@ -1268,6 +1434,26 @@ def case_input_summary(cfg: OpenFOAMCaseConfig, mesh_root: Path, poly_src: Path 
         "alpha_deg": cfg.alpha_deg,
         "velocity_m_s": cfg.velocity_m_s,
         "velocity_components_m_s": {"Ux": Ux, "Uy": Uy, "Uz": 0.0},
+        "initial_conditions": {
+            "U_internal_m_s": {"Ux": Ux, "Uy": Uy, "Uz": 0.0},
+            "p_internal_m2_s2": 0.0,
+            "p_semantics": "kinematic gauge pressure; its arbitrary uniform offset does not alter incompressible forces",
+            "nuTilda_internal_m2_s": 4.0 * cfg.nu,
+            "nut_internal_m2_s": 0.0,
+            "farfield_velocity": "freestream direction and magnitude from alpha and U_inf",
+            "farfield_pressure": "freestreamPressure with gauge reference zero",
+            "wall_velocity": "noSlip",
+            "wall_turbulence": "nuTilda=fixedValue 0; nut=fixedValue 0 (low-Re SA, no wall function)",
+            "wall_turbulence": "nuTilda zero; nut low-Re wall treatment",
+            "initialization_strategy": (
+                "uniform freestream volume followed by the mandatory SIMPLE/RANS initialization; "
+                "the final RANS fields U, p, nuTilda, nut and phi seed URANS"
+            ),
+            "review_note": (
+                "This is a robust external-aerodynamics initialization, not a prescribed final flow field. "
+                "The stationary stage develops the boundary layer and pressure field before physical-time integration."
+            ),
+        },
         "dynamic_pressure_pa": cfg.dynamic_pressure_pa,
         "spanwise_thickness_chord": cfg.spanwise_thickness_chord,
         "spanwise_thickness_m": cfg.spanwise_thickness_m,
@@ -1297,6 +1483,15 @@ def case_input_summary(cfg: OpenFOAMCaseConfig, mesh_root: Path, poly_src: Path 
         "endTime_star": cfg.endTime_star,
         "field_write_interval_star": cfg.field_write_interval_star,
         "average_from_fraction": cfg.average_from_fraction,
+        "field_average": {
+            "enabled": True,
+            "time_start_s": cfg.average_from_fraction * cfg.endTime,
+            "time_start_star": cfg.average_from_fraction * cfg.endTime_star,
+            "clean_restart": False,
+            "mean_fields": ["U", "p", "nuTilda"],
+            "second_moment_fields": ["U", "p"],
+            "semantics": "Only the configured production window contributes to URANS means.",
+        },
         "maxCo": cfg.maxCo,
         "time_step_assessment": time_step_assessment,
         "purgeWrite": cfg.purgeWrite,
@@ -1311,7 +1506,10 @@ def case_input_summary(cfg: OpenFOAMCaseConfig, mesh_root: Path, poly_src: Path 
             "retained_convective_time_star": retained_convective_time,
             "note": "Planning estimate using 130 bytes/cell; inspect actual time-directory sizes after the first writes.",
         },
-        "derived_fields_at_each_volume_write": ["Cp", "Co", "yPlus", "wallShearStress", "vorticity"],
+        "derived_fields_at_each_volume_write": [
+            "Cp", "Co", "yPlus", "wallShearStress", "vorticity", "Q",
+            "UMean", "UPrime2Mean", "pMean", "pPrime2Mean", "nuTildaMean",
+        ],
         "scalar_histories_each_iteration": ["forceCoeffs", "residuals", "Courant/deltaT in solver log"],
         "purge_write_scope": "volume fields only; function-object scalar histories are retained",
         "physical_input_ownership": {
@@ -1337,6 +1535,17 @@ def case_input_summary(cfg: OpenFOAMCaseConfig, mesh_root: Path, poly_src: Path 
             "lRef": cfg.chord_m,
             "Aref": cfg.reference_area_m2,
             "CofR_x_c": cfg.CofR_x_c,
+            "integrated_contributions": {
+                "pressure_normal_force": True,
+                "viscous_shear_force": True,
+                "pressure_moment": True,
+                "viscous_shear_moment": True,
+            },
+            "implementation_note": (
+                "OpenFOAM forceCoeffs derives from forcesBase: fN integrates rho*Sf*(p-pRef) "
+                "and fT integrates magSf*devTau on every selected wall patch; both contribute "
+                "to force and moment about CofR."
+            ),
         },
     }
 
@@ -1482,6 +1691,7 @@ def write_case(
     overwrite: bool = False,
     require_converted_polymesh: bool = False,
     existing_case_action: str = "archive",
+    solver_config_path: Path | None = None,
 ) -> Path:
     mesh_root = cfd_meshes_root(case_root) / variant
     if require_approval and not (mesh_root / "MESH_APPROVED.flag").exists():
@@ -1495,7 +1705,8 @@ def write_case(
     if poly_src is not None:
         reject_forbidden_boundary(poly_src)
     boundary_patches = parse_boundary_patches(poly_src)
-    cfg = load_physical(case_root, alpha, reynolds, variant)
+    cfg = load_physical(case_root, alpha, reynolds, variant, solver_config_path)
+    automatic_mesh_numerics = apply_mesh_quality_numerics(cfg, mesh_root)
     safe_alpha = f"alpha_{alpha:+.3f}".replace("+", "p").replace("-", "m").replace(".", "p")
     case_dir = cfd_cases_root(case_root) / variant / safe_alpha
     if case_dir.exists() and overwrite:
@@ -1531,6 +1742,8 @@ def write_case(
         "mesh_status": mesh_status,
         "converted_polyMesh_source": str(poly_src) if poly_src else None,
         "boundary_patches": boundary_patches,
+        "solver_config_source": str(solver_config_path.resolve()) if solver_config_path else None,
+        "automatic_mesh_quality_numerics": automatic_mesh_numerics,
     }
     write_json(case_dir / "case_config.json", applied_config)
     write_json(case_dir / "applied_solver_configuration.json", {
@@ -1584,6 +1797,12 @@ def parse_args() -> argparse.Namespace:
         help="Policy applied by the writer when --overwrite finds an active case.",
     )
     p.add_argument("--require-converted-polymesh", action="store_true", help="Fail unless mesh_builder produced a real constant/polyMesh with gmshToFoam/checkMesh.")
+    p.add_argument(
+        "--solver-config",
+        type=Path,
+        default=None,
+        help="Optional study-specific solver JSON. The global active configuration remains unchanged.",
+    )
     return p.parse_args()
 
 
@@ -1605,6 +1824,7 @@ def main() -> None:
             args.overwrite,
             args.require_converted_polymesh,
             args.existing_case_action,
+            args.solver_config,
         )
         print(f"Wrote OpenFOAM case: {path.resolve()}")
 

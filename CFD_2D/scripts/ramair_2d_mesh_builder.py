@@ -7294,6 +7294,11 @@ def run_openfoam_mesh_checks(
     profile_points: pd.DataFrame | None = None,
 ) -> None:
     """Run gmshToFoam/checkMesh only when explicitly requested by the caller."""
+    # This function is also called directly by the experimental mesh CLI, not
+    # only through the Streamlit JobManager.  In the former case Python may
+    # not inherit a shell that sourced OpenFOAM's bashrc, so resolve the tools
+    # here as well instead of silently reporting them as missing.
+    activate_openfoam_environment()
     report["check_mesh_requested"] = True
 
     def mirror_converted_polymesh(conv_dir: Path) -> None:

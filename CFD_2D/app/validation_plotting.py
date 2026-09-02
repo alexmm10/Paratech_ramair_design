@@ -83,8 +83,13 @@ def residual_figure(
         invalid = (~np.isfinite(frame["value"])) | (frame["value"] <= 0)
         invalid_count = int(invalid.sum())
         frame.loc[invalid, "value"] = np.nan
-        frame = _downsample(frame.dropna(subset=["iteration"]))
+        frame = frame.dropna(subset=["iteration"])
         for field, group in frame.groupby("field", sort=False):
+            # Archived and active SIMPLE histories remain complete from
+            # iteration zero. URANS is still downsampled per equation because
+            # long physical-time campaigns can contain millions of solves.
+            if mode != "RANS":
+                group = _downsample(group, maximum=700)
             axis.plot(
                 group["iteration"],
                 group["value"],
@@ -93,6 +98,11 @@ def residual_figure(
             )
     axis.set_yscale("log")
     axis.set_xlabel("Iteracion SIMPLE" if mode == "RANS" else "Tiempo fisico [s]")
+    if mode == "RANS":
+        axis.set_xlim(left=0.0)
+        if axis.lines:
+            axis.relim()
+            axis.autoscale_view(scalex=False, scaley=True)
     axis.set_ylabel("Residuo inicial")
     axis.set_title(
         "Convergencia de residuos - RANS/SIMPLE"
@@ -132,6 +142,7 @@ def coefficient_figure(
     mode: str,
     separate_cd_cm: bool = False,
     cd_epsilon: float = 1e-12,
+    rans_discard_initial: int = 0,
 ) -> tuple[plt.Figure, dict[str, int]]:
     """Return the requested aerodynamic-coefficient plot with safe Cl/Cd."""
     mode = mode.upper()
@@ -160,6 +171,8 @@ def coefficient_figure(
         frame["Time"] = pd.to_numeric(frame["Time"], errors="coerce")
         for column in ("Cl", "Cd", "Cm"):
             frame[column] = pd.to_numeric(frame.get(column), errors="coerce")
+        if mode == "RANS" and int(rans_discard_initial) > 0:
+            frame = frame[frame["Time"] >= float(rans_discard_initial)]
         frame = _downsample(frame.dropna(subset=["Time"]))
         efficiency = np.full(len(frame), np.nan, dtype=float)
         valid = (
@@ -213,6 +226,8 @@ def coefficient_figure(
     else:
         primary.text(0.5, 0.5, "Esperando forceCoeffs", ha="center", va="center")
     primary.set_ylabel("Coeficiente aerodinamico [-]")
+    if mode == "RANS":
+        primary.set_xlim(left=0.0)
     (
         secondary_panel if secondary_panel is not None else primary
     ).set_xlabel(x_label)

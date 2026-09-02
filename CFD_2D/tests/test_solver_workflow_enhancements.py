@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -71,14 +72,40 @@ from ramair_2d_openfoam_staged_runner import (  # noqa: E402
     ensure_potential_phi_solver,
     ensure_steady_stability_numerics,
     reset_transient_time_origin,
+    run_transient_phase_plan,
     steady_force_plateau,
 )
 from ramair_2d_postprocess import (  # noqa: E402
+    detect_simulation_mode,
     derived_field_inventory,
     plot_delta_t,
     plot_force_coeffs,
     write_aerodynamic_efficiency_products,
 )
+
+
+def test_postprocess_auto_mode_does_not_label_simple_iterations_as_urans(tmp_path: Path) -> None:
+    case = tmp_path / "case"
+    (case / "system").mkdir(parents=True)
+    (case / "50").mkdir()
+    (case / "system" / "fvSchemes").write_text(
+        "ddtSchemes { default steadyState; }\n", encoding="utf-8"
+    )
+    mode, evidence = detect_simulation_mode(case, "AUTO")
+    assert mode == "RANS"
+    assert evidence["reason"] == "no_physical_time_evidence"
+
+
+def test_postprocess_auto_mode_accepts_transient_time_evidence(tmp_path: Path) -> None:
+    case = tmp_path / "case"
+    (case / "system").mkdir(parents=True)
+    (case / "0.019591").mkdir()
+    (case / "system" / "fvSchemes").write_text(
+        "ddtSchemes { default backward; }\n", encoding="utf-8"
+    )
+    mode, evidence = detect_simulation_mode(case, "AUTO")
+    assert mode == "URANS"
+    assert evidence["transient_scheme"] is True
 from ramair_2d_profile_case_builder import chord_m_for_variant_request  # noqa: E402
 from ramair_2d_scale_validation_geometry import build_scaled_variant  # noqa: E402
 from ramair_2d_solver_performance import benchmark_from_log  # noqa: E402
@@ -87,13 +114,26 @@ from ramair_2d_validation import (  # noqa: E402
     _result_record,
     collect_ramair_points,
     generate_validation_report,
+    polar_reference_error_statistics,
+    remove_active_workspace_validation,
     update_active_workspace_validation,
+)
+from ramair_2d_ls1_validation_study import (  # noqa: E402
+    validation_phase_plan,
+    validation_solver_profile,
 )
 from workflow_backend import (  # noqa: E402
     openfoam_case_from_command,
     prepare_existing_simulation,
     request_openfoam_clean_stop,
     request_openfoam_sweep_stop,
+)
+from ls1_validation_page import (  # noqa: E402
+    _alpha_from_dir,
+    _effective_validation_status,
+    _phase_at_convective_time,
+    _validation_monitor_mode,
+    validation_phase_plan,
 )
 
 
@@ -381,6 +421,10 @@ def test_writer_applies_configured_transient_order_and_pimple_correctors(tmp_pat
     assert "type            CourantNo;" in control
     assert "result          Co;" in control
     assert "executeControl  writeTime;" in control
+    assert "productionFieldAverage" in control
+    assert "type            fieldAverage;" in control
+    assert "cleanRestart    no;" in control
+    assert "UMean" not in control  # OpenFOAM creates the mean-field names at runtime.
     description = time_integration_description(cfg)
     assert "transient PIMPLE, backward ddt" in description
     assert "first-order Euler ddt" not in description
@@ -444,12 +488,17 @@ def test_open_wall_topology_is_explicit_and_does_not_require_baffles(tmp_path: P
         {"name": "farfield", "type": "patch"},
         {"name": "frontAndBack", "type": "empty"},
     ]
-    audit = case_input_summary(cfg, tmp_path, None, patches)[
-        "open_airfoil_wall_topology_audit"
-    ]
+    summary = case_input_summary(cfg, tmp_path, None, patches)
+    audit = summary["open_airfoil_wall_topology_audit"]
     assert audit["status"] == "PASS"
     assert audit["create_baffles_required"] is False
     assert audit["inlet_is_connected_fluid_not_patch"] is True
+    initial = summary["initial_conditions"]
+    initial_u = initial["U_internal_m_s"]
+    assert (initial_u["Ux"] ** 2 + initial_u["Uy"] ** 2) ** 0.5 == pytest.approx(20.0)
+    assert initial["p_internal_m2_s2"] == 0.0
+    assert initial["nuTilda_internal_m2_s"] == pytest.approx(4.0 * cfg.nu)
+    assert "phi" in initial["initialization_strategy"]
 
 
 def test_general_urans_uses_adaptive_outer_exit_but_validation_does_not(tmp_path: Path) -> None:
@@ -608,7 +657,7 @@ def test_topology_profiles_distinguish_closed_and_open_numerics() -> None:
     assert opened["steady_numerics"]["U_relaxation"] == pytest.approx(0.4)
 
 
-def test_canonical_open_solver_uses_requested_courant_and_steady_window() -> None:
+def test_editable_solver_snapshot_uses_supported_controls_and_steady_window() -> None:
     solver = json.loads(
         (ROOT / "CFD_2D/CFD_2D_inputs/config/cfd2d_solver_config.json").read_text(
             encoding="utf-8"
@@ -620,15 +669,13 @@ def test_canonical_open_solver_uses_requested_courant_and_steady_window() -> Non
         )
     )
     assert solver["config_schema_version"] >= 15
-    assert solver["time_step_mode"] == "adaptive_physics_limited"
-    assert (
-        solver["topology_profiles"]["open_internal_cavity"]["time_step_mode"]
-        == "adaptive_physics_limited"
-    )
-    assert solver["maxCo"] == pytest.approx(50.0)
-    assert solver["topology_profiles"]["open_internal_cavity"]["maxCo"] == pytest.approx(25.0)
-    assert solver["n_outer_correctors"] == 10
-    assert solver["topology_profiles"]["open_internal_cavity"]["n_outer_correctors"] == 15
+    supported_modes = {"adaptive_courant", "adaptive_physics_limited", "fixed"}
+    assert solver["time_step_mode"] in supported_modes
+    assert solver["topology_profiles"]["open_internal_cavity"]["time_step_mode"] in supported_modes
+    assert float(solver["maxCo"]) > 0.0
+    assert float(solver["topology_profiles"]["open_internal_cavity"]["maxCo"]) > 0.0
+    assert int(solver["n_outer_correctors"]) >= 1
+    assert int(solver["topology_profiles"]["open_internal_cavity"]["n_outer_correctors"]) >= 1
     assert list(solver["outer_corrector_residual_control"]["fields"]) == ["U", "nuTilda"]
     assert list(solver["topology_profiles"]["open_internal_cavity"]["outer_corrector_residual_control"]["fields"]) == ["U", "p"]
     assert solver["steady_max_iterations"] == 20000
@@ -647,7 +694,13 @@ def test_writer_uses_openfoam13_freestream_farfield_by_default(tmp_path: Path) -
     write_0(tmp_path, cfg, patches)
     assert "type freestreamVelocity;" in (tmp_path / "0" / "U").read_text(encoding="utf-8")
     assert "type freestreamPressure;" in (tmp_path / "0" / "p").read_text(encoding="utf-8")
-    assert "type freestream;" in (tmp_path / "0" / "nuTilda").read_text(encoding="utf-8")
+    nu_tilda = (tmp_path / "0" / "nuTilda").read_text(encoding="utf-8")
+    nut = (tmp_path / "0" / "nut").read_text(encoding="utf-8")
+    assert "type freestream;" in nu_tilda
+    assert f"internalField   uniform {4.0 * cfg.nu:.10g};" in nu_tilda
+    assert "nutUSpaldingWallFunction" not in nut
+    assert "airfoil_wall { type fixedValue; value uniform 0; }" in nut
+    assert "farfield { type freestream;" in nut
 
 
 def test_resume_uses_latest_time_and_extends_convective_duration(tmp_path: Path) -> None:
@@ -738,7 +791,140 @@ def test_validation_overlay_includes_only_matching_real_results(tmp_path: Path) 
     assert (output / "validation_percentage_errors.csv").is_file()
     assert (output / "validation_max_percentage_error_summary.csv").is_file()
     assert (output / "validation_max_percentage_error_summary.png").is_file()
+    assert (output / "validation_reference_differences.csv").is_file()
+    assert (output / "validation_err_norm_summary.csv").is_file()
+    assert (output / "validation_err2_peak_summary.csv").is_file()
+    assert (output / "validation_err_norm_summary.png").is_file()
+    assert (output / "validation_err2_peak_summary.png").is_file()
+    assert (output / "LS1_0417_CL_over_CD_alpha_validation.png").is_file()
+    assert (output / "validation_relative_differences_Cl.png").is_file()
+    assert (output / "validation_relative_differences_Cd.png").is_file()
+    assert (output / "validation_relative_differences_Cl_over_Cd.png").is_file()
     assert set(summary["maximum_absolute_percentage_errors"]) == {"Cl", "Cd", "Cl/Cd"}
+
+
+def test_validation_reference_norm_and_peak_errors_use_only_published_points() -> None:
+    ramair = pd.DataFrame({
+        "alpha_deg": [0.0, 2.0], "Cl": [0.0, 1.1], "Cd": [0.10, 0.22],
+    })
+    cl_alpha = pd.DataFrame({
+        "series": ["Experimental", "Experimental"],
+        "alpha_deg": [0.0, 2.0], "Cl": [0.0, 1.0],
+    })
+    cd_cl = pd.DataFrame({
+        "series": ["Experimental", "Experimental"],
+        "Cl": [0.0, 1.0], "Cd": [0.10, 0.20],
+    })
+    points, norms, peaks = polar_reference_error_statistics(ramair, cl_alpha, cd_cl)
+    assert len(points) == 6
+    cl_norm = norms[(norms["reference"] == "Experimental") & (norms["variable"] == "Cl")].iloc[0]
+    assert cl_norm["sample_count"] == 2
+    assert cl_norm["err_percent"] == pytest.approx((0.1**2 / 2.0) ** 0.5 * 100.0)
+    cl_peak = peaks[(peaks["reference"] == "Experimental") & (peaks["variable"] == "Cl")].iloc[0]
+    assert cl_peak["err2_percent"] == pytest.approx(10.0)
+
+
+def test_validation_relative_error_omits_near_zero_reference_without_infinity() -> None:
+    ramair = pd.DataFrame({
+        "alpha_deg": [0.0, 2.0], "Cl": [0.02, 1.1], "Cd": [0.10, 0.22],
+    })
+    cl_alpha = pd.DataFrame({
+        "series": ["Experimental", "Experimental"],
+        "alpha_deg": [0.0, 2.0], "Cl": [0.0, 1.0],
+    })
+    cd_cl = pd.DataFrame({
+        "series": ["Experimental", "Experimental"],
+        "Cl": [0.0, 1.0], "Cd": [0.10, 0.20],
+    })
+    points, _, _ = polar_reference_error_statistics(ramair, cl_alpha, cd_cl)
+    cl_points = points[(points["reference"] == "Experimental") & (points["variable"] == "Cl")]
+    at_zero = cl_points[cl_points["alpha_deg"].abs() < 1.0e-12]
+    assert len(at_zero) == 1
+    assert at_zero.iloc[0]["relative_status"] == "OMITTED_NEAR_ZERO_REFERENCE"
+    assert pd.isna(at_zero.iloc[0]["relative_difference_percent"])
+
+
+def test_ls1_validation_solver_profile_enforces_rans_and_abcde_production() -> None:
+    profile = validation_solver_profile({"steady_max_iterations": 12, "maxCo": 1.0})
+    assert profile["steady_max_iterations"] == 15000
+    assert profile["steady_residual_control"] == {"p": 1.0e-6, "U": 1.0e-6, "nuTilda": 1.0e-6}
+    assert profile["steady_numerics"]["U_relaxation"] == pytest.approx(0.7)
+    assert profile["steady_numerics"]["nuTilda_relaxation"] == pytest.approx(0.7)
+    assert profile["maxCo"] == pytest.approx(50.0)
+    assert profile["n_outer_correctors"] == 5
+    assert set(profile["outer_corrector_residual_control"]["fields"]) == {
+        "p", "U", "nuTilda"
+    }
+    plan = validation_phase_plan()
+    assert [stage["stage"] for stage in plan["stages"]] == list("ABCDE")
+    assert plan["stages"][-2]["duration_time_star"] == pytest.approx(10.0)
+    assert plan["stages"][-1]["duration_time_star"] == pytest.approx(50.0)
+    assert plan["average_from_fraction"] == pytest.approx(14.0 / 64.0)
+
+
+def test_validation_phase_resume_skips_already_completed_phases(tmp_path: Path) -> None:
+    case = tmp_path / "case"
+    case.mkdir()
+    (case / "case_config.json").write_text(
+        json.dumps({
+            "chord_m": 1.0,
+            "velocity_m_s": 50.0,
+            "field_write_interval_star": 0.1,
+            "purgeWrite": 24,
+        }),
+        encoding="utf-8",
+    )
+    # t*=64 at U=50 m/s and c=1 m is 1.28 s: every A-E phase is complete.
+    (case / "1.28").mkdir()
+    plan_path = case / "phase_plan.json"
+    plan_path.write_text(json.dumps(validation_phase_plan()), encoding="utf-8")
+
+    code, reports = run_transient_phase_plan(
+        SimpleNamespace(case=case), plan_path,
+    )
+
+    assert code == 0
+    assert [row["phase"] for row in reports] == list("ABCDE")
+    assert all(row["status"] == "ALREADY_COMPLETED_ON_RESUME" for row in reports)
+    sampling = json.loads((case / "validation_sampling_window.json").read_text())
+    assert sampling["production_stage"] == "E"
+    assert sampling["total_time_star"] == pytest.approx(64.0)
+
+
+def test_validation_case_directory_and_monitor_mode_are_unambiguous() -> None:
+    assert _alpha_from_dir("alpha_p12p000") == pytest.approx(12.0)
+    assert _alpha_from_dir("alpha_m4p500") == pytest.approx(-4.5)
+    assert _alpha_from_dir("alpha_12") is None
+    assert _validation_monitor_mode(None, {"mode": "URANS"}) == "URANS"
+    assert _validation_monitor_mode(None, {"mode": "RANS"}) == "RANS"
+    assert _validation_monitor_mode(
+        None, {}, {"status": "STEADY_AWAITING_USER_DECISION"}
+    ) == "RANS"
+    assert _validation_monitor_mode(
+        None, {}, {"status": "TRANSIENT_STAGE_PARTIAL"}
+    ) == "URANS"
+    assert _effective_validation_status(
+        {"status": "STOPPED_PARTIAL"},
+        {"status": "TRANSIENT_STAGE_FINISHED"},
+    ) == "STOPPED_PARTIAL"
+    assert _effective_validation_status(
+        {"status": "RUN_COMPLETED"},
+        {"status": "TRANSIENT_STAGE_FINISHED", "production_complete": True},
+    ) == "TRANSIENT_STAGE_FINISHED"
+    assert _effective_validation_status(
+        {"status": "RUN_COMPLETED"},
+        {"status": "TRANSIENT_STAGE_FINISHED"},
+    ) == "TRANSIENT_STAGE_PARTIAL"
+
+
+def test_validation_monitor_infers_active_phase_from_convective_time() -> None:
+    plan = validation_phase_plan()
+    assert _phase_at_convective_time(plan, 0.5)[0] == "A"
+    assert _phase_at_convective_time(plan, 3.0)[0] == "C"
+    phase, delta_t_star = _phase_at_convective_time(plan, 13.0)
+    assert phase == "D"
+    assert delta_t_star == pytest.approx(0.0025)
+    assert _phase_at_convective_time(plan, 14.01)[0] == "E"
 
 
 def test_validation_update_is_scoped_to_selected_work_case(tmp_path: Path) -> None:
@@ -786,6 +972,14 @@ def test_validation_update_is_scoped_to_selected_work_case(tmp_path: Path) -> No
     assert (output / "LS1_0417_CD_CL_validation.png").is_file()
     assert not (tmp_path / "CFD_2D/results/validation").exists()
 
+    removed = remove_active_workspace_validation(tmp_path, "reference_uncut", 4.0)
+    assert removed == output
+    remaining = pd.read_csv(output / "ramair_validation_points.csv")
+    assert remaining.empty
+    # Removal regenerates the evidence instead of leaving stale figures behind.
+    assert (output / "LS1_0417_CL_alpha_validation.png").is_file()
+    assert (output / "LS1_0417_CD_CL_validation.png").is_file()
+
 
 def test_validation_update_accepts_headerless_empty_history_files(tmp_path: Path) -> None:
     reference_src = ROOT / "CFD_2D/reference_data/LS1_0417_Ghoreyshi_2016"
@@ -830,6 +1024,61 @@ def test_validation_update_accepts_headerless_empty_history_files(tmp_path: Path
     assert output == validation_dir
     assert list(pd.read_csv(validation_dir / "ramair_validation_points.csv")["alpha_deg"]) == [4.0]
     assert list(pd.read_csv(validation_dir / "ignored_nonmatching_results.csv").columns)
+
+
+def test_validation_incomplete_publication_requires_explicit_override(tmp_path: Path) -> None:
+    reference_src = ROOT / "CFD_2D/reference_data/LS1_0417_Ghoreyshi_2016"
+    shutil.copytree(reference_src, tmp_path / "CFD_2D/reference_data/LS1_0417_Ghoreyshi_2016")
+    workspace = tmp_path / "Results/validation_case"
+    workspace.mkdir(parents=True)
+    (workspace / "case_manifest.json").write_text(
+        json.dumps({
+            "variant": "reference_uncut",
+            "validation": {"enabled": True, "variant": "reference_uncut"},
+        }),
+        encoding="utf-8",
+    )
+    state = tmp_path / "CFD_2D/app_state"
+    state.mkdir(parents=True)
+    (state / "active_workspace.json").write_text(
+        json.dumps({"case": "validation_case", "stage": "workspace"}),
+        encoding="utf-8",
+    )
+    result = tmp_path / "CFD_2D/results/reference_uncut/alpha_p4p000"
+    case = tmp_path / "CFD_2D/openfoam_cases/reference_uncut/alpha_p4p000"
+    result.mkdir(parents=True)
+    case.mkdir(parents=True)
+    (result / "forceCoeffs_mean.csv").write_text(
+        "Cl,Cd,Cm\n0.8,0.04,0.02\n", encoding="utf-8",
+    )
+    (result / "case_summary.json").write_text(
+        '{"status":"PROCESSED","run_status":{"status":"RUNNING"}}',
+        encoding="utf-8",
+    )
+    (case / "case_config.json").write_text(
+        json.dumps({"alpha_deg": 4.0, "reynolds": 1.9e6, "mach_input": 0.15}),
+        encoding="utf-8",
+    )
+
+    output = update_active_workspace_validation(tmp_path, "reference_uncut", 4.0)
+    assert output == workspace / "Validation"
+    assert not (output / "ramair_validation_points.csv").exists()
+    rejected = pd.read_csv(output / "ignored_nonmatching_results.csv")
+    assert list(rejected["reason"]) == ["result_not_validation_eligible"]
+
+    overridden = update_active_workspace_validation(
+        tmp_path, "reference_uncut", 4.0, allow_incomplete=True,
+    )
+    points = pd.read_csv(overridden / "ramair_validation_points.csv")
+    assert list(points["alpha_deg"]) == [4.0]
+    assert bool(points.loc[0, "published_incomplete"])
+    assert "explicit user override" in points.loc[0, "publication_warning"]
+
+    # Re-publishing replaces the angle rather than accumulating stale copies.
+    update_active_workspace_validation(
+        tmp_path, "reference_uncut", 4.0, allow_incomplete=True,
+    )
+    assert len(pd.read_csv(overridden / "ramair_validation_points.csv")) == 1
 
 
 def test_field_inventory_recognizes_openfoam_gzip_fields(tmp_path: Path) -> None:
@@ -1148,6 +1397,8 @@ def test_steady_archive_creates_independent_paraview_snapshots_and_resets_transi
         for field in ("U", "p", "phi", "nuTilda"):
             (directory / field).write_text(f"{field}-{value}", encoding="utf-8")
     archive.mkdir(parents=True)
+    (archive / "initial_zero").mkdir()
+    (archive / "initial_zero" / "U").write_text("U-initial", encoding="utf-8")
     report = archive_steady_outputs(
         case_dir,
         archive,
@@ -1159,6 +1410,8 @@ def test_steady_archive_creates_independent_paraview_snapshots_and_resets_transi
     assert (case_dir / "0" / "phi").read_text(encoding="utf-8") == "phi-300"
     assert (archive / "paraview_case" / "100" / "U").is_file()
     assert (archive / "paraview_case" / "300" / "U").is_file()
+    assert (archive / "paraview_case" / "0" / "U").read_text(encoding="utf-8") == "U-initial"
+    assert report["paraview_case"]["paraview_snapshots"] == [0.0, 100.0, 300.0]
     assert (archive / "paraview_case" / "steady_initialization.foam").is_file()
     assert (archive / "paraview_case" / "postProcessing" / "ParaView" / "open_case.py").is_file()
     assert report["paraview_case"]["status"] == "PREPARED_FOR_PARAVIEW"

@@ -27,6 +27,7 @@ import os
 import shutil
 import sys
 import time
+import re
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any
@@ -60,6 +61,13 @@ SUPPORTED_VARIANTS = {
     "optimized",
 }
 VARIANT_ALIASES = {"standard": "open_ramair", "optimized": "open_ramair"}
+
+
+def is_open_variant_name(name: str) -> bool:
+    normalized = str(name).lower()
+    return normalized.startswith("open_ramair") or normalized.startswith("ross_") or normalized in {
+        "standard", "optimized",
+    }
 
 
 def project_root_from_case_root(case_root: Path) -> Path:
@@ -1044,7 +1052,7 @@ def export_case_package(case_root: Path, variant: str, output_dir: Path, physica
     boundary_frames = []
     geom_rows = []
     for var_name in variants:
-        is_open_variant = var_name in {"open_ramair", "ross_standard_8p4", "ross_minimum_4p0", "standard", "optimized"}
+        is_open_variant = is_open_variant_name(var_name)
         pv = load_profile_variant(case_root, var_name)
         vout = output_dir / var_name
         vout.mkdir(parents=True, exist_ok=True)
@@ -1089,8 +1097,8 @@ def export_case_package(case_root: Path, variant: str, output_dir: Path, physica
         "is_closed_reference": v in {"closed_reference", "reference_uncut", "reference_uncut_validation_1m"},
         "source_file": str((cfd_inputs_root(case_root) / "geometry" / v).resolve()),
         "can_mesh_diagnostic": True,
-        "openfoam_ready": v in {"closed_reference", "reference_uncut", "reference_uncut_validation_1m"},
-        "notes": "open profile requires finite-thickness open-cavity meshing before OpenFOAM" if v in {"open_ramair", "ross_standard_8p4", "ross_minimum_4p0", "standard", "optimized"} else "exported"
+        "openfoam_ready": not is_open_variant_name(v),
+        "notes": "open profile requires open-cavity meshing before OpenFOAM" if is_open_variant_name(v) else "exported"
     } for v in variants]).to_csv(output_dir / "variant_index.csv", index=False)
     manifest = {
         "case_root": str(case_root.resolve()),
@@ -1141,7 +1149,7 @@ def run_case_package_validation(output_dir: Path, variants: list[str] | None = N
             pts = pd.read_csv(vdir / "points.csv")
             add(f"{v}_no_nan_coordinates", not pts[["x_norm", "z_norm", "x_m", "z_m"]].isna().any().any())
             add(f"{v}_positive_chord", float(pts.x_norm.max() - pts.x_norm.min()) > 0)
-        if v in {"open_ramair", "ross_standard_8p4", "ross_minimum_4p0", "standard", "optimized"} and (vdir / "patches.json").exists():
+        if is_open_variant_name(v) and (vdir / "patches.json").exists():
             patches = json.loads((vdir / "patches.json").read_text(encoding="utf-8"))
             add(f"{v}_has_inlet_marker_if_open", ("inlet_opening_marker" in patches or "ram_air_inlet" in patches) or v in {"standard", "optimized"})
         if v in {"closed_reference", "reference_uncut", "reference_uncut_validation_1m"} and (vdir / "edges.csv").exists() and (vdir / "points.csv").exists():
@@ -1168,19 +1176,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--case-root", type=Path, required=True)
     p.add_argument(
         "--variant",
-        choices=[
-            "open_ramair",
-            "closed_reference",
-            "reference_uncut",
-            "reference_uncut_validation_1m",
-            "ross_standard_8p4",
-            "ross_minimum_4p0",
-            "standard",
-            "optimized",
-            "both",
-            "all",
-        ],
         default="both",
+        help=(
+            "Physical geometry identifier already exported below CFD_2D_inputs/geometry, "
+            "or one of both/all/standard/optimized."
+        ),
     )
     p.add_argument("--alpha-start", type=float, default=-5.0)
     p.add_argument("--alpha-end", type=float, default=15.0)
@@ -1203,6 +1203,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if not re.fullmatch(r"[A-Za-z0-9_.+-]+", str(args.variant)):
+        raise ValueError("--variant must be a filesystem-safe geometry identifier")
     if args.generate_mesh:
         raise NotImplementedError("Meshing will be implemented in the next module.")
     case_root = Path(args.case_root)

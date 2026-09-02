@@ -1176,6 +1176,7 @@ def accept_current_six_bases(
     project_root: Path,
     *,
     confirmation: bool,
+    alpha_deg: float | None = None,
 ) -> dict[str, Any]:
     """Accept every evidence-backed canonical base under one explicit action."""
     if not confirmation:
@@ -1185,13 +1186,17 @@ def accept_current_six_bases(
         _field_path,
         _latest_restart_state,
         create_reviewed_checkpoint,
+        mesh_angle_id,
     )
-    from ramair_2d_study_registry import MESH_IDS
+    from ramair_2d_study_registry import MESH_IDS, load_study
 
     source = "EXPLICIT_USER_BATCH_INSTRUCTION_2026-08-04"
     accepted: list[dict[str, Any]] = []
     exceptions: list[dict[str, Any]] = []
-    for mesh_id in MESH_IDS:
+    study = load_study(project_root)
+    selected_alpha = None if alpha_deg is None else float(alpha_deg)
+    for base_mesh_id in MESH_IDS:
+        mesh_id = mesh_angle_id(study, base_mesh_id, selected_alpha)
         checkpoint_root = _checkpoint_root(Path(project_root).resolve(), mesh_id)
         checkpoint = read_json(
             checkpoint_root / "checkpoint_manifest.json", {}
@@ -1254,6 +1259,7 @@ def accept_current_six_bases(
         "schema_version": 1,
         "status": "COMPLETED" if not exceptions else "COMPLETED_WITH_EXCEPTIONS",
         "review_source": source,
+        "alpha_deg": selected_alpha,
         "accepted": accepted,
         "exceptions": exceptions,
         "accepted_count": len(accepted),
@@ -1267,7 +1273,12 @@ def accept_current_six_bases(
     }
     output = (
         active_workspace_root(Path(project_root).resolve())
-        / "reports/rans_six_base_batch_acceptance_20260804.json"
+        / "reports"
+        / (
+            f"rans_six_base_batch_acceptance_alpha_{selected_alpha:g}.json"
+            if selected_alpha is not None
+            else "rans_six_base_batch_acceptance_20260804.json"
+        )
     )
     write_json_atomic(output, report)
     return {**report, "report": str(output)}

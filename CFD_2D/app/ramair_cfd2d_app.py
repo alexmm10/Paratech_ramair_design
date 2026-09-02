@@ -13,9 +13,13 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import numpy as np
 import streamlit as st
 
-SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
+APP_DIR = Path(__file__).resolve().parent
+SCRIPTS_DIR = APP_DIR.parent / "scripts"
+if str(APP_DIR) not in sys.path:
+    sys.path.insert(0, str(APP_DIR))
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
@@ -25,6 +29,7 @@ from boundary_layer_estimates import (  # noqa: E402
     turbulent_flat_plate_delta99,
 )
 from ramair_2d_timestep_advisor import temporal_frequency_budget  # noqa: E402
+from ramair_profile_utils import read_and_canonicalize_profile_2d  # noqa: E402
 from ramair_geometry_workspace import (  # noqa: E402
     TE_LABELS,
     geometry_dto,
@@ -32,6 +37,8 @@ from ramair_geometry_workspace import (  # noqa: E402
     load_profile_catalog,
     preview_series,
 )
+from open_experimental_mesh_page import render_open_experimental_mesh  # noqa: E402
+from closed_experimental_mesh_page import render_closed_experimental_mesh  # noqa: E402
 
 import workflow_backend as _workflow_backend
 from mesh_configuration import (
@@ -116,7 +123,6 @@ from workflow_backend import (
     mesh_refinement_analysis_command,
     mesh_refinement_study_command,
     migrate_solver_config_schema,
-    mesh_optimizer_command,
     open_mesh_viewer,
     open_checkmesh_problem_viewer,
     open_paraview_case,
@@ -181,6 +187,65 @@ st.markdown(
 
 
 ROOT = find_project_root()
+
+
+PROFILE_X_DOMAIN = [-0.1, 1.1]
+
+
+def canonical_profile_plot_rows(
+    profile: pd.DataFrame,
+    *,
+    series: str = "Perfil activo",
+) -> tuple[list[dict[str, Any]], pd.DataFrame, pd.DataFrame]:
+    """Return one continuous LE-upper-TE-lower-LE plotting contour."""
+    canonical = read_and_canonicalize_profile_2d(
+        profile,
+        profile_kind="plot_preview",
+        input_order="auto",
+        has_inlet="auto",
+        te_closure_mode="straight",
+    )
+    if canonical.errors or canonical.upper.empty or canonical.lower.empty:
+        cleaned = pd.DataFrame({
+            "x_norm": pd.to_numeric(profile.get("x"), errors="coerce"),
+            "z_norm": pd.to_numeric(profile.get("y"), errors="coerce"),
+        }).dropna().drop_duplicates().sort_values(["x_norm", "z_norm"])
+        rows = [
+            {"x/c": float(row.x_norm), "z/c": float(row.z_norm), "elemento": series, "orden": index}
+            for index, row in enumerate(cleaned.itertuples(index=False))
+        ]
+        return rows, cleaned, cleaned
+    upper = canonical.upper[["x_norm", "z_norm"]].sort_values("x_norm")
+    lower = canonical.lower[["x_norm", "z_norm"]].sort_values("x_norm")
+    contour = pd.concat([upper, lower.iloc[::-1]], ignore_index=True).drop_duplicates(
+        subset=["x_norm", "z_norm"], keep="first"
+    )
+    rows = [
+        {"x/c": float(row.x_norm), "z/c": float(row.z_norm), "elemento": series, "orden": index}
+        for index, row in enumerate(contour.itertuples(index=False))
+    ]
+    return rows, upper, lower
+
+
+def profile_line_chart(rows: list[dict[str, Any]], *, height: int) -> None:
+    st.vega_lite_chart(
+        pd.DataFrame(rows),
+        {
+            "mark": {"type": "line", "clip": True},
+            "height": height,
+            "encoding": {
+                "x": {
+                    "field": "x/c", "type": "quantitative",
+                    "scale": {"domain": PROFILE_X_DOMAIN, "zero": False},
+                },
+                "y": {"field": "z/c", "type": "quantitative", "scale": {"zero": False}},
+                "color": {"field": "elemento", "type": "nominal"},
+                "detail": {"field": "elemento", "type": "nominal"},
+                "order": {"field": "orden", "type": "quantitative"},
+            },
+        },
+        width="stretch",
+    )
 
 
 def revisioned_widget_key(base: str) -> str:
@@ -603,8 +668,7 @@ PROJECT_TAB_LAYOUT = [
     ("Perfil y TE", ["airfoil_processing"]),
     ("Crossports", ["crossports"]),
     ("Tejido y lineas", ["fabric_and_lines"]),
-    ("CATIA", ["catia_generation", "catia_exports", "optional_modules"]),
-    ("CFD 2D y plots", ["cfd_2d_exports", "cfd_2d", "debug_plots"]),
+    ("CATIA & CFD exports", ["catia_exports", "cfd_2d_exports", "debug_plots", "catia_generation"]),
 ]
 
 PROJECT_TAB_INTROS = {
@@ -613,8 +677,7 @@ PROJECT_TAB_INTROS = {
     "Perfil y TE": "Controla limpieza, normalizacion, separacion upper/lower y cierre del trailing edge. Estas opciones cambian la geometria exportada, no la fisica CFD.",
     "Crossports": "Configura los orificios internos y sus margenes geometricos. El preprocesador valida que puedan construirse antes de que CATIA consuma los datos.",
     "Tejido y lineas": "Agrupa propiedades estructurales y representaciones CAD de tela y lineas; las estrategias experimentales se mantienen identificadas como tales.",
-    "CATIA": "Selecciona entidades y formatos que Generate_RamAir_Canopy_MAIN.CATScript debe construir o exportar. Guardar aqui no inicia CATIA.",
-    "CFD 2D y plots": "Elige las geometrías entregadas al caso CFD 2D y los diagnosticos del preproceso. El mallado se configura y ejecuta despues en Malla.",
+    "CATIA & CFD exports": "Agrupa primero los formatos CATIA y las interfaces CFD 2D. Las opciones de generacion CAD estables quedan al final como valores avanzados.",
 }
 
 
@@ -750,9 +813,24 @@ PROJECT_FIELD_GROUPS: dict[str, list[tuple[str, list[str], bool]]] = {
         ("Distribucion y forma", ["enable_crossports", "shape", "ellipse_orientation", "count", "position_mode", "x_positions_chord", "x_start_chord", "x_end_chord", "width_fraction_chord", "height_fraction_local_thickness", "edge_clearance_fraction_local_thickness", "points_per_loop", "apply_to", "centerline_mode", "custom_specs"], False),
         ("Opciones avanzadas CATIA: modificar solo ante fallos", ["cut_mode", "split_orientation", "cut_strategy", "cutter_extrude_mode", "cutter_extrude_factor_semicell", "cutter_extrude_min_mm", "cutter_extrude_max_mm", "cutter_extrude_mm"], True),
     ],
+    "fabric_and_lines": [
+        ("Propiedades de tejido", ["enable_fabric_thickness_properties", "fabric_thickness_mm", "fabric_density_kg_m3", "fabric_material", "fabric_thickness_strategy"], False),
+        ("Propiedades de lineas", ["default_suspension_line_diameter_mm", "suspension_line_cad_strategy"], False),
+    ],
+    "catia_generation": [
+        ("Opciones avanzadas / defaults de generacion CATIA", ["create_rib_fills", "create_loft_panels", "create_te_closure_panels", "force_export_to_base_folder"], True),
+    ],
     "optional_modules": [
         ("Modulos opcionales", ["enable_canopy_stabilizers", "enable_tip_side_bulge", "system_config_json"], False),
     ],
+}
+
+PROJECT_HIDDEN_FIELDS: dict[str, set[str]] = {
+    "fabric_and_lines": {
+        "enable_fabric_thickness", "fabric_thickness_mode", "fabric_thickness_offset_side",
+        "fabric_thickness_include_ribs", "fabric_thickness_include_stabilizers",
+        "fabric_thickness_include_tip_bulge", "enable_suspension_tube_geometry",
+    },
 }
 
 
@@ -1106,7 +1184,12 @@ def render_grouped_object(
                 )
                 rendered.add(key)
         st.divider()
-    ungrouped = [key for key in data if key not in rendered and key != "enable_suspension_lines"]
+    section_name = prefix.rsplit(".", 1)[-1]
+    hidden = PROJECT_HIDDEN_FIELDS.get(section_name, set())
+    ungrouped = [
+        key for key in data
+        if key not in rendered and key != "enable_suspension_lines" and key not in hidden
+    ]
     if ungrouped:
         with st.expander("Compatibilidad y parametros secundarios", expanded=False):
             st.caption("Se conservan para compatibilidad con el preprocesador actual.")
@@ -1760,7 +1843,7 @@ def geometry_2d_workspace_editor(selected_case_manifest: dict[str, Any]) -> None
             pd.DataFrame(chart_rows),
             {"mark": {"type": "line", "clip": True}, "height": 360,
              "encoding": {
-                 "x": {"field": "x/c", "type": "quantitative", "scale": {"zero": False}},
+                 "x": {"field": "x/c", "type": "quantitative", "scale": {"domain": PROFILE_X_DOMAIN, "zero": False}},
                  "y": {"field": "z/c", "type": "quantitative", "scale": {"zero": False}},
                  "color": {"field": "serie", "type": "nominal"},
                  "detail": {"field": "serie", "type": "nominal"},
@@ -1784,7 +1867,7 @@ def inlet_design_editor() -> None:
     st.caption(
         "Repaneliza el perfil cerrado con XFOIL, calcula una polar viscosa al Reynolds/Mach de diseno, "
         "localiza el punto de remanso en cada solucion convergida y recorta la envolvente del borde de ataque. "
-        "XFLR5 puede usarse despues para inspeccion manual, pero la ejecucion automatica usa la consola reproducible de XFOIL."
+        "La ejecucion automatica usa XFOIL en consola y conserva sus polares y metadatos de forma reproducible."
     )
     config = load_config(ROOT, "inlet_design")
     workflow_conditions = (load_config(ROOT, "workflow").get("case_conditions") or {})
@@ -1860,7 +1943,7 @@ def inlet_design_editor() -> None:
     check_col, info_col = st.columns([1, 3])
     if check_col.button("Verificar XFOIL"):
         start_job("xfoil_environment", xfoil_check_command(ROOT))
-    info_col.caption("La verificacion ejecuta y cierra XFOIL; no inicia XFLR5 ni modifica perfiles.")
+    info_col.caption("La verificacion ejecuta y cierra XFOIL sin modificar perfiles.")
     if run_design:
         start_job("inlet_design", inlet_design_command(ROOT))
 
@@ -1926,13 +2009,114 @@ def catia_system_config_editor() -> dict[str, Any]:
             suspension = dict(data.get("suspension") or {})
             constraints = dict(data.get("constraints") or {})
             suspension["enabled"] = suspension_enabled
+            legacy_selection = dict(data.get("loaded_rib_selection") or {})
+            legacy_mode = str(legacy_selection.get("mode") or "all_loaded")
+            displayed_mode = "all_loaded" if legacy_mode == "all_loaded" else "explicit_rib_ids"
+            displayed_mode = st.selectbox(
+                "Costillas cargadas",
+                ["all_loaded", "explicit_rib_ids"],
+                index=["all_loaded", "explicit_rib_ids"].index(displayed_mode),
+                format_func=lambda value: {
+                    "all_loaded": "Todas las costillas cargadas (automatico)",
+                    "explicit_rib_ids": "IDs de costilla explicitos",
+                }[value],
+                help="all_loaded escala automaticamente con el numero de celdas; no usa una lista fija de seis estaciones.",
+            )
+            explicit_ids = legacy_selection.get("rib_ids") or legacy_selection.get("indices") or []
+            if displayed_mode == "explicit_rib_ids":
+                explicit_raw = st.text_input(
+                    "IDs de costilla cargada",
+                    value=", ".join(map(str, explicit_ids)),
+                    help="Lista separada por comas. Los IDs se validan contra las costillas generadas.",
+                )
+                try:
+                    explicit_ids = [int(value.strip()) for value in explicit_raw.split(",") if value.strip()]
+                except ValueError:
+                    st.error("Los IDs de costilla deben ser enteros separados por comas.")
+            edited["loaded_rib_selection"] = {
+                **legacy_selection,
+                "mode": displayed_mode,
+                "rib_ids": explicit_ids if displayed_mode == "explicit_rib_ids" else [],
+            }
+
+            rigging_mode = str(suspension.get("rigging_mode") or (
+                "R_over_b" if suspension.get("derive_anhedral_from_R_over_b", True) else "explicit_angle"
+            ))
+            rigging_mode = st.radio(
+                "Definicion del rigging",
+                ["R_over_b", "explicit_angle"],
+                index=["R_over_b", "explicit_angle"].index(rigging_mode if rigging_mode in {"R_over_b", "explicit_angle"} else "R_over_b"),
+                format_func=lambda value: "Derivar desde R/b" if value == "R_over_b" else "Angulo explicito",
+                horizontal=True,
+            )
+            suspension["rigging_mode"] = rigging_mode
+            suspension["derive_anhedral_from_R_over_b"] = rigging_mode == "R_over_b"
+            if rigging_mode == "R_over_b":
+                constraints["R_over_b"] = st.number_input(
+                    "R/b",
+                    min_value=0.01,
+                    value=float(constraints.get("R_over_b", 0.8)),
+                    format="%.6g",
+                )
+            else:
+                angles = dict(data.get("angles") or {})
+                angles["theta_deg"] = st.number_input(
+                    "Angulo de rigging explicito [deg]",
+                    value=float(angles.get("theta_deg") or 0.0),
+                    format="%.6g",
+                )
+                edited["angles"] = angles
             edited["suspension"] = suspension
             edited["constraints"] = constraints
-            render_suspension = {key: value for key, value in suspension.items() if key not in {"enabled", "derive_anhedral_from_R_over_b"}}
-            render_constraints = {key: value for key, value in constraints.items() if key != "R_over_b"}
+            render_suspension = {
+                key: value for key, value in suspension.items()
+                if key not in {"enabled", "derive_anhedral_from_R_over_b", "rigging_mode"}
+            }
+            render_constraints = {
+                "max_bifurcation_angle_deg": float(constraints.get("max_bifurcation_angle_deg", 55.0))
+            }
+            render_anchors = {
+                key: value for key, value in dict(data.get("anchors") or {}).items()
+                if key not in {"name_format", "tip_anchor_mode"}
+            }
             render_data["suspension"] = render_suspension
             render_data["constraints"] = render_constraints
+            render_data["anchors"] = render_anchors
+            sections_to_render = [
+                section for section in ("banks", "anchors", "cascades", "canopy_reference", "constraints")
+                if section in sections_to_render
+            ]
             st.divider()
+        elif selected_label == "Estabilizadores":
+            stabilizers = dict(data.get("stabilizers") or {})
+            tip_bulge = dict(data.get("tip_side_bulge") or {})
+            stabilizers["active"] = st.toggle(
+                "Activar estabilizador lateral",
+                value=bool(stabilizers.get("active", False)),
+            )
+            tip_bulge["active"] = st.toggle(
+                "Activar tip side bulge",
+                value=bool(tip_bulge.get("active", False)),
+            )
+            edited["stabilizers"] = stabilizers
+            edited["tip_side_bulge"] = tip_bulge
+            render_data["stabilizers"] = {key: value for key, value in stabilizers.items() if key != "active"}
+            render_data["tip_side_bulge"] = {key: value for key, value in tip_bulge.items() if key != "active"}
+        elif selected_label == "Tejido y outputs":
+            fabric = dict(data.get("fabric_thickness") or {})
+            outputs = dict(data.get("outputs") or {})
+            fabric["catia_offsets_enabled"] = False
+            fabric["catia_offset_mode"] = "none"
+            outputs["catia_create_tubes"] = False
+            edited["fabric_thickness"] = fabric
+            edited["outputs"] = outputs
+            render_data["fabric_thickness"] = {
+                key: value for key, value in fabric.items()
+                if key not in {"catia_offsets_enabled", "catia_offset_mode"}
+            }
+            render_data["outputs"] = {
+                key: value for key, value in outputs.items() if key != "catia_create_tubes"
+            }
         updates = render_selected_sections(render_data, sections_to_render, prefix=name)
         for section, values in updates.items():
             if isinstance(values, dict) and isinstance(edited.get(section), dict):
@@ -1952,6 +2136,36 @@ def catia_system_config_editor() -> dict[str, Any]:
         st.success("Configuracion del sistema guardada; se copiara como snapshot trazable en CATIA/Inputs.")
         if backup:
             st.caption(f"Copia anterior: {backup}")
+    if selected_label == "Estabilizadores":
+        stabilizer = dict(edited.get("stabilizers") or {})
+        profile_path = ROOT / "CATIA/Inputs/Canopy/Profile_used/ramair_profile_used_normalized.csv"
+        if profile_path.is_file():
+            profile = pd.read_csv(profile_path)
+            rows, upper, lower = canonical_profile_plot_rows(profile)
+            start = float(stabilizer.get("chord_start_x_c", 0.15))
+            end = float(stabilizer.get("chord_end_x_c", 0.95))
+            apex = float(stabilizer.get("apex_x_c", 0.62))
+            chord_mm = float((load_config(ROOT, "project").get("canopy_geometry") or {}).get("chord_mm", 3016.0))
+            height = float(stabilizer.get("height_mm", 450.0)) / max(chord_mm, 1.0)
+            lower_ordered = lower.sort_values("x_norm")
+            lower_x = lower_ordered["x_norm"].to_numpy(float)
+            lower_z = lower_ordered["z_norm"].to_numpy(float)
+            start_z = float(np.interp(start, lower_x, lower_z))
+            end_z = float(np.interp(end, lower_x, lower_z))
+            apex_surface_z = float(np.interp(apex, lower_x, lower_z))
+            offset = len(rows)
+            for order, (x, z) in enumerate(
+                ((start, start_z), (apex, apex_surface_z - height), (end, end_z)),
+                start=offset,
+            ):
+                rows.append({"x/c": x, "z/c": z, "elemento": "Estabilizador", "orden": order})
+            st.markdown("**Vista lateral del estabilizador**")
+            profile_line_chart(rows, height=340)
+    if "placeholder" in json.dumps(data.get("line_properties") or {}).lower() or "placeholder" in json.dumps(data.get("fabric_thickness") or {}).lower():
+        st.warning(
+            "No se encontro localmente una fuente Preralta verificable con propiedades de material. "
+            "Se conservan los placeholders existentes y no se han inventado valores."
+        )
     return edited
 
 
@@ -1959,6 +2173,7 @@ def active_variant_chord_m(variant: str) -> float | None:
     candidates = [
         ROOT / "CFD_2D/CFD_2D_inputs/case_package" / variant / "manifest.json",
         ROOT / "CFD_2D/CFD_2D_inputs/geometry" / variant / "manifest.json",
+        ROOT / "CFD_2D/CFD_2D_inputs/geometry" / variant / "profile_manifest.json",
     ]
     for path in candidates:
         data = read_json(path, {}) or {}
@@ -1969,6 +2184,44 @@ def active_variant_chord_m(variant: str) -> float | None:
         if chord > 0.0:
             return chord
     return None
+
+
+def variant_display_name(variant_name: str) -> str:
+    """Describe meaningful preprocessed geometry without relying on raw folder names."""
+    manifest = read_json(
+        ROOT / "CFD_2D/CFD_2D_inputs/geometry" / variant_name / "profile_manifest.json", {}
+    ) or {}
+    source = str(manifest.get("base_profile") or manifest.get("source_profile") or manifest.get("source") or "")
+    source_name = Path(source.replace("\\", "/")).stem
+    if source_name.lower() in {"", "ramair_profile_used_normalized", "profile_used"}:
+        project = load_config(ROOT, "project")
+        source = str((project.get("profile_inputs") or {}).get("main_profile") or "")
+        source_name = Path(source.replace("\\", "/")).stem or "perfil activo"
+    inlet = manifest.get("nominal_inlet_percent_chord")
+    reynolds = manifest.get("reference_reynolds")
+    mach = manifest.get("reference_mach")
+    if variant_name.startswith("ross_"):
+        return f"Ross {str(manifest.get('ross_case_type') or variant_name).replace('_', ' ').title()} ({source_name})"
+    if variant_name.startswith("open_ramair"):
+        details = [source_name]
+        if reynolds is not None:
+            details.append(f"Re={float(reynolds):g}")
+        if mach is not None:
+            details.append(f"M={float(mach):g}")
+        if inlet is not None:
+            details.append(f"inlet={float(inlet):g}% c")
+        chord = active_variant_chord_m(variant_name)
+        if chord is not None:
+            details.append(f"c={chord:g} m")
+        prefix = "Open RAM-Air validation" if "validation_1m" in variant_name else "Open RAM-Air"
+        return f"{prefix} ({' | '.join(details)})"
+    if variant_name.startswith("closed_reference"):
+        return f"Closed Reference ({source_name})"
+    if variant_name == "reference_uncut_validation_1m":
+        return f"Reference Uncut 1 m ({source_name})"
+    if variant_name == "reference_uncut":
+        return f"Reference Uncut ({source_name})"
+    return variant_name.replace("_", " ").title()
 
 
 def estimated_first_cell_height_m(chord_m: float, target_y_plus: float) -> dict[str, float]:
@@ -2659,7 +2912,10 @@ def job_console() -> None:
                 )
             except Exception as exc:
                 st.error(f"No se pudo solicitar la parada PIMPLE: {exc}")
-        elif job.stage in {"solver", "solver_sweep", "steady_extend", "steady_start_transient"}:
+        elif job.stage in {
+            "solver", "solver_sweep", "steady_extend", "steady_start_transient",
+            "ls1_validation_solver", "ls1_validation_solver_queue",
+        }:
             try:
                 cdir = openfoam_case_from_command(job.command)
                 if cdir is None:
@@ -2728,6 +2984,57 @@ def show_images(paths: list[Path], columns: int = 2) -> None:
     cols = st.columns(columns)
     for index, path in enumerate(existing):
         cols[index % columns].image(str(path), caption=path.name, width='stretch')
+
+
+def geometry_actions_panel() -> None:
+    """Keep the two principal geometry actions visible before configuration tabs."""
+    st.subheader("Acciones principales")
+    catia_status = cached_catia_detection(str(ROOT))
+    catia_available = bool(catia_status.get("available"))
+    catia_inputs_ready = bool(catia_status.get("inputs_ready"))
+    catia_macro_ready = bool(catia_status.get("macro_ready"))
+    ready = catia_available and catia_inputs_ready and catia_macro_ready
+    columns = st.columns([1, 1, 3])
+    if columns[0].button("Ejecutar preprocesador", type="primary", key="geometry-run-preprocessor"):
+        start_job("preprocess", preprocessor_command(ROOT))
+    if columns[1].button(
+        "Generar modelo CATIA",
+        disabled=not (catia_available and catia_inputs_ready and catia_macro_ready),
+        key="geometry-run-catia",
+        help="Disponible solo si CATIA V5, el CATScript y CATIA/Inputs se detectan localmente.",
+    ):
+        start_job(
+            "catia_macro",
+            catia_macro_command(ROOT, str(catia_status.get("cnext") or "")),
+        )
+    if ready:
+        columns[2].success("CATIA V5 listo. El preprocesador y CATIA se ejecutan siempre por separado.")
+    elif catia_status.get("available"):
+        columns[2].warning("CATIA esta instalado, pero primero deben generarse sus Inputs con el preprocesador.")
+    else:
+        columns[2].caption("CATIA V5 no se ha detectado; el boton CAD queda desactivado sin bloquear CFD 2D.")
+
+
+def geometry_summary_paths(view: str, variant_name: str) -> list[Path]:
+    """Return only representative previews for the selected geometry dimension."""
+    if view == "Geometria 2D":
+        profile_root = ROOT / "CFD_2D/CFD_2D_inputs/geometry" / variant_name
+        counterpart = "closed_reference" if variant_has_open_inlet(variant_name) else "open_ramair"
+        candidates = [
+            profile_root / "profile_preview.png",
+            ROOT / "CFD_2D/CFD_2D_inputs/geometry" / counterpart / "profile_preview.png",
+            ROOT / "CATIA/Inputs/Canopy/Profile_used/ramair_profile_used_cfd_contour_te_zoom.png",
+        ]
+    else:
+        candidates = [
+            ROOT / "CATIA/Inputs/ramair_chord_distribution.png",
+            ROOT / "CATIA/Inputs/ramair_suspension_network_preview.png",
+        ]
+    result: list[Path] = []
+    for candidate in candidates:
+        if candidate.is_file() and candidate not in result:
+            result.append(candidate)
+    return result
 
 
 def render_mesh_quality_summary(report_path: Path) -> None:
@@ -2819,10 +3126,36 @@ active_workspace = read_json(ROOT / "CFD_2D/app_state/active_workspace.json", {}
 preferred_library_case = st.session_state.pop("_preferred_library_case_after_restore", None)
 active_case_name = str(active_workspace.get("case") or "") if isinstance(active_workspace, dict) else ""
 temporary_workspace_label = "Workspace temporal (no guardar automaticamente)"
-library_default = (
-    preferred_library_case
-    if preferred_library_case in library_case_names
-    else temporary_workspace_label
+if preferred_library_case in library_case_names:
+    active_case_name = str(preferred_library_case)
+loaded_case_name = active_case_name if active_case_name in saved_case_map else ""
+library_case_selection = loaded_case_name or temporary_workspace_label
+set_workcase_selection(ROOT, loaded_case_name or None)
+
+loaded_manifest = saved_case_map.get(loaded_case_name) or {}
+loaded_stages = loaded_manifest.get("stages") or {}
+loaded_mesh_entry = loaded_stages.get("mesh") or {}
+loaded_case_entry = loaded_stages.get("case") or {}
+active_mesh_label = str(
+    (active_workspace.get("packages") or {}).get("mesh")
+    or loaded_mesh_entry.get("active_package")
+    or "Missing"
+)
+active_cfd_case_label = str(
+    (active_workspace.get("packages") or {}).get("case")
+    or loaded_case_entry.get("active_package")
+    or "Missing"
+)
+context_alpha = st.session_state.get(
+    revisioned_widget_key("active-alpha"),
+    active_workspace.get("alpha_deg"),
+)
+context_conditions = workflow.get("case_conditions") or {}
+active_alpha_label = (
+    f"{active_cfd_case_label} | alpha={float(context_alpha):g} deg | "
+    f"Re={float(context_conditions.get('reynolds', 0.0)):g} | M={float(context_conditions.get('mach', 0.0)):g}"
+    if context_alpha is not None and active_cfd_case_label != "Missing"
+    else active_cfd_case_label
 )
 st.title("RamAir: Design and CFD")
 st.caption(
@@ -2830,65 +3163,26 @@ st.caption(
     "mediante una orden explicita y cuando se detecta una instalacion local de CATIA V5."
 )
 st.subheader("Contexto activo")
-context_columns = st.columns([3, 2, 2])
-library_case_selection = context_columns[0].selectbox(
-    "Caso de trabajo",
-    [temporary_workspace_label, *library_case_names],
-    index=[temporary_workspace_label, *library_case_names].index(library_default),
-    key=revisioned_widget_key("results-library-case"),
-    help=(
-        "Al iniciar se usa el workspace temporal. Selecciona una carpeta existente y cargala "
-        "para restaurar geometria, caso CFD, malla y solver de forma trazable."
-    ),
-)
-set_workcase_selection(
-    ROOT,
-    None if library_case_selection == temporary_workspace_label else library_case_selection,
-)
-context_columns[1].metric("Perfil CFD cargado", variant)
-context_columns[2].metric(
-    "Workspace",
-    "Temporal" if library_case_selection == temporary_workspace_label else library_case_selection,
-)
+context_columns = st.columns(4)
+context_columns[0].metric("Caso de trabajo", loaded_case_name or "Not selected")
+context_columns[1].metric("Geometria CFD 2D", variant if loaded_case_name else "Missing")
+context_columns[2].metric("Malla", active_mesh_label)
+context_columns[3].metric("Caso activo", active_alpha_label)
+if loaded_case_name:
+    st.caption(
+        f"Workspace cargado: {loaded_case_name} / {active_workspace.get('stage', 'workspace')} / "
+        f"{active_workspace.get('package', 'active_packages')}. Los selectores internos no cambian este contenedor."
+    )
+else:
+    st.caption("Workspace temporal activo. Crea o carga explicitamente un caso desde `Caso de trabajo`.")
 
 st.sidebar.title("RamAir: Design and CFD")
 st.sidebar.caption("Preproceso, Gmsh, OpenFOAM y postproceso")
-with st.sidebar.expander("Crear caso de trabajo", expanded=False):
-    st.caption(
-        "Crea el contenedor, lo activa y copia la configuracion completa del solver estandar. "
-        "La geometria, la malla y los resultados solo se guardan cuando realmente existen."
-    )
-    with st.form("create-working-case-form"):
-        new_case_name = st.text_input("Nombre de carpeta", value=suggested_library_case_name(variant, float((workflow.get("case_conditions", {}).get("alphas_deg") or [4.0])[0])))
-        new_case_description = st.text_input("Descripcion", value="")
-        create_working_case = st.form_submit_button("Crear caso")
-    if create_working_case:
-        start_job(
-            "library_create_case",
-            case_library_command(
-                ROOT,
-                "create",
-                case_name=new_case_name,
-                variant=variant,
-                alpha=float((workflow.get("case_conditions", {}).get("alphas_deg") or [4.0])[0]),
-                description=new_case_description,
-            ),
-            completion_action={"kind": "select_case", "case": new_case_name},
-        )
-if (
-    library_case_selection != temporary_workspace_label
-    and isinstance(active_workspace, dict)
-    and active_workspace.get("case")
-):
-    st.info(
-        f"Workspace cargado: {active_workspace.get('case')} / {active_workspace.get('stage')} / "
-        f"{active_workspace.get('package', 'legacy')}\n\n"
-        f"Perfil: {active_workspace.get('variant')} | alpha: {active_workspace.get('alpha_deg')}"
-    )
-    st.caption(
-        "Las configuraciones del caso se versionan con sus paquetes. En Malla, los cambios permanecen "
-        "como borrador activo hasta guardar o sustituir explicitamente una malla real."
-    )
+st.sidebar.markdown("**Contexto activo**")
+st.sidebar.caption(f"Work Case: {loaded_case_name or 'Not selected'}")
+st.sidebar.caption(f"CFD 2D Geometry: {variant if loaded_case_name else 'Missing'}")
+st.sidebar.caption(f"Mesh: {active_mesh_label}")
+st.sidebar.caption(f"Active Case / Execution: {active_alpha_label}")
 results_locations = results_library_locations(ROOT)
 with st.sidebar.expander("Ubicacion real de Results", expanded=False):
     st.caption("Los datos pesados se conservan en el filesystem Linux para no ralentizar Gmsh/OpenFOAM.")
@@ -2900,99 +3194,6 @@ with st.sidebar.expander("Ubicacion real de Results", expanded=False):
             st.success("Explorador abierto en la biblioteca real de WSL.")
         except Exception as exc:
             st.error(str(exc))
-if library_case_selection in saved_case_map:
-    selected_manifest = saved_case_map[library_case_selection]
-    complete_stages = {"geometry", "case", "mesh"}
-    available_complete_stages = set((selected_manifest.get("stages") or {}).keys())
-    if complete_stages.issubset(available_complete_stages):
-        restore_existing_action = st.selectbox(
-            "Al cargar el caso",
-            ["delete", "archive"],
-            format_func=lambda value: {
-                "delete": "Reemplazar workspace temporal",
-                "archive": "Archivar workspace temporal",
-            }[value],
-            help=(
-                "Los paquetes guardados en Results no se borran. Archivar conserva tambien "
-                "los outputs temporales activos y puede consumir bastante espacio."
-            ),
-            key="sidebar-workspace-restore-action",
-        )
-        if st.button(
-            "Cargar caso de trabajo completo",
-            type="primary",
-            key="sidebar-restore-workspace",
-            width="stretch",
-        ):
-            start_job(
-                "library_restore_workspace",
-                case_library_command(
-                    ROOT,
-                    "restore-workspace",
-                    case_name=library_case_selection,
-                    existing_action=restore_existing_action,
-                ),
-                completion_action={
-                    "kind": "reload_configuration",
-                    "case": library_case_selection,
-                    "stage": "workspace",
-                    "package": "active_packages",
-                },
-            )
-    with st.expander("Versiones y carga por etapa del caso seleccionado", expanded=False):
-        st.caption(
-            f"Perfil: {selected_manifest.get('main_profile') or selected_manifest.get('variant')} | "
-            f"alpha: {selected_manifest.get('alpha_deg')} | Re: {selected_manifest.get('reynolds')}"
-        )
-        if complete_stages.issubset(available_complete_stages):
-            st.caption(
-                "La carga completa restaura geometria, condiciones CFD, malla y la configuracion "
-                "de solver activa. Usa los controles inferiores solo para cargar una etapa aislada."
-            )
-        saved_stages = sorted((selected_manifest.get("stages") or {}).keys())
-        if saved_stages:
-            sidebar_restore_stage = st.selectbox("Etapa disponible", saved_stages, key="sidebar-saved-stage")
-            sidebar_packages = manifest_stage_packages(selected_manifest, sidebar_restore_stage)
-            if sidebar_packages:
-                stage_entry = (selected_manifest.get("stages") or {}).get(sidebar_restore_stage) or {}
-                preferred_package = st.session_state.pop("_preferred_package_after_restore", None)
-                default_package = str(preferred_package or stage_entry.get("active_package") or "")
-                if default_package not in sidebar_packages:
-                    default_package = next(reversed(sidebar_packages))
-                sidebar_restore_package = st.selectbox(
-                    "Paquete disponible",
-                    list(sidebar_packages),
-                    index=list(sidebar_packages).index(default_package),
-                    key="sidebar-saved-package",
-                )
-                stage_info = sidebar_packages[sidebar_restore_package]
-                st.caption(
-                    f"Guardada: {stage_info.get('saved_at', '-')} | "
-                    f"archivos: {stage_info.get('file_count', '-')} | "
-                    f"tamano: {float(stage_info.get('size_bytes', 0) or 0) / 1048576.0:.1f} MB"
-                )
-                if st.button("Cargar paquete al workspace", key="sidebar-restore-stage"):
-                    start_job(
-                        f"library_restore_{sidebar_restore_stage}",
-                        case_library_command(
-                            ROOT,
-                            "restore",
-                            stage=sidebar_restore_stage,
-                            case_name=library_case_selection,
-                            package_name=sidebar_restore_package,
-                            existing_action="archive",
-                        ),
-                        completion_action={
-                            "kind": "reload_configuration",
-                            "case": library_case_selection,
-                            "stage": sidebar_restore_stage,
-                            "package": sidebar_restore_package,
-                        },
-                    )
-            else:
-                st.caption("La etapa no contiene ningun paquete restaurable.")
-        else:
-            st.caption("El manifiesto no contiene etapas reutilizables.")
 st.sidebar.markdown(f'<div class="ramair-path">{ROOT}</div>', unsafe_allow_html=True)
 st.sidebar.divider()
 with st.sidebar:
@@ -3160,19 +3361,111 @@ Los botones inician trabajos en segundo plano. La consola y **Archivos y logs** 
 
 if active_page == "Caso de trabajo":
     st.info(TAB_INTROS["Caso de trabajo"])
-    if not workflow_case_ready:
-        st.subheader("Selecciona o crea un caso")
-        st.caption(
-            "La seleccion activa habilita Geometria, Caso CFD, Malla, OpenFOAM, Ejecucion y Postproceso. "
-            "Validation & Convergence Lab conserva su workspace independiente."
+    st.subheader("Abrir un caso de trabajo")
+    st.caption(
+        "Elegir un nombre no cambia el workspace. El caso se activa solamente al pulsar `Cargar caso de trabajo`; "
+        "geometrias, mallas y casos CFD se seleccionan despues sin abandonar este contenedor."
+    )
+    candidate_options = library_case_names or ["No hay casos guardados"]
+    candidate_default = loaded_case_name if loaded_case_name in candidate_options else candidate_options[0]
+    candidate_case = st.selectbox(
+        "Caso disponible",
+        candidate_options,
+        index=candidate_options.index(candidate_default),
+        key="workcase-load-candidate",
+    )
+    candidate_manifest = saved_case_map.get(candidate_case) or {}
+    load_cols = st.columns([2, 2, 3])
+    replace_action = load_cols[0].selectbox(
+        "Estado temporal actual",
+        ["archive", "delete"],
+        format_func=lambda value: {
+            "archive": "Guardar copia antes de reemplazar",
+            "delete": "Reemplazar sin copia temporal",
+        }[value],
+        help="No modifica el caso guardado. Solo controla los outputs activos que van a ser sustituidos.",
+        key="workcase-load-existing-action",
+    )
+    load_cols[1].metric("Actualmente cargado", loaded_case_name or "Temporal")
+    confirm_load = load_cols[2].checkbox(
+        "Confirmo el cambio de caso de trabajo",
+        value=False,
+        disabled=candidate_case == loaded_case_name or candidate_case not in saved_case_map,
+        key="workcase-load-confirm",
+    )
+    load_disabled = (
+        candidate_case not in saved_case_map
+        or candidate_case == loaded_case_name
+        or not confirm_load
+    )
+    if st.button(
+        "Cargar caso de trabajo",
+        type="primary",
+        disabled=load_disabled,
+        key="workcase-explicit-load",
+    ):
+        start_job(
+            "library_restore_workspace",
+            case_library_command(
+                ROOT,
+                "restore-workspace",
+                case_name=candidate_case,
+                existing_action=replace_action,
+            ),
+            completion_action={
+                "kind": "reload_configuration",
+                "case": candidate_case,
+                "stage": "workspace",
+                "package": "active_packages",
+            },
         )
-    else:
+    if candidate_manifest:
+        available_counts = {
+            stage: len(manifest_stage_packages(candidate_manifest, stage))
+            for stage in ("geometry", "case", "mesh", "solver", "simulation", "postprocess")
+        }
+        st.caption(
+            "Contenido candidato: "
+            + " | ".join(f"{stage}={count}" for stage, count in available_counts.items())
+        )
+
+    with st.expander("Crear nuevo espacio de trabajo", expanded=True):
+        st.caption(
+            "Crea un contenedor persistente con la configuracion de solver estandar. Los productos se anaden "
+            "despues, cuando existan, y pueden convivir varias geometrias o mallas."
+        )
+        with st.form("create-working-case-form"):
+            new_case_name = st.text_input(
+                "Nombre de carpeta",
+                value=suggested_library_case_name(
+                    variant,
+                    float((workflow.get("case_conditions", {}).get("alphas_deg") or [4.0])[0]),
+                ),
+            )
+            new_case_description = st.text_input("Descripcion", value="")
+            create_working_case = st.form_submit_button("Crear y activar espacio", type="primary")
+        if create_working_case:
+            start_job(
+                "library_create_case",
+                case_library_command(
+                    ROOT,
+                    "create",
+                    case_name=new_case_name,
+                    variant=variant,
+                    alpha=float((workflow.get("case_conditions", {}).get("alphas_deg") or [4.0])[0]),
+                    description=new_case_description,
+                ),
+                completion_action={"kind": "reload_configuration", "case": new_case_name, "stage": "workspace"},
+            )
+
+    if workflow_case_ready:
         manifest = saved_case_map[library_case_selection]
+        st.subheader("Contenido del caso cargado")
         header = st.columns(4)
         header[0].metric("Caso", str(manifest.get("case_name") or library_case_selection))
         header[1].metric("Schema", str(manifest.get("schema_version", "-")))
         header[2].metric("Perfil", str(manifest.get("variant") or manifest.get("main_profile") or "-"))
-        header[3].metric("Revisado", str(manifest.get("updated_at") or "-"))
+        header[3].metric("Actualizado", str(manifest.get("updated_at") or "-"))
         st.caption(f"UUID: {manifest.get('work_case_id', '-')}")
         rows = []
         for stage, stage_entry in (manifest.get("stages") or {}).items():
@@ -3193,9 +3486,12 @@ if active_page == "Caso de trabajo":
             st.info("El caso aun no contiene paquetes. Comienza por Geometria.")
         with st.expander("Manifest versionado", expanded=False):
             st.json(manifest)
+    else:
+        st.info("No hay ningun caso cargado. La seleccion superior permanece inactiva hasta confirmar la carga.")
 
 if active_page == "Geometria" and workflow_case_ready:
     st.info(TAB_INTROS["Geometria"])
+    geometry_actions_panel()
     geometry_view = st.segmented_control(
         "Dimension de geometria", ["Geometria 2D", "Geometria 3D"],
         default="Geometria 2D", key=revisioned_widget_key("geometry-dimension"),
@@ -3208,50 +3504,15 @@ if active_page == "Geometria" and workflow_case_ready:
         project_config_editor([
             ("Canopy", ["canopy_geometry", "rib_and_cell_geometry"]),
             ("Tejido y lineas", ["fabric_and_lines"]),
-            ("CATIA", ["catia_generation", "catia_exports", "optional_modules"]),
-            ("CFD 2D y plots", ["cfd_2d_exports", "cfd_2d", "debug_plots"]),
+            ("CATIA & CFD exports", ["catia_exports", "cfd_2d_exports", "debug_plots", "catia_generation"]),
         ])
         catia_system_config_editor()
-    cols = st.columns([1, 4])
-    if cols[0].button("Ejecutar preprocesador", type="primary"):
-        start_job("preprocess", preprocessor_command(ROOT))
-    cols[1].info("Esta accion regenera CATIA/Inputs y la geometria CFD, pero no abre CATIA V5.")
-    st.subheader("Generacion CAD opcional")
-    catia_status = cached_catia_detection(str(ROOT))
-    catia_available = bool(catia_status.get("available"))
-    catia_inputs_ready = bool(catia_status.get("inputs_ready"))
-    catia_macro_ready = bool(catia_status.get("macro_ready"))
-    catia_cols = st.columns([1, 3])
-    if catia_cols[0].button(
-        "Ejecutar CATScript en CATIA V5",
-        type="primary",
-        disabled=not (catia_available and catia_inputs_ready and catia_macro_ready),
-        help=(
-            "Inicia CATIA V5 de forma visible y ejecuta Generate_RamAir_Canopy_MAIN.CATScript "
-            "con RAMAIR_CATIA_INPUTS apuntando a CATIA/Inputs."
-        ),
-    ):
-        start_job(
-            "catia_macro",
-            catia_macro_command(ROOT, str(catia_status.get("cnext") or "")),
-        )
-    if catia_available and catia_inputs_ready and catia_macro_ready:
-        catia_cols[1].success(
-            f"CATIA V5 detectado: {catia_status.get('cnext')}. "
-            "El modelo CAD se genera solo al pulsar el boton."
-        )
-    elif not catia_available:
-        catia_cols[1].caption(
-            "CATIA V5 no se ha detectado. Esta funcion queda desactivada y no se considera "
-            "un requisito para preproceso, Gmsh u OpenFOAM."
-        )
+    summary_paths = geometry_summary_paths(geometry_view, variant)
+    if summary_paths:
+        st.subheader("Resumen visual")
+        show_images(summary_paths, 3 if geometry_view == "Geometria 2D" else 2)
     else:
-        catia_cols[1].warning(
-            "CATIA V5 esta disponible, pero faltan el CATScript principal o "
-            "CATIA/Inputs/ramair_global_inputs.csv. Ejecuta primero el preprocesador."
-        )
-    preview_paths = latest_files(ROOT / "CFD_2D/CFD_2D_inputs", ["previews/*.png", "geometry/*/*preview*.png"], 8)
-    show_images(preview_paths, 3)
+        st.caption("Los resumenes visuales apareceran despues de ejecutar el preprocesador.")
 
 if active_page == "Caso CFD" and workflow_case_ready:
     st.info(TAB_INTROS["Caso CFD"])
@@ -3261,6 +3522,7 @@ if active_page == "Caso CFD" and workflow_case_ready:
         "Geometria preprocesada",
         variants,
         index=variants.index(variant) if variant in variants else 0,
+        format_func=variant_display_name,
         key=revisioned_widget_key("case-cfd-variant"),
         help=(
             "Selecciona una geometria real del paquete CFD. Los niveles coarse/medium/fine y "
@@ -3282,67 +3544,10 @@ if active_page == "Caso CFD" and workflow_case_ready:
     profile_columns[0].caption(
         "El perfil activo se guarda con las condiciones CFD y se restaura al cargar el caso de trabajo."
     )
-    validation_preset_dir = ROOT / "CFD_2D/validation_cases/LS1_0417_M0p15_Re1p9e6"
-    validation_workcase_name = "LS1_0417_validation_M0p15_Re1p9e6"
-    validation_workcase_dir = ROOT / "Results" / validation_workcase_name
-    with st.expander("Validacion publicada LS(1)-0417: M=0.15, Re=1.9e6", expanded=False):
-        st.caption(
-            "Carga la polar de Ghoreyshi et al. y la configuracion temporal de segundo orden. "
-            "No ejecuta el solver. La geometria CFD se escala a c=1 m; para satisfacer simultaneamente "
-            "M=0.15 y Re=1.9e6 con T y viscosidad fijas se usa rho=0.6661 kg/m3 (p ideal 55.09 kPa), "
-            "por lo que no representa literalmente densidad/presion de nivel del mar."
-        )
-        if validation_workcase_dir.is_dir():
-            st.success(f"Caso de trabajo disponible: {validation_workcase_name}")
-            st.code(str(validation_workcase_dir), language="text")
-            st.caption(
-                "Seleccionalo en la barra lateral y pulsa 'Cargar geometria + caso CFD + malla'. "
-                "Las graficas de validacion se actualizan exclusivamente dentro de ese caso."
-            )
-        elif st.button("Crear caso de trabajo completo de validacion", type="primary", key="create-ls10417-validation-workcase"):
-            start_job(
-                "create_validation_workcase",
-                [
-                    sys.executable,
-                    str(ROOT / "CFD_2D/scripts/ramair_2d_validation_workcase.py"),
-                    "--project-root", str(ROOT),
-                    "--case-name", validation_workcase_name,
-                    "--existing-action", "keep",
-                ],
-                completion_action={"kind": "select_case", "case": validation_workcase_name},
-            )
-        validation_time_profile = st.selectbox(
-            "Duracion temporal",
-            [
-                "Prueba portatil: t*=0.2 (~14 min estimados)",
-                "Preliminar portatil: 2500 pasos nominales",
-                "Publicada: 25000 pasos nominales",
-            ],
-            help=(
-                "Los tres perfiles conservan backward, maxCo=1 y tres correctores externos. "
-                "La prueba t*=0.2 comprueba estabilidad y archivos; la preliminar y la publicada requieren "
-                "muchos mas pasos efectivos cuando maxCo reduce el deltaT nominal."
-            ),
-            key="ls10417-validation-time-profile",
-        )
-        if st.button("Cargar preset de validacion", type="primary", key="load-ls10417-validation-preset"):
-            workflow_preset = read_json(validation_preset_dir / "workflow_preset.json", {}) or {}
-            if validation_time_profile.startswith("Prueba"):
-                solver_filename = "solver_preset_laptop_smoke.json"
-            elif validation_time_profile.startswith("Preliminar"):
-                solver_filename = "solver_preset_laptop_screening.json"
-            else:
-                solver_filename = "solver_preset.json"
-            solver_preset = read_json(validation_preset_dir / solver_filename, {}) or {}
-            active_workflow = load_config(ROOT, "workflow")
-            for section in ("geometry", "case_conditions", "execution"):
-                active_workflow[section] = dict(active_workflow.get(section) or {}) | dict(workflow_preset.get(section) or {})
-            save_config(ROOT, "workflow", active_workflow)
-            save_config(ROOT, "solver", solver_preset)
-            st.session_state["_config_ui_revision"] = int(st.session_state.get("_config_ui_revision", 0)) + 1
-            st.success("Preset cargado y configuraciones anteriores respaldadas. Revisa los valores antes de generar casos.")
-            st.rerun()
-        show_json_report(validation_preset_dir / "case_manifest.json", "Correspondencia con el paper")
+    st.caption(
+        "La validación publicada LS(1)-0417 se gestiona ahora de forma independiente en "
+        "`Validation & Convergence Lab > Validación`; ya no depende del caso de trabajo activo."
+    )
     conditions = workflow.get("case_conditions", {})
     st.subheader("Paquete de geometria y condiciones")
     with st.form("case-builder-form"):
@@ -3436,6 +3641,8 @@ if active_page == "Malla" and workflow_case_ready:
     project_geometry = geometry_dto(load_config(ROOT, "project"), load_config(ROOT, "inlet_design"))
     geometry_rows = []
     for series_name, points in preview_series(ROOT, project_geometry).items():
+        if "crossport" in str(series_name).lower():
+            continue
         geometry_rows.extend(
             {"x/c": point["x"], "z/c": point["z"], "serie": series_name, "orden": order}
             for order, point in enumerate(points)
@@ -3445,7 +3652,7 @@ if active_page == "Malla" and workflow_case_ready:
             pd.DataFrame(geometry_rows),
             {"mark": {"type": "line", "clip": True}, "height": 280,
              "encoding": {
-                 "x": {"field": "x/c", "type": "quantitative", "scale": {"zero": False}},
+                 "x": {"field": "x/c", "type": "quantitative", "scale": {"domain": PROFILE_X_DOMAIN, "zero": False}},
                  "y": {"field": "z/c", "type": "quantitative", "scale": {"zero": False}},
                  "color": {"field": "serie", "type": "nominal", "legend": None},
                  "detail": {"field": "serie", "type": "nominal"},
@@ -3458,20 +3665,39 @@ if active_page == "Malla" and workflow_case_ready:
         f"Perfil/geometria: {variant} | tipo: {profile_kind}. Solo las revisiones enlazadas a la "
         "geometria activa se ofrecen para reutilizacion silenciosa."
     )
+    st.markdown("### Mallador experimental desde cero")
+    open_experimental_tab, closed_experimental_tab = st.tabs(
+        ["Perfil abierto", "Perfil cerrado"]
+    )
+    with open_experimental_tab:
+        if not variant_has_open_inlet(variant):
+            st.caption("La geometría CFD activa es cerrada; esta pestaña permanece disponible para cargar otra revisión.")
+        render_open_experimental_mesh(ROOT, start_job, open_mesh_viewer)
+    with closed_experimental_tab:
+        if variant_has_open_inlet(variant):
+            st.caption("La geometría CFD activa es abierta; la estrategia cerrada se gestiona de forma independiente.")
+        render_closed_experimental_mesh(ROOT, start_job, open_mesh_viewer)
     mesh_catalog = saved_mesh_catalog(ROOT, library_case_selection)
     compatible_meshes = [item for item in mesh_catalog if item.get("compatible")]
     if compatible_meshes:
         render_records_table([{
             "caso": item["case_name"], "malla": item["package_name"],
+            "nivel": item.get("mesh_level", "custom"),
             "revision": item.get("revision_id"), "checkMesh": item.get("checkMesh_status"),
             "aprobacion": (item.get("approval") or {}).get("status", "pending"),
+            "cargable_en_caso": bool(item.get("result_load_allowed")),
             "guardada": item.get("saved_at"),
         } for item in compatible_meshes], max_rows=50)
         mesh_labels = [f"{item['case_name']} / {item['package_name']}" for item in compatible_meshes]
         selected_saved_mesh_label = st.selectbox("Malla guardada compatible", mesh_labels)
         selected_saved_mesh = compatible_meshes[mesh_labels.index(selected_saved_mesh_label)]
         saved_actions = st.columns([1, 1, 3])
-        if saved_actions[0].button("Cargar malla", type="primary"):
+        if saved_actions[0].button(
+            "Cargar malla",
+            type="primary",
+            disabled=not bool(selected_saved_mesh.get("result_load_allowed")),
+            help="Un resultado solo se activa dentro del Work Case al que pertenece. Sus ajustes pueden reutilizarse como base en cualquier caso compatible.",
+        ):
             start_job(
                 "library_restore_mesh",
                 case_library_command(
@@ -3484,6 +3710,8 @@ if active_page == "Malla" and workflow_case_ready:
                 },
             )
         saved_actions[1].caption("Abrir/revisar: carga el paquete y usa los visores e informes inferiores.")
+        if not selected_saved_mesh.get("result_load_allowed"):
+            saved_actions[1].warning("Resultado de otro Work Case: usa `Partir de > Malla guardada seleccionada` para importar solo sus ajustes.")
         if selected_saved_mesh.get("quality_report"):
             saved_actions[2].caption(str(selected_saved_mesh["quality_report"]))
     else:
@@ -3492,11 +3720,36 @@ if active_page == "Malla" and workflow_case_ready:
     incompatible_count = len(mesh_catalog) - len(compatible_meshes)
     if incompatible_count:
         with st.expander(f"Mallas incompatibles visibles ({incompatible_count})", expanded=False):
+            incompatible_meshes = [item for item in mesh_catalog if not item.get("compatible")]
             render_records_table([{
                 "caso": item["case_name"], "malla": item["package_name"],
                 "motivo": item.get("compatibility_reason"),
+                "nivel": item.get("mesh_level", "custom"),
                 "estado": (item.get("approval") or {}).get("status", "pending"),
-            } for item in mesh_catalog if not item.get("compatible")], max_rows=100)
+            } for item in incompatible_meshes], max_rows=100)
+            incompatible_labels = [f"{item['case_name']} / {item['package_name']}" for item in incompatible_meshes]
+            incompatible_choice = st.selectbox(
+                "Configuracion reutilizable",
+                incompatible_labels,
+                key="incompatible-mesh-seed-choice",
+            )
+            seed_mesh = incompatible_meshes[incompatible_labels.index(incompatible_choice)]
+            st.warning(
+                "El resultado .msh no se cargara porque pertenece a otra geometria. Solo se copiaran sus "
+                "parametros de generacion para crear una malla nueva de la geometria activa."
+            )
+            if st.button("Importar solo ajustes como base", key="import-incompatible-mesh-seed"):
+                seed_config = saved_mesh_configuration(
+                    ROOT, str(seed_mesh["case_name"]), str(seed_mesh["package_name"])
+                )
+                seed_config["mesh_configuration_mode"] = "incompatible_mesh_seed"
+                seed_config["mesh_source_entity_id"] = seed_mesh.get("entity_id")
+                seed_config["mesh_source_revision_id"] = seed_mesh.get("revision_id")
+                seed_config["mesh_source_warning"] = "geometry_incompatible_result_not_loaded"
+                save_config(ROOT, "mesh", seed_config, sync_workcase=False)
+                st.session_state["_config_ui_revision"] = int(st.session_state.get("_config_ui_revision", 0)) + 1
+                st.success("Ajustes importados como borrador. Revisa la geometria, y1 y escalas antes de generar.")
+                st.rerun()
 
     st.subheader("Nueva configuracion")
     st.caption(
@@ -3623,34 +3876,6 @@ if active_page == "Malla" and workflow_case_ready:
             mesh_config=None,
         ))
     mesh_config = mesh_config_editor(variant)
-    with st.expander("Optimizacion corta de parametros", expanded=False):
-        st.caption(
-            "Genera entre 2 y 5 mallas reales, ejecuta gmshToFoam/checkMesh, puntua sus metricas y conserva "
-            "solo la mejor. No ejecuta el solver. La primera celda solo varia si el modo y+ esta desactivado."
-        )
-        with st.form("mesh-optimizer-form"):
-            opt_cols = st.columns(4)
-            opt_iterations = opt_cols[0].number_input("Candidatos", min_value=2, max_value=5, value=3, step=1)
-            opt_action = opt_cols[1].selectbox("Malla previa", ["archive", "delete"], index=0)
-            opt_vary_y1 = opt_cols[2].toggle("Variar y1 manual", value=False)
-            opt_confirm = opt_cols[3].checkbox("Confirmo varias mallas")
-            optimize_mesh = st.form_submit_button("Optimizar y seleccionar", type="primary")
-        if optimize_mesh and opt_confirm:
-            start_job("mesh_optimize", mesh_optimizer_command(
-                ROOT,
-                variant=variant,
-                domain=domain,
-                mesh_level=level,
-                iterations=int(opt_iterations),
-                vary_first_cell=opt_vary_y1,
-                gmsh_backend=backend,
-                gmsh_timeout_s=int(timeout_s),
-                openfoam_timeout_s=int(foam_timeout_s),
-                threads=int(threads),
-                previous_output_action=opt_action,
-            ))
-        elif optimize_mesh:
-            st.error("Confirma explicitamente la generacion de varias mallas.")
     mesh_root = ROOT / "CFD_2D/meshes" / variant
     gmsh_gui = Path.home() / ".local/opt/gmsh-4.15.2/bin/gmsh"
     if gmsh_gui.is_file():
@@ -3728,9 +3953,6 @@ if active_page == "Malla" and workflow_case_ready:
             st.success(f"ParaView iniciado con la malla y {len(problem_vtks)} sets de calidad (PID {paraview_pid}).")
         except Exception as exc:
             st.error(str(exc))
-    optimization_reports = latest_files(ROOT / "CFD_2D/reports", [f"mesh_optimization_{variant}_*.json"], 1)
-    if optimization_reports:
-        show_json_report(optimization_reports[0], "Ultima optimizacion de malla")
     show_images([
         mesh_root / "mesh_preview_front_surface.png",
         mesh_root / "mesh_preview_te.png",
@@ -3942,6 +4164,34 @@ if active_page == "Ejecucion" and workflow_case_ready:
             help="Conserva los campos reconstruidos y elimina solo processorN cuando el ultimo tiempo ya existe en la raiz. Desactivalo para diagnosticar la descomposicion.",
             key=revisioned_widget_key("runner-cleanup-processors"),
         )
+        with st.expander("Optimización paralela antes de ejecutar", expanded=False):
+            parallel_mode = st.radio(
+                "Selección de procesos",
+                ["auto", "manual"],
+                index=0 if bool(execution_cfg.get("automatic_core_selection", True)) else 1,
+                format_func=lambda value: "Automática" if value == "auto" else "Manual",
+                horizontal=True,
+                help=(
+                    "Auto usa el número exacto de celdas, los cores físicos y un perfil de benchmark "
+                    "compatible si existe. El número MPI superior actúa como límite. Manual conserva "
+                    "exactamente el número elegido."
+                ),
+                key=revisioned_widget_key("runner-parallel-mode"),
+            )
+            automatic_core_selection = parallel_mode == "auto"
+            renumber_before_decompose = st.toggle(
+                "Renumerar una malla fresca antes de descomponer",
+                value=bool(execution_cfg.get("renumber_before_decompose", True)),
+                help=(
+                    "Ejecuta renumberMesh y vuelve a comprobar la malla solo en un caso nuevo. "
+                    "Nunca se aplica silenciosamente a un resume/checkpoint."
+                ),
+                key=revisioned_widget_key("runner-renumber-before-decompose"),
+            )
+            st.caption(
+                "La ejecución usa Scotch por defecto, afinidad MPI a cores físicos, verifica que "
+                "numberOfSubdomains, processorN y -np coincidan y reconstruye únicamente lo requerido."
+            )
         resume_cols = st.columns(2)
         configured_existing_simulation_action = str(
             execution_cfg.get(
@@ -4127,6 +4377,8 @@ if active_page == "Ejecucion" and workflow_case_ready:
         "stop_mode": stop_mode,
         "pyfoam_live_monitor": bool(pyfoam_live_monitor),
         "cleanup_processor_directories": bool(cleanup_processors),
+        "automatic_core_selection": bool(automatic_core_selection),
+        "renumber_before_decompose": bool(renumber_before_decompose),
         "existing_simulation_action": existing_simulation_action,
         "resume_existing": bool(resume_existing),
         "resume_additional_time_star": float(resume_extension) if resume_extension > 0 else None,
@@ -4189,6 +4441,8 @@ if active_page == "Ejecucion" and workflow_case_ready:
                 postprocess_after_each=bool(postprocess_after_each),
                 continue_after_error=bool(continue_sweep_after_error),
                 average_from_fraction=float(solver_cfg.get("average_from_fraction", 0.6)),
+                automatic_core_selection=bool(automatic_core_selection),
+                renumber_before_decompose=bool(renumber_before_decompose),
             )
         return staged_runner_command(
             ROOT,
@@ -4221,7 +4475,37 @@ if active_page == "Ejecucion" and workflow_case_ready:
             steady_decision=steady_decision,
             steady_additional_iterations=int(steady_additional_iterations),
             steady_paraview_snapshots=int(steady_paraview_snapshots),
+            automatic_core_selection=bool(automatic_core_selection),
+            renumber_before_decompose=bool(renumber_before_decompose),
         )
+
+    with st.expander("Plan paralelo resuelto", expanded=False):
+        show_json_report(
+            cdir / "parallel_execution_plan.json",
+            "Preflight, candidatos, balance y reconstrucción",
+        )
+        st.caption(
+            "El pilot compara copias temporales idénticas del caso y guarda el mejor perfil por "
+            "hash de malla, solver, numerica, OpenFOAM/MPI y hardware. No modifica resultados activos."
+        )
+        if st.button(
+            "Medir candidatos MPI en scratch",
+            disabled=not (cdir / "constant/polyMesh/owner").is_file(),
+            key=revisioned_widget_key("runner-parallel-pilot"),
+        ):
+            start_job(
+                "openfoam_parallel_tuning",
+                [
+                    sys.executable,
+                    str(ROOT / "CFD_2D/scripts/ramair_2d_parallel_tuner.py"),
+                    "--case", str(cdir),
+                    "--stage", "URANS",
+                    "--maximum-ranks", str(int(n_cores)),
+                    "--ranks", "4", "6", "8",
+                    "--steps", "30",
+                    "--planned-steps", "10000",
+                ],
+            )
 
     with st.expander("Paquete de ejecucion para servidor Linux/WSL", expanded=False):
         st.caption(
@@ -4470,6 +4754,30 @@ if active_page == "Postproceso" and workflow_case_ready:
             disabled=not automatic_pv,
             key=revisioned_widget_key("post-paraview-frames"),
         )
+        interval_enabled = st.toggle(
+            "Limitar las imágenes URANS a un intervalo físico",
+            value=bool(post_cfg.get("paraview_time_range_enabled", False)),
+            disabled=not automatic_pv,
+            help="Solo filtra los instantes cargados por ParaView; no recorta ni modifica los resultados OpenFOAM.",
+            key=revisioned_widget_key("post-paraview-range-enabled"),
+        )
+        interval_cols = st.columns(2)
+        interval_start_s = interval_cols[0].number_input(
+            "Inicio del intervalo [s]",
+            min_value=0.0,
+            value=float(post_cfg.get("paraview_time_range_start_s", 0.0)),
+            format="%.8g",
+            disabled=not (automatic_pv and interval_enabled),
+            key=revisioned_widget_key("post-paraview-range-start"),
+        )
+        interval_end_s = interval_cols[1].number_input(
+            "Final del intervalo [s]",
+            min_value=0.0,
+            value=float(post_cfg.get("paraview_time_range_end_s", solver_cfg.get("endTime", 1.0))),
+            format="%.8g",
+            disabled=not (automatic_pv and interval_enabled),
+            key=revisioned_widget_key("post-paraview-range-end"),
+        )
         wall_profiles = st.toggle(
             "Analizar y+(x/c), Cp(x/c), perfiles de velocidad y espesor de capa limite",
             value=bool(post_cfg.get("wall_profile_analysis", True)),
@@ -4502,6 +4810,9 @@ if active_page == "Postproceso" and workflow_case_ready:
         if wall_profiles and (not profile_stations or any(value <= 0.0 or value >= 1.0 for value in profile_stations)):
             st.error("Las estaciones deben ser numeros separados por comas dentro de 0 < x/c < 1.")
             st.stop()
+        if interval_enabled and float(interval_start_s) > float(interval_end_s):
+            st.error("El inicio del intervalo URANS no puede ser posterior al final.")
+            st.stop()
         solver_cfg["average_from_fraction"] = float(average_fraction)
         solver_cfg["velocity_profile_stations_xc"] = profile_stations
         solver_cfg["velocity_profile_sample_points"] = int(profile_points)
@@ -4517,6 +4828,9 @@ if active_page == "Postproceso" and workflow_case_ready:
             "velocity_profile_sample_points": int(profile_points),
             "automatic_paraview_products": bool(automatic_pv),
             "paraview_maximum_frames": int(maximum_frames),
+            "paraview_time_range_enabled": bool(interval_enabled),
+            "paraview_time_range_start_s": float(interval_start_s),
+            "paraview_time_range_end_s": float(interval_end_s),
         })
 
         start_job("postprocess", postprocess_command(
@@ -4528,6 +4842,10 @@ if active_page == "Postproceso" and workflow_case_ready:
             velocity_profile_sample_points=profile_points,
             automatic_paraview_products=automatic_pv,
             paraview_maximum_frames=maximum_frames,
+            paraview_time_range_s=(
+                (float(interval_start_s), float(interval_end_s))
+                if interval_enabled else None
+            ),
         ))
     st.subheader("Postproceso y validacion por lotes")
     postprocess_alpha_options = available_case_alphas(variant, workflow)
@@ -4559,6 +4877,10 @@ if active_page == "Postproceso" and workflow_case_ready:
                 velocity_profile_sample_points=int(profile_points),
                 automatic_paraview_products=bool(automatic_pv),
                 paraview_maximum_frames=int(maximum_frames),
+                paraview_time_range_s=(
+                    (float(interval_start_s), float(interval_end_s))
+                    if interval_enabled else None
+                ),
             ),
         )
     validation_enabled = (

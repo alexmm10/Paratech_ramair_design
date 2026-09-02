@@ -1694,6 +1694,12 @@ def _apply_default_case_config(cfg: Config, args: argparse.Namespace) -> Config:
             "suspension_line_cad_strategy",
         ]
     })
+    # Store thickness and line diameter as material properties only. The robust
+    # CATIA model remains midsurfaces plus line curves.
+    values["enable_fabric_thickness"] = False
+    values["fabric_thickness_mode"] = "none"
+    values["enable_suspension_tube_geometry"] = False
+    values["suspension_line_cad_strategy"] = "curve_with_properties"
     apply_fields("catia_generation", {
         "create_rib_fills": "create_rib_fills",
         "create_loft_panels": "create_loft_panels",
@@ -1764,6 +1770,25 @@ def _apply_default_case_config(cfg: Config, args: argparse.Namespace) -> Config:
         EXPORT_2D_PROFILE_PREVIEWS = bool(debug_plots["write_2d_profile_previews"])
 
     cfd = data.get("cfd_2d", {})
+    workflow_path = config_root / "CFD_2D/CFD_2D_inputs/config/cfd2d_workflow_config.json"
+    if workflow_path.is_file():
+        try:
+            workflow_data = json.loads(workflow_path.read_text(encoding="utf-8-sig"))
+            active_conditions = workflow_data.get("case_conditions") or {}
+            active_alphas = list(active_conditions.get("alphas_deg") or [])
+            cfd = dict(cfd)
+            for source, destination in (("reynolds", "reynolds"), ("mach", "mach")):
+                if active_conditions.get(source) is not None:
+                    cfd[destination] = active_conditions[source]
+            if active_alphas:
+                cfd["alpha_start_deg"] = min(map(float, active_alphas))
+                cfd["alpha_end_deg"] = max(map(float, active_alphas))
+                if len(active_alphas) > 1:
+                    cfd["alpha_step_deg"] = min(
+                        abs(float(b) - float(a)) for a, b in zip(active_alphas, active_alphas[1:])
+                    )
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            pass
     global CFD2D_DEFAULT_REYNOLDS, CFD2D_DEFAULT_MACH, CFD2D_DEFAULT_ALPHA_START_DEG, CFD2D_DEFAULT_ALPHA_END_DEG, CFD2D_DEFAULT_ALPHA_STEP_DEG
     if "reynolds" in cfd:
         CFD2D_DEFAULT_REYNOLDS = float(cfd["reynolds"])
@@ -1939,10 +1964,10 @@ def default_system_config(cells: int = NUM_CELLS) -> dict:
             {"name": "BRK", "enabled": True, "type": "brake", "x_c": 0.95, "riser_group": "brake"}
         ],
         "loaded_rib_selection": {
-            "mode": "cell_boundaries",
-            "indices": [0, 2, 4, 5, 7, cells],
+            "mode": "all_loaded",
+            "rib_ids": [],
             "enforce_symmetric_pairs": True,
-            "description": "cell_boundaries are the loaded boundary ribs from left to right, indexed 0..num_cells. For 9 cells, [0,2,4,5,7,9] gives 6 loaded stations."
+            "description": "all_loaded selects every loaded boundary for the current canopy. explicit_rib_ids preserves a manual subset."
         },
         "anchors": {
             "surface": "lower",
@@ -1967,7 +1992,7 @@ def default_system_config(cells: int = NUM_CELLS) -> dict:
             "alpha_op_deg": 0,
             "gamma_deg": 0,
             "mu_deg": 0,
-            "theta_deg": None,
+            "theta_deg": 0.0,
             "angle_tolerance_deg": 0.25,
             "description": "If theta_deg is null, theta = alpha_op + mu - gamma. v16 deliberately does not export long rigging-measurement diagnostics; the suspension/payload system is positioned using this theta relation and the report only checks the angular closure error."
         },
@@ -2162,8 +2187,6 @@ def maybe_apply_suspension_beta_to_canopy_cfg(cfg: Config) -> Config:
     are consistent.  It is only active when ENABLE_SUSPENSION_LINES is True and
     the JSON requests derive_anhedral_from_R_over_b.
     """
-    if not ENABLE_SUSPENSION_LINES:
-        return cfg
     try:
         line_cfg = _load_system_json(cfg.out_dir, cfg.cells)
     except Exception:
@@ -2756,13 +2779,13 @@ class AnchorGenerator:
 
     def selected_ribs(self) -> pd.DataFrame:
         sel = self.cfg.get("loaded_rib_selection", {})
-        mode = str(sel.get("mode", "cell_boundaries")).lower()
+        mode = str(sel.get("mode", "all_loaded")).lower()
         boundary = self.canopy.boundary_rib_rows()
         if mode == "all_loaded":
             idxs = list(range(len(boundary)))
         elif mode == "cell_boundaries":
             idxs = [int(i) for i in sel.get("indices", [])]
-        elif mode == "rib_ids":
+        elif mode in {"rib_ids", "explicit_rib_ids"}:
             ids = {int(i) for i in sel.get("rib_ids", [])}
             return self.canopy.ribs[self.canopy.ribs["rib_id"].astype(int).isin(ids)].copy().sort_values("Y_flat_mm").reset_index(drop=True)
         elif mode == "station_indices":
@@ -3755,7 +3778,7 @@ def write_full_design_summary(out_dir: Path, cfg: Config, system_cfg: dict, stab
 
 
 def _generate_suspension_after_canopy(cfg: Config, system_cfg: dict, stabs: StabilizerGeometry | None = None):
-    if not ENABLE_SUSPENSION_LINES or not _deep_get(system_cfg, ["suspension", "enabled"], True):
+    if not _deep_get(system_cfg, ["suspension", "enabled"], False):
         write_suspension_disabled_params(cfg.out_dir)
         return None, None
     canopy = CanopyGeometry(cfg.out_dir)
@@ -5201,14 +5224,14 @@ def main() -> None:
     write_fabric_property_outputs(cfg.out_dir, cfg, system_cfg)
 
     stabs = None
-    if ENABLE_CANOPY_STABILIZERS or bool(_deep_get(system_cfg, ["stabilizers", "active"], False)):
+    if bool(_deep_get(system_cfg, ["stabilizers", "active"], False)):
         stabs = _generate_stabilizers_after_canopy(cfg, system_cfg)
     else:
         stabs = StabilizerGeometry(CanopyGeometry(cfg.out_dir), system_cfg)
         write_stabilizer_outputs(cfg.out_dir, stabs)
 
     tip = None
-    if ENABLE_TIP_SIDE_BULGE or bool(_deep_get(system_cfg, ["tip_side_bulge", "active"], False)):
+    if bool(_deep_get(system_cfg, ["tip_side_bulge", "active"], False)):
         tip = _generate_tip_side_bulge_after_canopy(cfg, system_cfg)
     else:
         tip = TipSideBulgeGeometry(CanopyGeometry(cfg.out_dir), system_cfg)

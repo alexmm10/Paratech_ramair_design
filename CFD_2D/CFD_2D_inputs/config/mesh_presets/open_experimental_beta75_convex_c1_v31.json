@@ -1,0 +1,19 @@
+{
+  "schema_version": 2,
+  "name": "beta75_convex_fallback_inlet140_uniform",
+  "boundary_layer": {
+    "prefer_exact_base_inlet": true,
+    "inlet_nodes": 140,
+    "inlet_bump_coefficient": 1.0
+  },
+  "execution": {
+    "gmsh_threads": 12,
+    "openfoam_timeout_s": 900
+  },
+  "notes": {
+    "geometry_policy": "Try the exact uncut LE guide, reject it when the lip-to-base C1 audit detects inflection, then use the bounded convex C1 closure.",
+    "verified_revision": "beta75_convex_fallback_inlet140_uniform",
+    "verified_checkMesh_status": "OK",
+    "verified_cell_count": 200116
+  }
+}

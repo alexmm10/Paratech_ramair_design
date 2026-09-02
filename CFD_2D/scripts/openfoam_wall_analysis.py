@@ -274,6 +274,57 @@ def _patch_vtk_candidates(case_dir: Path, patch: str, field_name: str) -> list[P
     return sorted(archived + active, key=lambda path: path.stat().st_mtime, reverse=True)
 
 
+def _latest_numeric_time_dir(case_dir: Path) -> Path | None:
+    candidates: list[tuple[float, Path]] = []
+    for path in case_dir.iterdir() if case_dir.is_dir() else []:
+        if not path.is_dir():
+            continue
+        try:
+            value = float(path.name)
+        except ValueError:
+            continue
+        if value > 0.0:
+            candidates.append((value, path))
+    return max(candidates, key=lambda item: item[0])[1] if candidates else None
+
+
+def _latest_field_mtime(case_dir: Path, field_name: str) -> float | None:
+    latest = _latest_numeric_time_dir(case_dir)
+    if latest is None:
+        return None
+    for candidate in (latest / field_name, latest / f"{field_name}.gz"):
+        if candidate.is_file():
+            return candidate.stat().st_mtime
+    return None
+
+
+def _wall_vtk_cache_current(
+    case_dir: Path,
+    field_name: str,
+) -> tuple[bool, list[str]]:
+    """Return true when every wall patch has a readable export for the latest field."""
+    source_mtime = _latest_field_mtime(case_dir, field_name)
+    patches = wall_patch_names(case_dir)
+    if source_mtime is None or not patches:
+        return False, []
+    sources: list[str] = []
+    for patch in patches:
+        current: Path | None = None
+        for candidate in _patch_vtk_candidates(case_dir, patch, field_name):
+            if candidate.stat().st_mtime + 1.0 < source_mtime:
+                continue
+            try:
+                read_legacy_vtk_wall(candidate, field_name)
+            except (OSError, ValueError):
+                continue
+            current = candidate
+            break
+        if current is None:
+            return False, []
+        sources.append(str(current))
+    return True, sources
+
+
 def _load_patch_field(case_dir: Path, patch: str, field_name: str) -> tuple[pd.DataFrame, Path] | None:
     for vtk in _patch_vtk_candidates(case_dir, patch, field_name):
         try:
@@ -691,6 +742,29 @@ def load_velocity_profiles(case_dir: Path, definitions: list[dict[str, Any]], ve
     return pd.concat(frames, ignore_index=True), sources
 
 
+def _velocity_profile_cache_current(
+    case_dir: Path,
+    definitions: list[dict[str, Any]],
+) -> tuple[bool, list[str]]:
+    source_mtime = _latest_field_mtime(case_dir, "U")
+    root = case_dir / "postProcessing" / "ramairVelocityProfiles"
+    if source_mtime is None or not definitions:
+        return False, []
+    sources: list[str] = []
+    for definition in definitions:
+        candidates = [
+            path for path in root.glob(f"**/*{definition['name']}*")
+            if path.is_file() and path.suffix.lower() in {".xy", ".raw", ".dat"}
+        ]
+        if not candidates:
+            return False, []
+        latest = max(candidates, key=lambda item: item.stat().st_mtime)
+        if latest.stat().st_mtime + 1.0 < source_mtime:
+            return False, []
+        sources.append(str(latest))
+    return True, sources
+
+
 def boundary_layer_velocity_ratio(
     profile: pd.DataFrame,
     velocity_m_s: float,
@@ -832,6 +906,7 @@ def analyze_wall_boundary_layer(
     sample_points: int,
     solver_module: str,
     simulation_mode: str = "AUTO",
+    include_temporal_separation_history: bool = True,
 ) -> dict[str, Any]:
     """Create real wall y+ and normal velocity-profile products when data exist."""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -885,7 +960,15 @@ def analyze_wall_boundary_layer(
         "stations_x_over_c": stations_xc,
     }
     if run_openfoam_tools:
-        if shutil.which("foamToVTK") is None:
+        cache_current, cache_sources = _wall_vtk_cache_current(case_dir, "yPlus")
+        if cache_current:
+            report["yplus_vtk_export"] = {
+                "status": "SKIPPED",
+                "reason": "latest_wall_field_export_already_current",
+                "sources": cache_sources,
+            }
+            report["yplus_vtk_archives"] = cache_sources
+        elif shutil.which("foamToVTK") is None:
             report["yplus_vtk_export"] = {"status": "MISSING_EXECUTABLE", "command": "foamToVTK"}
         else:
             command = yplus_patch_vtk_command(case_dir)
@@ -919,37 +1002,48 @@ def analyze_wall_boundary_layer(
         plot_yplus_distribution(wall_data, float(mesh_config.get("target_y_plus", 1.0)), output_dir / "wall_yplus_vs_xc.png")
         report.update(status="YPLUS_PROCESSED", yplus_status="PROCESSED", yplus_sources=yplus_sources, yplus_rows=len(wall_data))
 
-    if run_openfoam_tools and shutil.which("foamToVTK") is not None:
-        command = cp_patch_vtk_command(case_dir)
-        try:
-            completed = subprocess.run(
-                command,
-                cwd=str(case_dir),
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                timeout=max(10, int(timeout_s)),
-            )
-            log = output_dir / "openfoam_postprocess_logs" / "log.foamToVTK_Cp_wall"
-            log.parent.mkdir(parents=True, exist_ok=True)
-            log.write_text(completed.stdout or "", encoding="utf-8", errors="ignore")
-            result = {
-                "status": "OK" if completed.returncode == 0 else "FAIL",
-                "returncode": completed.returncode,
-                "command": command,
-                "log": str(log),
-            }
-            report["commands"].append(result)
-            report["cp_vtk_export"] = result
-            if completed.returncode == 0:
-                report["cp_vtk_archives"] = archive_wall_field_vtk(case_dir, "Cp")
-        except subprocess.TimeoutExpired as exc:
+    if run_openfoam_tools:
+        cache_current, cache_sources = _wall_vtk_cache_current(case_dir, "Cp")
+        if cache_current:
             report["cp_vtk_export"] = {
-                "status": "TIMEOUT",
-                "command": command,
-                "timeout_s": timeout_s,
-                "details": str(exc),
+                "status": "SKIPPED",
+                "reason": "latest_wall_field_export_already_current",
+                "sources": cache_sources,
             }
+            report["cp_vtk_archives"] = cache_sources
+        elif shutil.which("foamToVTK") is not None:
+            command = cp_patch_vtk_command(case_dir)
+            try:
+                completed = subprocess.run(
+                    command,
+                    cwd=str(case_dir),
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    timeout=max(10, int(timeout_s)),
+                )
+                log = output_dir / "openfoam_postprocess_logs" / "log.foamToVTK_Cp_wall"
+                log.parent.mkdir(parents=True, exist_ok=True)
+                log.write_text(completed.stdout or "", encoding="utf-8", errors="ignore")
+                result = {
+                    "status": "OK" if completed.returncode == 0 else "FAIL",
+                    "returncode": completed.returncode,
+                    "command": command,
+                    "log": str(log),
+                }
+                report["commands"].append(result)
+                report["cp_vtk_export"] = result
+                if completed.returncode == 0:
+                    report["cp_vtk_archives"] = archive_wall_field_vtk(case_dir, "Cp")
+            except subprocess.TimeoutExpired as exc:
+                report["cp_vtk_export"] = {
+                    "status": "TIMEOUT",
+                    "command": command,
+                    "timeout_s": timeout_s,
+                    "details": str(exc),
+                }
+        else:
+            report["cp_vtk_export"] = {"status": "MISSING_EXECUTABLE", "command": "foamToVTK"}
     cp_data: pd.DataFrame | None = None
     try:
         cp_data, cp_sources = load_wall_cp(case_dir, float(case_inputs["chord_m"]))
@@ -974,39 +1068,50 @@ def analyze_wall_boundary_layer(
         report["cp_status"] = "NOT_AVAILABLE"
         report["cp_reason"] = f"{type(exc).__name__}: {exc}"
 
-    if run_openfoam_tools and shutil.which("foamToVTK") is not None:
-        command = wall_shear_patch_vtk_command(case_dir)
-        try:
-            completed = subprocess.run(
-                command,
-                cwd=str(case_dir),
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                timeout=max(10, int(timeout_s)),
-            )
-            log = output_dir / "openfoam_postprocess_logs" / "log.foamToVTK_wallShearStress_wall"
-            log.parent.mkdir(parents=True, exist_ok=True)
-            log.write_text(completed.stdout or "", encoding="utf-8", errors="ignore")
-            result = {
-                "status": "OK" if completed.returncode == 0 else "FAIL",
-                "returncode": completed.returncode,
-                "command": command,
-                "log": str(log),
-            }
-            report["commands"].append(result)
-            report["wall_shear_vtk_export"] = result
-            if completed.returncode == 0:
-                report["wall_shear_vtk_archives"] = archive_wall_field_vtk(
-                    case_dir, "wallShearStress"
-                )
-        except subprocess.TimeoutExpired as exc:
+    if run_openfoam_tools:
+        cache_current, cache_sources = _wall_vtk_cache_current(case_dir, "wallShearStress")
+        if cache_current:
             report["wall_shear_vtk_export"] = {
-                "status": "TIMEOUT",
-                "command": command,
-                "timeout_s": timeout_s,
-                "details": str(exc),
+                "status": "SKIPPED",
+                "reason": "latest_wall_field_export_already_current",
+                "sources": cache_sources,
             }
+            report["wall_shear_vtk_archives"] = cache_sources
+        elif shutil.which("foamToVTK") is not None:
+            command = wall_shear_patch_vtk_command(case_dir)
+            try:
+                completed = subprocess.run(
+                    command,
+                    cwd=str(case_dir),
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    timeout=max(10, int(timeout_s)),
+                )
+                log = output_dir / "openfoam_postprocess_logs" / "log.foamToVTK_wallShearStress_wall"
+                log.parent.mkdir(parents=True, exist_ok=True)
+                log.write_text(completed.stdout or "", encoding="utf-8", errors="ignore")
+                result = {
+                    "status": "OK" if completed.returncode == 0 else "FAIL",
+                    "returncode": completed.returncode,
+                    "command": command,
+                    "log": str(log),
+                }
+                report["commands"].append(result)
+                report["wall_shear_vtk_export"] = result
+                if completed.returncode == 0:
+                    report["wall_shear_vtk_archives"] = archive_wall_field_vtk(
+                        case_dir, "wallShearStress"
+                    )
+            except subprocess.TimeoutExpired as exc:
+                report["wall_shear_vtk_export"] = {
+                    "status": "TIMEOUT",
+                    "command": command,
+                    "timeout_s": timeout_s,
+                    "details": str(exc),
+                }
+        else:
+            report["wall_shear_vtk_export"] = {"status": "MISSING_EXECUTABLE", "command": "foamToVTK"}
     try:
         shear_data, shear_sources = load_wall_shear_stress(
             case_dir, float(case_inputs["chord_m"])
@@ -1034,7 +1139,10 @@ def analyze_wall_boundary_layer(
             separation=separation_report,
             separation_products=separation_products,
         )
-        if str(simulation_mode).upper() == "URANS":
+        if (
+            str(simulation_mode).upper() == "URANS"
+            and include_temporal_separation_history
+        ):
             snapshot_reports: list[tuple[float, dict[str, Any]]] = []
             snapshot_sources: dict[str, list[str]] = {}
             for time_value, snapshot, sources in load_wall_shear_snapshots(
@@ -1077,8 +1185,15 @@ def analyze_wall_boundary_layer(
     report["velocity_profile_control_dict"] = str(control_dict)
     report["velocity_profile_definitions"] = definitions
     if run_openfoam_tools:
+        cache_current, cache_sources = _velocity_profile_cache_current(case_dir, definitions)
         executable = shutil.which("foamPostProcess") or shutil.which("postProcess")
-        if executable:
+        if cache_current:
+            report["velocity_profile_sampling"] = {
+                "status": "SKIPPED",
+                "reason": "latest_velocity_profiles_already_current",
+                "sources": cache_sources,
+            }
+        elif executable:
             command = [
                 executable,
                 "-solver", solver_module,

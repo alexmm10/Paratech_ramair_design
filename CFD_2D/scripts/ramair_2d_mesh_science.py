@@ -59,19 +59,23 @@ def first_cell_height_audit(
     if re_l <= 0 or length <= 0 or target <= 0 or rho <= 0 or mu <= 0:
         raise ValueError("Re, chord, y+, rho and mu must all be positive")
 
-    laminar = length * 1.3016 * target / (re_l ** 0.75)
-    turbulent = length * ((13.1463 * target) ** 0.875) / (re_l ** 0.90)
+    laminar_distance = length * 1.3016 * target / (re_l ** 0.75)
+    turbulent_distance = length * ((13.1463 * target) ** 0.875) / (re_l ** 0.90)
     velocity = re_l * mu / (rho * length)
     skin_friction = 0.026 / (re_l ** (1.0 / 7.0))
     wall_shear = 0.5 * rho * velocity * velocity * skin_friction
     friction_velocity = math.sqrt(max(wall_shear / rho, 1.0e-30))
-    project = target * mu / (rho * friction_velocity)
+    project_distance = target * mu / (rho * friction_velocity)
 
-    candidates = {
-        "project_flat_plate_skin_friction_m": float(project),
-        "provided_laminar_formula_m": float(laminar),
-        "provided_turbulent_formula_m": float(turbulent),
+    wall_distance_candidates = {
+        "project_flat_plate_skin_friction_m": float(project_distance),
+        "provided_laminar_formula_m": float(laminar_distance),
+        "provided_turbulent_formula_m": float(turbulent_distance),
     }
+    # OpenFOAM stores FV unknowns at cell centres.  The y+ wall distance is
+    # therefore half of the geometric first-cell height for an orthogonal
+    # near-wall cell.
+    candidates = {name: 2.0 * value for name, value in wall_distance_candidates.items()}
     selected_source, selected = min(candidates.items(), key=lambda item: item[1])
     return {
         "schema_version": MESH_SCIENCE_SCHEMA_VERSION,
@@ -81,9 +85,13 @@ def first_cell_height_audit(
         "rho_kg_m3": rho,
         "mu_pa_s": mu,
         "candidates": candidates,
+        "wall_centre_distance_candidates_m": wall_distance_candidates,
+        "selected_wall_centre_distance_m": float(selected / 2.0),
         "selected_first_cell_height_m": float(selected),
         "selected_source": selected_source,
-        "selection_rule": "minimum positive height (most restrictive y+ estimate)",
+        "finite_volume_height_multiplier": 2.0,
+        "discretization_basis": "OpenFOAM cell-centred finite volume: first-cell height = 2*y",
+        "selection_rule": "twice the minimum positive wall-centre distance (most restrictive y+ estimate)",
     }
 
 

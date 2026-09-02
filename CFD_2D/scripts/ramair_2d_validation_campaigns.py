@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extensible, metadata-only campaign engine for Validation Lab schema 11.
+"""Extensible, metadata-only campaign engine for the current Validation Lab schema.
 
 The engine plans and indexes scientific work.  It never launches OpenFOAM and
 never copies or deletes meshes, RANS checkpoints, canonical URANS cases or
@@ -57,6 +57,14 @@ CLOSED_CUMMINGS = (
     ("4", "medium", 0.00125),
     ("5", "fine", 0.000625),
     ("6", "fine", 0.0003125),
+)
+OPEN_CUMMINGS = (
+    ("1", "coarse", 0.02),
+    ("2", "coarse", 0.01),
+    ("3", "medium", 0.005),
+    ("4", "medium", 0.0025),
+    ("5", "fine", 0.00125),
+    ("6", "fine", 0.000625),
 )
 
 
@@ -280,7 +288,7 @@ def build_campaign(
 ) -> dict[str, Any]:
     project_root = Path(project_root).resolve()
     study = load_study(project_root)
-    if int((study.get("study_config") or {}).get("schema_version") or 0) != 11:
+    if int((study.get("study_config") or {}).get("schema_version") or 0) != STUDY_CONFIG_SCHEMA_VERSION:
         raise RuntimeError(
             f"Validation Lab schema {STUDY_CONFIG_SCHEMA_VERSION} is required"
         )
@@ -291,7 +299,7 @@ def build_campaign(
         raise ValueError("topology must be closed or open")
     allowed = {
         "closed": {"optimized", "cummings", "full_capacity"},
-        "open": {"progressive_medium_first", "full_capacity"},
+        "open": {"progressive_medium_first", "cummings", "full_capacity"},
     }[topology]
     if strategy not in allowed:
         raise ValueError(f"Unsupported {topology} campaign strategy: {strategy}")
@@ -343,6 +351,21 @@ def build_campaign(
                     reason="RANS_DIAGNOSTICS_PRECEDE_URANS",
                     existing=existing,
                 ))
+            if strategy == "cummings":
+                for label, level, dt_star in OPEN_CUMMINGS:
+                    cases.append(_case_record(
+                        topology=topology,
+                        label=f"a{angle:g}-{label}",
+                        mesh=meshes[level],
+                        alpha_deg=angle,
+                        dt_star=dt_star,
+                        tc_s=tc_s,
+                        collection_time_star=float(contract["screening_collection_time_star"]),
+                        state="PLANNED",
+                        reason="OPEN_CUMMINGS_LOW_COST_PLAN",
+                        existing=existing,
+                    ))
+                continue
             # Keep the complete 3x6 capacity visible in both strategies.  The
             # progressive strategy only unlocks Medium first; Coarse/Fine are
             # explicit deferred spatial-crossing records, never hidden work.

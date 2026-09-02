@@ -24,6 +24,9 @@ CFD_2D/results/
 CFD_2D/meshes/
 CFD_2D/openfoam_cases/
 CFD_2D/validation_studies/
+CFD_2D/experimental_meshes/
+CFD_2D/scratch/
+CFD_2D/parallel_profiles/
 CFD_2D/CFD_2D_inputs/case_package/
 CFD_2D/CFD_2D_inputs/geometry/
 CFD_2D/CFD_2D_inputs/previews/
@@ -51,6 +54,8 @@ Application Support/Tools/xfoil/
 processor*/
 postProcessing/
 VTK/
+*.pvsm
+*.pvd
 
 # OS leftovers
 Thumbs.db

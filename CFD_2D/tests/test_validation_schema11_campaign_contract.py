@@ -42,10 +42,10 @@ def _study(active: Path) -> dict[str, object]:
     }
 
 
-def test_schema11_defaults_and_schema10_migration_preserve_user_values() -> None:
+def test_schema13_defaults_and_schema10_migration_preserve_user_values() -> None:
     defaults = default_study_config()
-    assert STUDY_CONFIG_SCHEMA_VERSION == 11
-    assert defaults["schema_version"] == 11
+    assert STUDY_CONFIG_SCHEMA_VERSION == 13
+    assert defaults["schema_version"] == 13
     assert defaults["campaign_engine"]["full_matrix_per_angle"] == 18
     assert defaults["campaign_engine"]["closed"]["angle_order_deg"] == [16.0, 8.0]
     assert defaults["campaign_engine"]["open"]["angle_order_deg"] == [8.0, 16.0]
@@ -58,7 +58,11 @@ def test_schema11_defaults_and_schema10_migration_preserve_user_values() -> None
         "validation_study": {"alpha_deg": 8.0},
         "custom_metadata": {"owner": "user"},
     })
-    assert migrated["schema_version"] == 11
+    assert migrated["schema_version"] == 13
+    assert migrated["validation_study"]["rans_base_states"]["initial_iterations"] == 20000
+    assert migrated["validation_study"]["rans_base_states"]["relaxation"] == {
+        "p": 0.3, "U": 0.7, "nuTilda": 0.7,
+    }
     assert migrated["purpose"] == "preserve-me"
     assert migrated["custom_metadata"] == {"owner": "user"}
     assert migrated["campaign_engine"]["preserve_existing_runs"] is True
@@ -78,14 +82,14 @@ def test_metadata_only_migration_writes_backup_without_touching_heavy_data(
     persist_study_config_migration(config_path, current, migrated)
 
     assert heavy.read_bytes() == b"preserve-byte-for-byte"
-    assert json.loads(config_path.read_text())["schema_version"] == 11
+    assert json.loads(config_path.read_text())["schema_version"] == 13
     backups = list((config_path.parent / "configs/migrations").glob(
         "study_config_schema10_*.json"
     ))
     assert len(backups) == 1
     assert json.loads(backups[0].read_text()) == current
     report = json.loads((
-        config_path.parent / "configs/migrations/schema11_migration_report.json"
+        config_path.parent / "configs/migrations/schema13_migration_report.json"
     ).read_text())
     assert report["metadata_only"] is True
     assert "RANS checkpoints and bases" in report["preserved"]
@@ -143,6 +147,25 @@ def test_open_campaign_defers_urans_until_fixed_geometry_rans_diagnostics(
     assert sum(row["state"] == "DEFERRED" for row in campaign["cases"]) == 18
     assert campaign["methodology"]["geometry_must_remain_fixed"] is True
     assert campaign["methodology"]["minimum_cycles"] == 10
+
+
+def test_open_cummings_campaign_has_six_low_cost_urans_cases_per_angle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    active = tmp_path / "active"
+    monkeypatch.setattr(campaigns, "load_study", lambda _root: _study(active))
+    monkeypatch.setattr(campaigns, "active_workspace_root", lambda _root: active)
+    campaign = campaigns.build_campaign(
+        tmp_path, topology="open", strategy="cummings", angles_deg=[8.0]
+    )
+    urans = [row for row in campaign["cases"] if row["kind"] == "URANS"]
+    assert len(urans) == 6
+    assert [(row["mesh_level"], row["deltaT_star"]) for row in urans] == [
+        ("coarse", 0.02), ("coarse", 0.01),
+        ("medium", 0.005), ("medium", 0.0025),
+        ("fine", 0.00125), ("fine", 0.000625),
+    ]
 
 
 def test_campaign_decisions_append_immutable_history(

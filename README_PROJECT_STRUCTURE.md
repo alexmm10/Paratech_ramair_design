@@ -4,6 +4,11 @@ Aplicacion de diseno y preproceso CAD, mallado Gmsh, preparacion/ejecucion
 OpenFOAM y postproceso de perfiles ram-air. CATIA V5 no se ejecuta desde la
 interfaz; OpenFOAM solo se inicia mediante una accion explicita del usuario.
 
+El respaldo y actualización del código en GitHub se describe en
+`Documents and Manuals/Application/GITHUB_BACKUP_WORKFLOW.md`. Los casos CFD,
+mallas, VTK/ParaView y estados de ejecución se excluyen de Git y requieren una
+copia de datos científicos independiente.
+
 ## Inicio habitual
 
 En Windows, desde la raiz del proyecto:
@@ -144,15 +149,18 @@ los generados por XFOIL se registran en `Airfoil Profiles`.
 
 ## Flujo de trabajo
 
-1. **Geometria:** seleccionar o generar el perfil, editar la configuracion de
+1. **Caso de trabajo:** crear o elegir un candidato en su pagina y pulsar
+   explicitamente `Cargar caso de trabajo`. La barra lateral solo informa del
+   contexto activo; cambiar geometria o malla no cambia este contenedor.
+2. **Geometria:** seleccionar o generar el perfil, editar la configuracion de
    canopy/CATIA y ejecutar el preprocesador.
-2. **Caso CFD:** definir Reynolds, Mach, propiedades del fluido y angulos; crear
+3. **Caso CFD:** definir Reynolds, Mach, propiedades del fluido y angulos; crear
    el paquete de caso reutilizable.
-3. **Malla:** cargar una malla guardada o generar una nueva, revisar Gmsh y
+4. **Malla:** cargar una malla compatible o generar una nueva, revisar Gmsh y
    `checkMesh`, y aprobarla si corresponde.
-4. **Caso OpenFOAM:** escribir diccionarios sobre una `polyMesh` real.
-5. **Ejecucion:** dry-run por defecto; el solver solo arranca con confirmacion.
-6. **Postproceso:** operar sobre la simulacion activa o restaurar una previa.
+5. **Caso OpenFOAM:** escribir diccionarios sobre una `polyMesh` real.
+6. **Ejecucion:** dry-run por defecto; el solver solo arranca con confirmacion.
+7. **Postproceso:** operar sobre la simulacion activa o restaurar una previa.
 
 Los trabajos se ejecutan en segundo plano. Estado y logs se actualizan cada dos
 segundos sin pulsar refrescar. El boton **Cerrar DESIGN APP y liberar WSL** se
@@ -162,8 +170,9 @@ con `RAMAIR_APP_IDLE_SHUTDOWN_MIN=0`.
 
 El angulo de ataque no es una propiedad global de la geometria. El barrido se
 define en **Caso CFD** y el selector aparece solo al escribir, ejecutar o
-postprocesar uno de los casos `alpha_*`. La barra lateral identifica el perfil
-CFD activo y permite restaurar etapas de un caso guardado en `Results`.
+postprocesar uno de los casos `alpha_*`. La barra lateral identifica el perfil,
+la malla y el caso activos; la carga y creacion se realizan en **Caso de
+trabajo**.
 
 En **Malla**, `y1` manual se introduce en metros y se muestra tambien como
 `y1/c`. Cuando se activa el calculo desde y+, la app muestra el valor fisico

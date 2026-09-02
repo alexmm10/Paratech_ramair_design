@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -49,6 +50,71 @@ STANDARD_SOLVER_PACKAGE = "topology_solver_v11"
 STANDARD_SOLVER_CONFIG = Path("CFD_2D/CFD_2D_inputs/config/cfd2d_solver_config.json")
 
 
+def _canonical_signature(value: object) -> str:
+    payload = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _as_optional_bool(value: object) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "open", "opened"}:
+        return True
+    if text in {"0", "false", "no", "closed"}:
+        return False
+    return None
+
+
+def geometry_identity(root: Path, variant: str) -> dict[str, object]:
+    """Build a portable geometry identity independent of Work Case names."""
+    geometry_root = root / "CFD_2D/CFD_2D_inputs/geometry" / variant
+    package_root = root / "CFD_2D/CFD_2D_inputs/case_package" / variant
+    documents = [
+        read_json(geometry_root / "profile_manifest.json", {}) or {},
+        read_json(geometry_root / "manifest.json", {}) or {},
+        read_json(geometry_root / "mesh_input_contract.json", {}) or {},
+        read_json(package_root / "manifest.json", {}) or {},
+        read_json(package_root / "mesh_input_contract.json", {}) or {},
+    ]
+    merged: dict[str, object] = {}
+    for document in documents:
+        if isinstance(document, dict):
+            merged.update(document)
+    profile = variant_profile(root, variant)
+    profile_sha256 = hashlib.sha256(profile.read_bytes()).hexdigest() if profile and profile.is_file() else None
+
+    def first(*keys: str) -> object:
+        for key in keys:
+            if merged.get(key) is not None:
+                return merged[key]
+        return None
+
+    identity = {
+        "variant": str(variant),
+        "profile_path": portable_profile_name(root, variant),
+        "profile_sha256": profile_sha256,
+        "chord_m": first("chord_m", "reference_chord_m", "chord"),
+        "open_profile": _as_optional_bool(first("open_profile", "is_open", "open_inlet", "has_ram_air_opening_feature")),
+        "inlet_fraction_chord": first(
+            "inlet_fraction_chord", "inlet_length_chord", "cut_fraction_chord",
+            "opening_fraction_chord", "nominal_inlet_percent_chord"
+        ),
+        "geometry_contract_version": first("schema_version", "contract_version", "geometry_contract_version"),
+    }
+    comparable = {key: value for key, value in identity.items() if key != "variant" and value is not None}
+    identity["signature"] = _canonical_signature(comparable or {"variant": str(variant)})
+    return identity
+
+
 def safe_alpha_dir(alpha: float) -> str:
     return f"alpha_{float(alpha):+0.3f}".replace("+", "p").replace("-", "m").replace(".", "p")
 
@@ -74,7 +140,10 @@ def write_json_atomic(path: Path, data: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
-        temporary.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        temporary.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False, default=str) + "\n",
+            encoding="utf-8",
+        )
         temporary.replace(path)
     finally:
         temporary.unlink(missing_ok=True)
@@ -516,6 +585,8 @@ def resolve_stage_package(
     manifest: dict[str, object],
     stage: str,
     package_name: str | None,
+    *,
+    allow_stale: bool = False,
 ) -> tuple[str, Path]:
     manifest = schema3_manifest(case_root, manifest)
     packages = saved_stage_packages(case_root, manifest, stage)
@@ -546,7 +617,7 @@ def resolve_stage_package(
     if selected not in packages:
         raise KeyError(f"Unknown {stage} package '{selected}'. Available: {', '.join(packages)}")
     compatibility = package_compatibility(manifest, stage, selected)
-    if compatibility.get("status") == "stale":
+    if compatibility.get("status") == "stale" and not allow_stale:
         warnings = ", ".join(map(str, compatibility.get("warnings") or []))
         raise ValueError(
             f"Refusing to load stale {stage} package '{selected}': {warnings}"
@@ -622,6 +693,19 @@ def save_stage(
         previous_info=previous_info,
         archived_path=str(backup) if backup else None,
     )
+    geometry_meta = geometry_identity(root, variant)
+    if stage in {"geometry", "case", "mesh"}:
+        stage_info["geometry_identity"] = geometry_meta
+    if stage == "mesh":
+        mesh_cfg = read_json(destination / "Configurations/cfd2d_mesh_config.json", {}) or {}
+        workflow_cfg = read_json(destination / "Configurations/cfd2d_workflow_config.json", {}) or {}
+        conditions = workflow_cfg.get("case_conditions") if isinstance(workflow_cfg, dict) else {}
+        stage_info["mesh_condition_basis"] = {
+            "reynolds": (conditions or {}).get("reynolds"),
+            "mach": (conditions or {}).get("mach"),
+            "target_y_plus": mesh_cfg.get("target_y_plus") if isinstance(mesh_cfg, dict) else None,
+            "strategy_version": mesh_cfg.get("mesh_strategy_version") if isinstance(mesh_cfg, dict) else None,
+        }
     packages[package_key] = stage_info
     current["active_package"] = package_key
     current["folder"] = STAGE_COLLECTION_FOLDERS[stage]
@@ -654,13 +738,16 @@ def restore_stage(
     action: str,
     package_name: str | None = None,
     apply_solver_precedence: bool = True,
+    allow_stale: bool = False,
 ) -> dict[str, object]:
     case_name = safe_case_name(case_name)
     case_root = project_path(root, "results_library", case_name)
     manifest = schema3_manifest(
         case_root, read_json(case_root / "case_manifest.json", {}) or {}
     )
-    package, case_stage = resolve_stage_package(case_root, manifest, stage, package_name)
+    package, case_stage = resolve_stage_package(
+        case_root, manifest, stage, package_name, allow_stale=allow_stale
+    )
     package_info = saved_stage_packages(case_root, manifest, stage)[package]
     compatibility = package_compatibility(manifest, stage, package)
     variant = str(package_info.get("variant") or variant or manifest.get("variant") or "")
@@ -752,7 +839,12 @@ def restore_stage(
 
 
 def restore_workspace(root: Path, case_name: str, action: str) -> dict[str, object]:
-    """Restore the coherent geometry, CFD-case and mesh packages of one work case."""
+    """Restore the complete saved snapshot, including review-required revisions.
+
+    A stale package remains blocked when loaded on its own.  For a complete work-case
+    restore, however, the active package set is the user's saved snapshot and must be
+    recoverable as a unit.  Compatibility drift is preserved as an explicit warning.
+    """
     case_name = safe_case_name(case_name)
     case_root = project_path(root, "results_library", case_name)
     manifest = schema3_manifest(
@@ -765,8 +857,15 @@ def restore_workspace(root: Path, case_name: str, action: str) -> dict[str, obje
     for stage in ("geometry", "case", "mesh"):
         packages = saved_stage_packages(case_root, manifest, stage)
         if not packages:
-            raise FileNotFoundError(f"The work case has no restorable {stage} package: {case_root}")
-        package, _ = resolve_stage_package(case_root, manifest, stage, None)
+            warnings.append(f"work_case_has_no_{stage}_package")
+            continue
+        stage_entry = (manifest.get("stages") or {}).get(stage) or {}
+        package = str(stage_entry.get("active_package") or "")
+        if not package or package not in packages:
+            package = sorted(packages)[-1]
+        resolve_stage_package(
+            case_root, manifest, stage, package, allow_stale=True
+        )
         selected_packages[stage] = package
     for stage, package in selected_packages.items():
         result = restore_stage(
@@ -778,6 +877,7 @@ def restore_workspace(root: Path, case_name: str, action: str) -> dict[str, obje
             action,
             package,
             apply_solver_precedence=False,
+            allow_stale=True,
         )
         restored_stages[stage] = result
         packages_used[stage] = package
@@ -786,7 +886,13 @@ def restore_workspace(root: Path, case_name: str, action: str) -> dict[str, obje
     solver_packages = saved_stage_packages(case_root, manifest, "solver")
     if solver_packages:
         try:
-            package, _ = resolve_stage_package(case_root, manifest, "solver", None)
+            solver_entry = (manifest.get("stages") or {}).get("solver") or {}
+            package = str(solver_entry.get("active_package") or "")
+            if not package or package not in solver_packages:
+                package = sorted(solver_packages)[-1]
+            resolve_stage_package(
+                case_root, manifest, "solver", package, allow_stale=True
+            )
             result = restore_stage(
                 root,
                 "solver",
@@ -796,6 +902,7 @@ def restore_workspace(root: Path, case_name: str, action: str) -> dict[str, obje
                 action,
                 package,
                 apply_solver_precedence=False,
+                allow_stale=True,
             )
             restored_stages["solver"] = result
             packages_used["solver"] = package

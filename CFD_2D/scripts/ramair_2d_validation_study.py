@@ -24,6 +24,10 @@ from ramair_2d_openfoam_case_writer import (
     write_constant,
     write_system,
 )
+from ramair_2d_mesh_numerics import (
+    quality_controls_for_mesh,
+    quality_controls_from_paths,
+)
 from ramair_2d_study_registry import (
     MESH_IDS,
     active_workspace_root,
@@ -57,6 +61,7 @@ from ramair_2d_rans_checkpoint_batch import (
     delete_active_base,
     execute_base,
     execute_queue,
+    mesh_angle_id,
     require_compatible_checkpoint,
 )
 from ramair_2d_rans_review import (
@@ -463,6 +468,13 @@ def _stage_plan(
         for stage in stages[:3]
     ):
         warnings.append("BACKWARD_USED_DURING_STARTUP")
+    retained_snapshots = max(0, int(
+        urans.get("retained_snapshots", validation["retained_snapshots"])
+    ))
+    write_interval_s = float(validation["field_write_interval_tc"]) * condition["tc_s"]
+    for stage in stages:
+        stage["purge_write"] = retained_snapshots
+        stage["write_interval_s"] = write_interval_s
     return {
         "schema_version": 2,
         "time_policy": "fixed_staged",
@@ -604,8 +616,11 @@ def prepare_run(
     if mesh.get("checkMesh_status") != "OK" or not mesh.get("frontAndBack_empty"):
         update_run_status(project_root, run_id, "REJECTED_MESH")
         raise RuntimeError(f"{run_id}: source mesh is not eligible")
-    checkpoint = require_compatible_checkpoint(project_root, str(row["mesh_id"]))
-    checkpoint_case = _checkpoint_root(project_root, str(row["mesh_id"])) / "case"
+    checkpoint_id = mesh_angle_id(
+        study, str(row["mesh_id"]), float(row.get("alpha_deg", 0.0))
+    )
+    checkpoint = require_compatible_checkpoint(project_root, checkpoint_id)
+    checkpoint_case = _checkpoint_root(project_root, checkpoint_id) / "case"
     checkpoint_zero = Path(str(checkpoint.get("restart_zero") or ""))
     checkpoint_identity = checkpoint_mesh_identity(checkpoint_case, checkpoint_zero)
     if checkpoint_identity.get("status") != "READY":
@@ -671,12 +686,28 @@ def prepare_run(
         )
     )
     topology = str(row["topology"])
+    mesh_quality_controls = quality_controls_for_mesh(Path(mesh["mesh_package"]))
+    if mesh_quality_controls is None:
+        mesh_quality_controls = quality_controls_from_paths([
+            checkpoint_case / "mesh_quality_report.json",
+            checkpoint_case / "log.checkMesh.preRun",
+            checkpoint_case / "log.checkMesh",
+        ])
+    if mesh_quality_controls is None:
+        raise RuntimeError(
+            f"{run_id}: automatic non-orthogonal controls require the checkMesh "
+            "report belonging to the selected mesh package"
+        )
+    automatic_correctors = int(
+        mesh_quality_controls["n_non_orthogonal_correctors"]
+    )
+    automatic_laplacian = str(mesh_quality_controls["laplacian_scheme"])
     cfg = OpenFOAMCaseConfig(
         solver="foamRun",
         solver_module="incompressibleFluid",
         turbulence_model="SpalartAllmaras",
         reynolds=condition["reynolds"],
-        alpha_deg=8.0,
+        alpha_deg=float(row["alpha_deg"]),
         rho=condition["rho_kg_m3"],
         mu=condition["mu_pa_s"],
         chord_m=condition["chord_m"],
@@ -700,11 +731,14 @@ def prepare_run(
         n_correctors=int(
             urans.get("pimple_correctors", validation["nCorrectors"])
         ),
-        n_non_orthogonal_correctors=int(
-            urans.get(
-                "pimple_non_orthogonal_correctors",
-                validation["nNonOrthogonalCorrectors"],
-            )
+        n_non_orthogonal_correctors=automatic_correctors,
+        outer_corrector_residual_control=dict(
+            urans.get("outer_corrector_residual_control") or {
+                "enabled": True,
+                "p": {"tolerance": 1.0e-4, "relTol": 0.0},
+                "U": {"tolerance": 1.0e-4, "relTol": 0.0},
+                "nuTilda": {"tolerance": 1.0e-4, "relTol": 0.0},
+            }
         ),
         transient_velocity_divergence_scheme="Gauss linearUpwind limited",
         transient_turbulence_divergence_scheme="Gauss linearUpwind limited",
@@ -724,9 +758,16 @@ def prepare_run(
         ),
         farfield_boundary_condition="freestream",
         steady_initialization_enabled=True,
-        steady_max_iterations=10000,
+        steady_max_iterations=20000,
         steady_write_interval_iterations=50,
-        steady_n_non_orthogonal_correctors=0,
+        steady_n_non_orthogonal_correctors=automatic_correctors,
+        laplacian_scheme=automatic_laplacian,
+        steady_laplacian_scheme=automatic_laplacian,
+        mesh_non_orthogonality_deg=float(
+            mesh_quality_controls["maximum_non_orthogonality_deg"]
+        ),
+        mesh_quality_numerics_source=str(mesh_quality_controls["source"]),
+        mesh_quality_numerics_mode="automatic",
         temporal_accuracy={
             "profile_id": "validation_convergence_fixed_staged_v1",
             "target_min_strouhal": 0.05,
@@ -746,7 +787,7 @@ def prepare_run(
     case_config = {
         **asdict(cfg),
         "variant": mesh["variant"],
-        "alpha_deg": 8.0,
+        "alpha_deg": float(row["alpha_deg"]),
         "mesh_id": mesh["id"],
         "mesh_hash": checkpoint_mesh_hash,
         "registry_mesh_hash": mesh["mesh_hash"],
@@ -794,7 +835,7 @@ def prepare_run(
         "registry_mesh_hash": mesh["mesh_hash"],
         "mesh_source": "RANS_CHECKPOINT",
         "cell_count": checkpoint_identity.get("cell_count") or mesh["cell_count"],
-        "alpha_deg": 8.0,
+        "alpha_deg": float(row["alpha_deg"]),
         "mach": condition["mach"],
         "reynolds": condition["reynolds"],
         "chord_m": condition["chord_m"],
@@ -1091,9 +1132,10 @@ def execute_run(
             ),
             evidence=state,
         )
-    checkpoint = require_compatible_checkpoint(
-        project_root, str(row["mesh_id"])
+    checkpoint_id = mesh_angle_id(
+        study, str(row["mesh_id"]), float(row.get("alpha_deg", 0.0))
     )
+    checkpoint = require_compatible_checkpoint(project_root, checkpoint_id)
     case = run_root / "case"
     checkpoint_case = Path(str(checkpoint.get("checkpoint_case") or ""))
     restart_zero = Path(str(checkpoint.get("restart_zero") or ""))
@@ -1173,6 +1215,16 @@ def execute_run(
                 )
             )
             * 60.0
+        ),
+        (
+            "--automatic-core-selection"
+            if bool(urans.get("automatic_core_selection", True))
+            else "--no-automatic-core-selection"
+        ),
+        (
+            "--renumber-before-decompose"
+            if bool(urans.get("renumber_before_decompose", True))
+            else "--no-renumber-before-decompose"
         ),
     ]
     if run:
@@ -1340,13 +1392,22 @@ def parse_args() -> argparse.Namespace:
     checkpoint.add_argument("--run", action="store_true")
     rans_base = sub.add_parser("rans-base")
     rans_base.add_argument("--mesh-id", choices=MESH_IDS, required=True)
+    rans_base.add_argument("--alpha-deg", type=float)
     rans_base.add_argument("--overwrite", action="store_true")
     rans_base.add_argument("--allow-open-diagnostic", action="store_true")
     rans_base.add_argument("--manual-extension-iterations", type=int)
     rans_base.add_argument("--run", action="store_true")
     rans_queue = sub.add_parser("rans-queue")
+    rans_queue.add_argument("--alpha-deg", type=float)
     rans_queue.add_argument("--continue-on-nonfatal-failure", action="store_true")
     rans_queue.add_argument("--run", action="store_true")
+    rans_selection = sub.add_parser("rans-selection-queue")
+    rans_selection.add_argument(
+        "--case", action="append", required=True,
+        help="Ordered mesh_id:alpha_deg identity; may be repeated.",
+    )
+    rans_selection.add_argument("--continue-on-nonfatal-failure", action="store_true")
+    rans_selection.add_argument("--run", action="store_true")
     rans_delete = sub.add_parser("rans-delete")
     rans_delete.add_argument("--mesh-id", choices=MESH_IDS, required=True)
     rans_delete.add_argument("--confirm", action="store_true")
@@ -1371,7 +1432,8 @@ def parse_args() -> argparse.Namespace:
         ],
         required=True,
     )
-    rans_review.add_argument("--mesh-id", choices=MESH_IDS)
+    rans_review.add_argument("--mesh-id")
+    rans_review.add_argument("--alpha-deg", type=float)
     rans_review.add_argument("--reason")
     rans_review.add_argument("--confirm", action="store_true")
     execution_registry = sub.add_parser("execution-registry")
@@ -1418,7 +1480,13 @@ def parse_args() -> argparse.Namespace:
     preset = sub.add_parser("preset")
     preset.add_argument(
         "--preset",
-        choices=["reference", "frequency", "manual"],
+        choices=[
+            "reference",
+            "frequency",
+            "manual",
+            "cummings_closed_low_cost",
+            "cummings_open_low_cost",
+        ],
         required=True,
     )
     preset.add_argument("--anchor-dt-s", type=float)
@@ -1426,7 +1494,7 @@ def parse_args() -> argparse.Namespace:
     analyze = sub.add_parser("analyze")
     analyze.add_argument("--run-id", required=True)
     analyze_checkpoint_parser = sub.add_parser("analyze-checkpoint")
-    analyze_checkpoint_parser.add_argument("--mesh-id", choices=MESH_IDS, required=True)
+    analyze_checkpoint_parser.add_argument("--mesh-id", required=True)
     sub.add_parser("report")
     sub.add_parser("reference-table")
     return parser.parse_args()
@@ -1479,9 +1547,12 @@ def main() -> int:
             overwrite=args.overwrite,
         )
     elif args.action == "rans-base":
+        selected_mesh_id = mesh_angle_id(
+            load_study(root), args.mesh_id, args.alpha_deg
+        )
         result = execute_base(
             root,
-            args.mesh_id,
+            selected_mesh_id,
             run=args.run,
             overwrite=args.overwrite,
             allow_open_diagnostic=args.allow_open_diagnostic,
@@ -1492,9 +1563,52 @@ def main() -> int:
         result = execute_queue(
             root,
             run=args.run,
+            alpha_deg=args.alpha_deg,
             continue_on_nonfatal_failure=args.continue_on_nonfatal_failure,
         )
         generate_storage_inventory(root)
+    elif args.action == "rans-selection-queue":
+        study = load_study(root)
+        state_path = active_workspace_root(root) / "rans_selection_queue_state.json"
+        state = {
+            "schema_version": 1,
+            "status": "RUNNING" if args.run else "PREPARED",
+            "cases": [],
+            "updated_at": utc_stamp(),
+        }
+        write_json_atomic(state_path, state)
+        for order, case_spec in enumerate(args.case, start=1):
+            try:
+                base_mesh_id, alpha_text = str(case_spec).rsplit(":", 1)
+                alpha_deg = float(alpha_text)
+                checkpoint_id = mesh_angle_id(study, base_mesh_id, alpha_deg)
+                result = execute_base(
+                    root, checkpoint_id, run=args.run, overwrite=False,
+                    consume_previous_stop_marker=False,
+                )
+            except Exception as exc:
+                result = {
+                    "mesh_id": str(case_spec), "status": "RANS_BASE_FAILED",
+                    "message": str(exc),
+                }
+            state["cases"].append({
+                "order": order, "requested_case": str(case_spec), **result,
+            })
+            state["updated_at"] = utc_stamp()
+            write_json_atomic(state_path, state)
+            if (
+                args.run
+                and str(result.get("status")) in {"RANS_BASE_FAILED", "RANS_BASE_DIVERGED"}
+                and not args.continue_on_nonfatal_failure
+            ):
+                state["status"] = "STOPPED_ON_FAILURE"
+                write_json_atomic(state_path, state)
+                break
+        else:
+            state["status"] = "COMPLETED" if args.run else "PREPARED"
+            state["updated_at"] = utc_stamp()
+            write_json_atomic(state_path, state)
+        result = state
     elif args.action == "rans-delete":
         result = delete_active_base(
             root,
@@ -1515,7 +1629,7 @@ def main() -> int:
             raise ValueError(f"{args.review_action} requires --mesh-id")
         if args.review_action == "accept-six-current":
             result = accept_current_six_bases(
-                root, confirmation=args.confirm
+                root, confirmation=args.confirm, alpha_deg=args.alpha_deg
             )
         elif args.review_action == "migrate":
             result = migrate_existing_bases(root)

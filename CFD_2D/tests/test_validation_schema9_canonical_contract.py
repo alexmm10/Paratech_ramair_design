@@ -117,7 +117,7 @@ def test_api_schema_and_migration_remove_legacy_policy() -> None:
         }},
     })
     assert BACKEND_API_VERSION == 26
-    assert STUDY_CONFIG_SCHEMA_VERSION == 11
+    assert STUDY_CONFIG_SCHEMA_VERSION == 13
     urans = migrated["validation_study"]["urans"]
     assert not ({"pilot_policy", "attempts", "retention", "archive"} & set(urans))
 
@@ -385,6 +385,9 @@ def test_stage_write_interval_hits_target_after_delta_t_change(tmp_path: Path) -
 def test_matrix_is_exact_three_values_per_six_meshes() -> None:
     matrix = build_run_matrix(mesh_registry(), dt_values_s=[2.5e-4, 1.25e-4, 6.25e-5], preset="reference")
     assert len(matrix["runs"]) == 18
+    assert {
+        (item["topology"], item["alpha_deg"]) for item in matrix["runs"]
+    } == {("closed", 16.0), ("open", 8.0)}
     for mesh_id in {item["mesh_id"] for item in matrix["runs"]}:
         values = [item["dt_s"] for item in matrix["runs"] if item["mesh_id"] == mesh_id]
         assert values == sorted(values, reverse=True) and len(values) == 3

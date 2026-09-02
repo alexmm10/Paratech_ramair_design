@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import signal
 import subprocess
 import sys
 import time
@@ -76,6 +78,14 @@ def staged_command(args: argparse.Namespace, case_dir: Path, resume: bool) -> li
         "--convergence-mean-tolerance", str(float(args.convergence_mean_tolerance)),
         "--convergence-oscillation-tolerance", str(float(args.convergence_oscillation_tolerance)),
     ]
+    command.append(
+        "--automatic-core-selection" if args.automatic_core_selection
+        else "--no-automatic-core-selection"
+    )
+    command.append(
+        "--renumber-before-decompose" if args.renumber_before_decompose
+        else "--no-renumber-before-decompose"
+    )
     if args.run:
         command.append("--run")
     if args.steady_initialization:
@@ -102,7 +112,30 @@ def staged_command(args: argparse.Namespace, case_dir: Path, resume: bool) -> li
         command.append("--resume")
         if args.resume_additional_time_star is not None:
             command += ["--resume-additional-time-star", str(float(args.resume_additional_time_star))]
+    if args.transient_phase_plan is not None:
+        command += ["--transient-phase-plan", str(args.transient_phase_plan)]
     return command
+
+
+def regenerate_case_from_approved_mesh(args: argparse.Namespace, alpha: float) -> dict[str, Any]:
+    """Rebuild a clean case instead of trying to sanitize transferred RANS fields."""
+    script = Path(__file__).with_name("ramair_2d_openfoam_case_writer.py")
+    command = [
+        sys.executable,
+        str(script),
+        "--case-root", str(args.case_root),
+        "--variant", str(args.variant),
+        "--alpha", str(float(alpha)),
+        "--write-case",
+        "--mesh-approved-required",
+        "--require-converted-polymesh",
+        "--overwrite",
+        "--existing-case-action", "delete",
+    ]
+    if args.solver_config is not None:
+        command += ["--solver-config", str(args.solver_config)]
+    completed = subprocess.run(command, cwd=str(args.case_root), text=True)
+    return {"command": command, "returncode": int(completed.returncode)}
 
 
 def postprocess_command(args: argparse.Namespace, alpha: float) -> list[str]:
@@ -119,6 +152,47 @@ def postprocess_command(args: argparse.Namespace, alpha: float) -> list[str]:
     return command
 
 
+def run_with_case_timeout(
+    command: list[str],
+    *,
+    cwd: Path,
+    timeout_min: float,
+    stop_grace_min: float,
+) -> tuple[subprocess.CompletedProcess[str], bool]:
+    """Run one staged angle with a real wall-clock bound and recoverable stop."""
+    kwargs: dict[str, Any] = {"cwd": str(cwd), "text": True}
+    if os.name != "nt":
+        kwargs["start_new_session"] = True
+    process = subprocess.Popen(command, **kwargs)
+    timed_out = False
+    try:
+        returncode = process.wait(timeout=max(60.0, float(timeout_min) * 60.0))
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        if os.name != "nt":
+            os.killpg(process.pid, signal.SIGINT)
+        else:
+            process.send_signal(signal.SIGTERM)
+        try:
+            returncode = process.wait(
+                timeout=max(10.0, float(stop_grace_min) * 60.0)
+            )
+        except subprocess.TimeoutExpired:
+            if os.name != "nt":
+                os.killpg(process.pid, signal.SIGTERM)
+            else:
+                process.terminate()
+            try:
+                returncode = process.wait(timeout=30.0)
+            except subprocess.TimeoutExpired:
+                if os.name != "nt":
+                    os.killpg(process.pid, signal.SIGKILL)
+                else:
+                    process.kill()
+                returncode = process.wait()
+    return subprocess.CompletedProcess(command, int(returncode)), timed_out
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Execute prepared alpha cases sequentially. Dry-run by default.")
     parser.add_argument("--case-root", type=Path, required=True)
@@ -127,6 +201,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--solver", default="auto")
     parser.add_argument("--execution-backend", choices=["native", "pyfoam"], default="pyfoam")
     parser.add_argument("--n-cores", type=int, default=4)
+    parser.add_argument(
+        "--automatic-core-selection", action=argparse.BooleanOptionalAction, default=True,
+    )
+    parser.add_argument(
+        "--renumber-before-decompose", action=argparse.BooleanOptionalAction, default=True,
+    )
     parser.add_argument("--timeout-min-per-alpha", type=float, default=120.0)
     parser.add_argument("--steady-initialization", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--steady-timeout-min", type=float, default=30.0)
@@ -146,6 +226,11 @@ def parse_args() -> argparse.Namespace:
         help="Enable only for an attended diagnostic angle; unattended sweeps avoid plot-process overhead.",
     )
     parser.add_argument("--resume-existing", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--restart-existing", action=argparse.BooleanOptionalAction, default=False,
+        help="Regenerate every queued angle from the approved mesh and solver configuration before running it.",
+    )
+    parser.add_argument("--solver-config", type=Path, default=None)
     parser.add_argument("--resume-additional-time-star", type=float, default=None)
     parser.add_argument("--skip-completed", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--continue-after-timeout", action=argparse.BooleanOptionalAction, default=True)
@@ -172,6 +257,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--stop-grace-min", type=float, default=5.0)
     parser.add_argument("--postprocess-after-each", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--average-from-fraction", type=float, default=0.6)
+    parser.add_argument("--transient-phase-plan", type=Path, default=None)
     parser.add_argument("--run", action="store_true")
     return parser.parse_args()
 
@@ -179,6 +265,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     args.case_root = args.case_root.resolve()
+    if args.restart_existing and args.resume_existing:
+        raise ValueError("--restart-existing and --resume-existing are mutually exclusive")
     base = args.case_root / "CFD_2D" / "openfoam_cases" / args.variant
     base.mkdir(parents=True, exist_ok=True)
     status_path = base / "alpha_sweep_status.json"
@@ -194,6 +282,7 @@ def main() -> int:
         "alphas_deg": args.alphas,
         "sequential": True,
         "per_angle_timeout_min": args.timeout_min_per_alpha,
+        "per_case_timeout_enforced": True,
         "active_alpha_deg": None,
         "active_case": None,
         "active_phase": "planning",
@@ -207,6 +296,23 @@ def main() -> int:
             stopped_by_user = True
             break
         case_dir = base / safe_alpha_dir(alpha)
+        fresh_case: dict[str, Any] | None = None
+        if args.restart_existing and args.run:
+            fresh_case = regenerate_case_from_approved_mesh(args, alpha)
+            if int(fresh_case["returncode"]) != 0:
+                rows.append({
+                    "alpha_deg": alpha,
+                    "status": "CASE_REGENERATION_FAILED",
+                    "case_dir": str(case_dir),
+                    "case_regeneration": fresh_case,
+                })
+                issues += 1
+                report.update(rows=rows, active_alpha_deg=None, active_case=None, active_phase="case_regeneration_failed", updated_at=time.strftime("%Y-%m-%d %H:%M:%S"))
+                write_json_atomic(status_path, report)
+                if args.continue_after_error:
+                    continue
+                hard_failure = True
+                break
         if not (case_dir / "system" / "controlDict").is_file():
             rows.append({"alpha_deg": alpha, "status": "MISSING_CASE", "case_dir": str(case_dir)})
             issues += 1
@@ -225,7 +331,11 @@ def main() -> int:
             continue
         resume = bool(args.resume_existing and positive_times(case_dir))
         command = staged_command(args, case_dir, resume)
-        row: dict[str, Any] = {"alpha_deg": alpha, "case_dir": str(case_dir), "resume": resume, "command": command}
+        row: dict[str, Any] = {
+            "alpha_deg": alpha, "case_dir": str(case_dir), "resume": resume,
+            "restart_existing": bool(args.restart_existing), "case_regeneration": fresh_case,
+            "command": command,
+        }
         if not args.run:
             row["status"] = "DRY_RUN"
             rows.append(row)
@@ -241,15 +351,25 @@ def main() -> int:
             updated_at=started,
         )
         write_json_atomic(status_path, report)
-        completed = subprocess.run(command, cwd=str(case_dir), text=True)
+        completed, case_timed_out = run_with_case_timeout(
+            command,
+            cwd=case_dir,
+            timeout_min=float(args.timeout_min_per_alpha),
+            stop_grace_min=float(args.stop_grace_min),
+        )
         run_status = read_json(case_dir / "run_status.json", {}) or {}
         staged_status = read_json(case_dir / "staged_run_status.json", {}) or {}
-        status = effective_case_status(staged_status, run_status, completed.returncode)
+        status = (
+            "CASE_TIMEOUT_PARTIAL"
+            if case_timed_out
+            else effective_case_status(staged_status, run_status, completed.returncode)
+        )
         row.update(
             started_at=started,
             finished_at=time.strftime("%Y-%m-%d %H:%M:%S"),
             wall_time_s=float(time.perf_counter() - wall_started),
             returncode=completed.returncode,
+            case_timeout_reached=bool(case_timed_out),
             status=status,
             run_status=run_status,
             staged_run_status=staged_status,
@@ -258,7 +378,7 @@ def main() -> int:
             post = subprocess.run(postprocess_command(args, alpha), cwd=str(args.case_root), text=True)
             row["postprocess_returncode"] = post.returncode
         rows.append(row)
-        is_timeout = status in {"TIMEOUT", "TIMEOUT_PARTIAL"}
+        is_timeout = status in {"TIMEOUT", "TIMEOUT_PARTIAL", "CASE_TIMEOUT_PARTIAL"}
         is_error = completed.returncode != 0 or status in {
             "RUN_FAILED", "TRANSIENT_STAGE_FAILED", "STEADY_STAGE_FAILED",
             "STEADY_STAGE_DIVERGED", "STEADY_AWAITING_USER_DECISION",

@@ -4,16 +4,19 @@
 The launcher deliberately avoids ``paraFoam`` session state and ``--data``.
 Instead, a ParaView Python startup script opens the resolved ``.foam`` marker,
 selects ``internalMesh``, advances to the latest written time, frames the data
-and saves both a screenshot and a portable ``.pvsm`` state plus loader.
+and saves a readiness screenshot. Interactive state saving is intentionally
+disabled because ParaView can open a blocking file-location/copy-mode dialog.
 """
 from __future__ import annotations
 
 import json
 import argparse
 import os
+import signal
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -29,6 +32,15 @@ def read_json(path: Path) -> dict[str, Any]:
         return {}
 
 
+def _reap_interactive_process(process: subprocess.Popen[Any], label: str) -> None:
+    """Prevent closed ParaView windows from remaining as defunct children."""
+    threading.Thread(
+        target=process.wait,
+        name=f"{label}-{process.pid}",
+        daemon=True,
+    ).start()
+
+
 def case_chord_m(case_dir: Path) -> float | None:
     for name in ("case_config.json", "case_input_summary.json"):
         data = read_json(case_dir / name)
@@ -42,6 +54,22 @@ def case_chord_m(case_dir: Path) -> float | None:
     return None
 
 
+def case_physical_time_ceiling_s(case_dir: Path) -> float | None:
+    """Return the configured URANS end time, excluding archived RANS indices."""
+    values: dict[str, Any] = {}
+    for name in ("case_config.json", "case_input_summary.json"):
+        values.update(read_json(case_dir / name))
+    try:
+        velocity = float(values["velocity_m_s"])
+        chord = float(values.get("chord_m") or values["reference_length_m"])
+        end_star = float(values["endTime_star"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if velocity <= 0.0 or chord <= 0.0 or end_star <= 0.0:
+        return None
+    return end_star * chord / velocity
+
+
 def write_paraview_case_script(
     script_path: Path,
     foam_marker: Path,
@@ -50,6 +78,7 @@ def write_paraview_case_script(
     state_path: Path | None = None,
     ready_path: Path | None = None,
     focus_chord_m: float | None = None,
+    maximum_physical_time_s: float | None = None,
 ) -> Path:
     """Write a deterministic startup script that emits a portable state."""
     script_path = script_path.resolve()
@@ -73,6 +102,7 @@ screenshot_path = {json.dumps(str(screenshot_path))}
 state_path = {json.dumps(str(state_path))}
 ready_path = {json.dumps(str(ready_path))}
 focus_chord_m = {json.dumps(float(focus_chord_m) if focus_chord_m else None)}
+maximum_physical_time_s = {json.dumps(float(maximum_physical_time_s) if maximum_physical_time_s else None)}
 
 view = GetActiveViewOrCreate("RenderView")
 view.CameraParallelProjection = 1
@@ -103,7 +133,12 @@ try:
 except Exception:
     available_times = []
 if available_times:
-    scene.AnimationTime = available_times[-1]
+    physical_times = [
+        value for value in available_times
+        if maximum_physical_time_s is None
+        or value <= maximum_physical_time_s * (1.0 + 1.0e-8)
+    ]
+    scene.AnimationTime = (physical_times or available_times)[-1]
 source.UpdatePipeline(time=scene.AnimationTime)
 display = Show(source, view)
 display.Representation = "Surface"
@@ -158,34 +193,15 @@ if focus_chord_m and focus_chord_m > 0:
         pass
 Render(view)
 SaveScreenshot(screenshot_path, view, ImageResolution=[1600, 1000])
-try:
-    SaveState(state_path)
-    state_file = Path(state_path)
-    state_base = state_file.parent
-    relative_foam_path = os.path.relpath(foam_path, state_base).replace("\\\\", "/")
-    state_text = state_file.read_text(encoding="utf-8")
-    state_text = state_text.replace(foam_path, relative_foam_path)
-    state_text = state_text.replace(foam_path.replace("/", "\\\\"), relative_foam_path)
-    state_file.write_text(state_text, encoding="utf-8")
-    portable_loader = state_base / ("load_" + state_file.stem + "_portable.py")
-    portable_loader.write_text(
-        "from pathlib import Path\\n"
-        "import os\\n"
-        "from paraview.simple import LoadState\\n"
-        "root = Path(__file__).resolve().parent\\n"
-        "os.chdir(root)\\n"
-        "LoadState(str(root / " + repr(state_file.name) + "))\\n",
-        encoding="utf-8",
-    )
-    state_path = state_file.name
-    portable_loader_path = portable_loader.name
-except Exception:
-    state_path = None
-    portable_loader_path = None
-    relative_foam_path = None
+# SaveState opens ParaView's file-location/copy-mode dialog in an interactive
+# WSL session and blocks the loaded case behind that modal window. Interactive
+# opening therefore renders the case and writes readiness evidence only.
+state_path = None
+portable_loader_path = None
+relative_foam_path = foam_path
 Path(ready_path).write_text(json.dumps({{
     "schema_version": 2,
-    "path_base": "state_directory",
+    "path_base": "absolute_case_reference",
     "status": "READY",
     "foam_marker": foam_path,
     "animation_time": float(scene.AnimationTime),
@@ -236,6 +252,7 @@ def prepare_paraview_case(case_dir: Path) -> dict[str, Any]:
         state_path=support / "case_latest.pvsm",
         ready_path=support / "case_latest.ready.json",
         focus_chord_m=case_chord_m(case_dir),
+        maximum_physical_time_s=case_physical_time_ceiling_s(case_dir),
     )
     ready = support / "case_latest.ready.json"
     ready.unlink(missing_ok=True)
@@ -267,6 +284,8 @@ def write_automatic_products_script(
     field_scale_mode: str = "exact",
     robust_percentiles: tuple[float, float] = (1.0, 99.0),
     manual_scales: dict[str, tuple[float, float]] | None = None,
+    time_range_s: tuple[float, float] | None = None,
+    include_animations: bool = True,
 ) -> Path:
     """Write a bounded, off-screen ParaView render script.
 
@@ -289,6 +308,11 @@ def write_automatic_products_script(
         for name, bounds in (manual_scales or {}).items()
         if len(bounds) == 2 and float(bounds[0]) < float(bounds[1])
     }
+    normalized_time_range = (
+        [float(time_range_s[0]), float(time_range_s[1])]
+        if time_range_s is not None and float(time_range_s[0]) <= float(time_range_s[1])
+        else None
+    )
     script = f'''from paraview.simple import *
 import json
 import math
@@ -313,6 +337,8 @@ stage_label = {json.dumps(str(stage_label))}
 field_scale_mode = {json.dumps(normalized_scale_mode)}
 robust_percentiles = {json.dumps([float(low_percentile), float(high_percentile)])}
 manual_scales = {json.dumps(normalized_manual_scales)}
+requested_time_range_s = {normalized_time_range!r}
+include_animations = {bool(include_animations)!r}
 scale_evidence = {{}}
 stage_slug = "".join(character for character in stage_label if character.isalnum() or character in ("_", "-")) or "CFD"
 is_iteration_stage = (
@@ -326,8 +352,12 @@ frame_axis_label = "iteration" if is_iteration_stage else "t [s]"
 output_dir.mkdir(parents=True, exist_ok=True)
 velocity_dir = output_dir / "velocity_frames"
 pressure_dir = output_dir / "pressure_frames"
+pressure_contour_dir = output_dir / "pressure_contour_frames"
+vorticity_contour_dir = output_dir / "vorticity_contour_frames"
 velocity_dir.mkdir(exist_ok=True)
 pressure_dir.mkdir(exist_ok=True)
+pressure_contour_dir.mkdir(exist_ok=True)
+vorticity_contour_dir.mkdir(exist_ok=True)
 
 source = OpenFOAMReader(FileName=foam_path)
 try:
@@ -344,10 +374,49 @@ except Exception:
     pass
 try:
     source.UpdatePipelineInformation()
-    source.CellArrays = list(source.CellArrays.Available)
+    requested_arrays = [
+        "U", "p", "Cp", "Co", "nuTilda", "nut", "yPlus",
+        "wallShearStress", "vorticity", "Q", "UMean", "pMean",
+        "CpMean", "vorticityMean",
+        "UPrime2Mean", "pPrime2Mean", "nuTildaMean",
+    ]
+    available_cell_arrays = list(source.CellArrays.Available)
+    source.CellArrays = [
+        name for name in requested_arrays if name in available_cell_arrays
+    ]
 except Exception:
     pass
 source.UpdatePipeline()
+visual_input = source
+try:
+    source_cell_names = [
+        source.GetCellDataInformation().GetArray(index).GetName()
+        for index in range(source.GetCellDataInformation().GetNumberOfArrays())
+    ]
+except Exception:
+    source_cell_names = []
+if not is_iteration_stage and "CpMean" not in source_cell_names and "pMean" in source_cell_names:
+    mean_cp = Calculator(registrationName="DerivedCpMean", Input=visual_input)
+    mean_cp.ResultArrayName = "CpMean"
+    mean_cp.Function = "2*pMean/%.16g" % max(velocity_m_s * velocity_m_s, 1.0e-30)
+    mean_cp.UpdatePipeline()
+    visual_input = mean_cp
+if not is_iteration_stage and "vorticityMean" not in source_cell_names and "UMean" in source_cell_names:
+    try:
+        mean_point_fields = CellDatatoPointData(
+            registrationName="MeanPointFields", Input=visual_input
+        )
+        mean_point_fields.PassCellData = 1
+        mean_velocity_gradient = Gradient(
+            registrationName="MeanVelocityGradient", Input=mean_point_fields
+        )
+        mean_velocity_gradient.ScalarArray = ["POINTS", "UMean"]
+        mean_velocity_gradient.ComputeVorticity = 1
+        mean_velocity_gradient.VorticityArrayName = "vorticityMean"
+        mean_velocity_gradient.UpdatePipeline()
+        visual_input = mean_velocity_gradient
+    except Exception:
+        pass
 
 scene = GetAnimationScene()
 scene.UpdateAnimationUsingDataTimeSteps()
@@ -358,6 +427,11 @@ except Exception:
 positive_times = [value for value in available_times if value > 0.0]
 if not positive_times and available_times:
     positive_times = available_times
+if requested_time_range_s is not None and not is_iteration_stage:
+    positive_times = [
+        value for value in positive_times
+        if requested_time_range_s[0] <= value <= requested_time_range_s[1]
+    ]
 if len(positive_times) > maximum_frames:
     selected_indices = sorted(set(
         int(round(index * (len(positive_times) - 1) / (maximum_frames - 1)))
@@ -366,15 +440,32 @@ if len(positive_times) > maximum_frames:
     selected_times = [positive_times[index] for index in selected_indices]
 else:
     selected_times = positive_times
+range_times = selected_times if include_animations else selected_times[-1:]
 
 view = GetActiveViewOrCreate("RenderView")
 view.CameraParallelProjection = 1
 view.ViewSize = [1280, 720]
 try:
+    view.UseColorPaletteForBackground = 0
+except Exception:
+    pass
+view.Background = [0.94, 0.95, 0.96]
+try:
+    view.Background2 = [0.94, 0.95, 0.96]
+except Exception:
+    pass
+try:
     view.OrientationAxesVisibility = 0
 except Exception:
     pass
-display = Show(source, view)
+visual_source = Transform(registrationName="AngleOfAttackFrame", Input=visual_input)
+visual_source.Transform.Rotate = [0.0, 0.0, -alpha_deg]
+try:
+    visual_source.TransformAllInputVectors = 1
+except Exception:
+    pass
+visual_source.UpdatePipeline()
+display = Show(visual_source, view)
 display.Representation = "Surface"
 title_source = Text(registrationName="StageTitle")
 title_display = Show(title_source, view)
@@ -395,8 +486,8 @@ def set_title(field_label, value):
 
 def available_array(name):
     for association, information in (
-        ("CELLS", source.GetCellDataInformation()),
-        ("POINTS", source.GetPointDataInformation()),
+        ("CELLS", visual_source.GetCellDataInformation()),
+        ("POINTS", visual_source.GetPointDataInformation()),
     ):
         try:
             if information.GetArray(name) is not None:
@@ -423,12 +514,12 @@ def leaf_datasets(dataset):
 def exact_range(name, association, vector_magnitude=False):
     lower = math.inf
     upper = -math.inf
-    for value in selected_times:
-        source.UpdatePipeline(time=value)
+    for value in range_times:
+        visual_source.UpdatePipeline(time=value)
         information = (
-            source.GetCellDataInformation()
+            visual_source.GetCellDataInformation()
             if association == "CELLS"
-            else source.GetPointDataInformation()
+            else visual_source.GetPointDataInformation()
         )
         array = information.GetArray(name)
         if array is None:
@@ -452,9 +543,9 @@ def robust_range(name, association, vector_magnitude=False):
         return None
     samples = []
     maximum_samples_per_block = 200000
-    for value in selected_times:
-        source.UpdatePipeline(time=value)
-        fetched = servermanager.Fetch(source)
+    for value in range_times:
+        visual_source.UpdatePipeline(time=value)
+        fetched = servermanager.Fetch(visual_source)
         for dataset in leaf_datasets(fetched):
             attributes = (
                 dataset.GetCellData()
@@ -515,7 +606,7 @@ def field_range(name, association, vector_magnitude=False):
         "robust_percentiles": (
             robust_percentiles if requested_mode == "robust" else None
         ),
-        "global_over_selected_frames": len(selected_times) > 1,
+        "global_over_selected_frames": len(range_times) > 1,
     }}
     return lower, upper
 
@@ -526,15 +617,33 @@ def apply_field_range(lut, name, association, vector_magnitude=False):
     lut.RescaleTransferFunction(bounds[0], bounds[1])
     return True
 
+def style_scalar_bar(lut, title):
+    try:
+        bar = GetScalarBar(lut, view)
+        bar.Title = title
+        bar.ComponentTitle = ""
+        bar.TitleColor = [0.05, 0.05, 0.05]
+        bar.LabelColor = [0.05, 0.05, 0.05]
+        bar.TitleFontSize = 12
+        bar.LabelFontSize = 10
+        bar.ScalarBarLength = 0.30
+    except Exception:
+        pass
+
 def set_camera(kind):
     if kind == "airfoil":
         focal_x = 0.5 * chord_m
         scale = 0.42 * chord_m
+    elif kind == "nearfield":
+        # At 1600x1000 this frames approximately -0.5c..2c: the complete
+        # profile, 0.5c upstream and 1c downstream of the trailing edge.
+        focal_x = 0.75 * chord_m
+        scale = 0.78 * chord_m
     else:
         focal_x = 1.5 * chord_m
         scale = 1.35 * chord_m
     try:
-        bounds = source.GetDataInformation().GetBounds()
+        bounds = visual_source.GetDataInformation().GetBounds()
         z_mid = 0.5 * (bounds[4] + bounds[5])
     except Exception:
         z_mid = 0.0
@@ -543,43 +652,49 @@ def set_camera(kind):
     view.CameraViewUp = [0.0, 1.0, 0.0]
     view.CameraParallelScale = max(scale, 1.0e-6)
 
-def color_cp():
+def color_cp(instantaneous=False):
     try:
         display.SetScalarBarVisibility(view, False)
     except Exception:
         pass
-    association = available_array("Cp")
-    if association:
-        ColorBy(display, (association, "Cp"))
-        lut = GetColorTransferFunction("Cp")
-        if not apply_field_range(lut, "Cp", association):
+    preferred = (
+        "CpMean" if not is_iteration_stage and not instantaneous and available_array("CpMean")
+        else "pMean" if not is_iteration_stage and not instantaneous and available_array("pMean")
+        else "Cp" if available_array("Cp")
+        else "p" if available_array("p")
+        else None
+    )
+    association = available_array(preferred) if preferred else None
+    if association and preferred:
+        ColorBy(display, (association, preferred))
+        lut = GetColorTransferFunction(preferred)
+        if not apply_field_range(lut, preferred, association):
             display.RescaleTransferFunctionToDataRange(True, False)
         display.SetScalarBarVisibility(view, True)
-        return "Cp"
-    association = available_array("p")
-    if association:
-        ColorBy(display, (association, "p"))
-        lut = GetColorTransferFunction("p")
-        if not apply_field_range(lut, "p", association):
-            display.RescaleTransferFunctionToDataRange(True, False)
-        display.SetScalarBarVisibility(view, True)
-        return "p"
+        style_scalar_bar(lut, "Cp [-]" if preferred.startswith("Cp") else preferred)
+        return preferred
     return None
 
-def color_velocity():
+def color_velocity(instantaneous=False):
     try:
         display.SetScalarBarVisibility(view, False)
     except Exception:
         pass
-    association = available_array("U")
+    name = (
+        "UMean"
+        if not is_iteration_stage and not instantaneous and available_array("UMean")
+        else "U"
+    )
+    association = available_array(name)
     if not association:
         return None
-    ColorBy(display, (association, "U", "Magnitude"))
-    lut = GetColorTransferFunction("U")
-    if not apply_field_range(lut, "U", association, True):
+    ColorBy(display, (association, name, "Magnitude"))
+    lut = GetColorTransferFunction(name)
+    if not apply_field_range(lut, name, association, True):
         display.RescaleTransferFunctionToDataRange(True, False)
     display.SetScalarBarVisibility(view, True)
-    return "U magnitude"
+    style_scalar_bar(lut, "|%s| [m/s]" % name)
+    return "%s magnitude" % name
 
 def color_courant():
     try:
@@ -593,6 +708,7 @@ def color_courant():
     lut = GetColorTransferFunction("Co")
     lut.RescaleTransferFunction(0.0, max(1.2 * maximum_courant, 1.0e-6))
     display.SetScalarBarVisibility(view, True)
+    style_scalar_bar(lut, "Co [-]")
     return "Co"
 
 def color_scalar_field(name, vector_magnitude=False):
@@ -611,7 +727,72 @@ def color_scalar_field(name, vector_magnitude=False):
     if not apply_field_range(lut, name, association, vector_magnitude):
         display.RescaleTransferFunctionToDataRange(True, False)
     display.SetScalarBarVisibility(view, True)
+    style_scalar_bar(lut, name)
     return {{"array": name, "association": association, "vector_magnitude": vector_magnitude}}
+
+wall_overlay = {{
+    "reader": None,
+    "transform": None,
+    "feature_edges": None,
+    "display": None,
+    "regions": [],
+}}
+
+def show_airfoil_overlay(latest):
+    if wall_overlay["display"] is not None:
+        wall_overlay["display"].Visibility = 1
+        return wall_overlay["display"]
+    try:
+        reader = OpenFOAMReader(FileName=foam_path)
+        reader.CaseType = "Reconstructed Case"
+        reader.SkipZeroTime = 0
+        reader.UpdatePipelineInformation()
+        available = list(reader.MeshRegions.Available)
+        regions = [
+            name for name in available
+            if "airfoil" in name.lower()
+            or ("wall" in name.lower() and "frontandback" not in name.lower())
+        ]
+        if regions:
+            reader.MeshRegions = regions
+            reader.UpdatePipeline(time=latest)
+            transformed = Transform(registrationName="RotatedAirfoilOutline", Input=reader)
+            transformed.Transform.Rotate = [0.0, 0.0, -alpha_deg]
+            transformed.UpdatePipeline(time=latest)
+            # The wall patch is an extruded side surface and can have zero
+            # apparent area in the 2-D camera. Its explicit edges remain
+            # visible and give the airfoil an unambiguous dark outline.
+            edges = ExtractEdges(registrationName="AirfoilPatchEdges", Input=transformed)
+            edges.UpdatePipeline(time=latest)
+            overlay_source = edges
+        else:
+            Delete(reader)
+            reader = None
+            transformed = None
+            # Some OpenFOAMReader builds expose only internalMesh. FeatureEdges
+            # then provides a deterministic outline of the airfoil and farfield;
+            # the latter remains outside the airfoil/wake cameras.
+            edges = FeatureEdges(registrationName="DomainBoundaryOutline", Input=visual_source)
+            edges.BoundaryEdges = 1
+            edges.FeatureEdges = 1
+            edges.NonManifoldEdges = 0
+            edges.ManifoldEdges = 0
+            edges.FeatureAngle = 80.0
+            edges.UpdatePipeline(time=latest)
+            overlay_source = edges
+        overlay = Show(overlay_source, view)
+        ColorBy(overlay, None)
+        overlay.DiffuseColor = [0.08, 0.08, 0.08]
+        overlay.AmbientColor = [0.08, 0.08, 0.08]
+        overlay.LineWidth = 2.5
+        wall_overlay.update({{
+            "reader": reader, "transform": transformed,
+            "feature_edges": overlay_source,
+            "display": overlay, "regions": regions,
+        }})
+        return overlay
+    except Exception:
+        return None
 
 def save_courant_hotspots(latest):
     association = available_array("Co")
@@ -669,6 +850,7 @@ products = {{
     "frame_coordinate_kind": "SIMPLE_iteration" if is_iteration_stage else "physical_time_seconds",
     "selected_times": selected_times,
     "available_times": available_times,
+    "requested_time_range_s": requested_time_range_s,
     "scale_policy": {{
         "mode": field_scale_mode,
         "robust_percentiles": robust_percentiles,
@@ -681,74 +863,161 @@ if selected_times:
     scene.AnimationTime = latest
     source.UpdatePipeline(time=latest)
     streamline_source = CellDatatoPointData(
-        registrationName="StreamlinePointFields",
-        Input=source,
+        registrationName="VisualPointFields",
+        Input=visual_source,
     )
     try:
         streamline_source.PassCellData = 1
     except Exception:
         pass
     streamline_source.UpdatePipeline(time=latest)
+    # OpenFOAM stores primary volume fields cell-centred. CleanToGrid removes
+    # duplicate coincident points before interpolation; CellDatatoPointData is
+    # still required because streamline integration needs a continuous point
+    # vector field. Keep the original source as a compatibility fallback.
+    try:
+        native_streamline_grid = CleanToGrid(
+            registrationName="NativeCleanGrid",
+            Input=source,
+        )
+        native_streamline_grid.UpdatePipeline(time=latest)
+    except Exception:
+        native_streamline_grid = source
+    native_streamline_source = CellDatatoPointData(
+        registrationName="NativeStreamlinePointFields",
+        Input=native_streamline_grid,
+    )
+    try:
+        native_streamline_source.PassCellData = 1
+    except Exception:
+        pass
+    native_streamline_source.UpdatePipeline(time=latest)
     streamlines = StreamTracer(
         registrationName="FreestreamSeededStreamlines",
-        Input=streamline_source,
+        Input=native_streamline_source,
         SeedType="Line",
     )
-    flow_x = math.cos(math.radians(alpha_deg))
-    flow_y = math.sin(math.radians(alpha_deg))
+    # Integrate in the physical OpenFOAM frame. StreamTracer can return an
+    # empty output when its vector field is supplied through Transform; rotate
+    # the finished trajectories only for display.
+    alpha_rad = math.radians(alpha_deg)
+    flow_x = math.cos(alpha_rad)
+    flow_y = math.sin(alpha_rad)
     normal_x = -flow_y
     normal_y = flow_x
-    seed_center_x = -0.25 * chord_m
-    seed_center_y = 0.0
-    seed_half_length = 0.75 * chord_m
+    seed_center_x = -1.0 * chord_m * flow_x
+    seed_center_y = -1.0 * chord_m * flow_y
+    seed_lower_length = 0.60 * chord_m
+    seed_upper_length = 0.45 * chord_m
     try:
-        bounds = source.GetDataInformation().GetBounds()
+        bounds = visual_source.GetDataInformation().GetBounds()
         seed_z = 0.5 * (bounds[4] + bounds[5])
     except Exception:
         seed_z = 0.0
+    # Isolines must be computed on the physical 2-D mid-plane. Contouring the
+    # one-cell-thick extruded volume produces isosurfaces that are edge-on in
+    # the aerodynamic camera and therefore appear blank once the filled field
+    # is hidden.
+    contour_plane = Slice(
+        registrationName="AerodynamicMidPlane", Input=streamline_source
+    )
+    contour_plane.SliceType = "Plane"
+    contour_plane.SliceType.Origin = [0.0, 0.0, seed_z]
+    contour_plane.SliceType.Normal = [0.0, 0.0, 1.0]
+    contour_plane.UpdatePipeline(time=latest)
     streamlines.SeedType.Point1 = [
-        seed_center_x - seed_half_length * normal_x,
-        seed_center_y - seed_half_length * normal_y,
+        seed_center_x - seed_lower_length * normal_x,
+        seed_center_y - seed_lower_length * normal_y,
         seed_z,
     ]
     streamlines.SeedType.Point2 = [
-        seed_center_x + seed_half_length * normal_x,
-        seed_center_y + seed_half_length * normal_y,
+        seed_center_x + seed_upper_length * normal_x,
+        seed_center_y + seed_upper_length * normal_y,
         seed_z,
     ]
-    streamlines.SeedType.Resolution = 120
+    streamlines.SeedType.Resolution = 100
     streamlines.Vectors = ["POINTS", "U"]
+    try:
+        # The OpenFOAM case is a one-cell-thick volume, not a surface mesh.
+        # SurfaceStreamlines can lock trajectories to an internal block face
+        # that visually resembles the outer boundary-layer envelope.
+        streamlines.SurfaceStreamlines = 0
+    except Exception:
+        pass
+    try:
+        streamlines.IntegrationDirection = "BOTH"
+    except Exception:
+        pass
     try:
         streamlines.MaximumStreamlineLength = 8.0 * chord_m
     except Exception:
         pass
     streamlines.UpdatePipeline(time=latest)
-    streamline_display = Show(streamlines, view)
+    streamline_information = streamlines.GetDataInformation()
+    streamline_point_count = int(streamline_information.GetNumberOfPoints())
+    streamline_cell_count = int(streamline_information.GetNumberOfCells())
+    display_streamlines = Transform(
+        registrationName="RotatedFreestreamStreamlines",
+        Input=streamlines,
+    )
+    display_streamlines.Transform.Rotate = [0.0, 0.0, -alpha_deg]
+    # Lift the displayed trajectories above the front face of the single-cell
+    # extrusion. Their physical integration remains in the native case frame.
+    display_streamlines.Transform.Translate = [
+        0.0, 0.0, (bounds[5] - seed_z) + 0.001 * chord_m,
+    ]
     try:
-        ColorBy(streamline_display, None)
-        streamline_display.DiffuseColor = [0.08, 0.08, 0.08]
-        streamline_display.LineWidth = 1.2
-        streamline_display.Opacity = 0.82
+        display_streamlines.TransformAllInputVectors = 1
     except Exception:
         pass
+    display_streamlines.UpdatePipeline(time=latest)
+    # The z-offset above removes coplanar depth occlusion. Render the line
+    # cells directly: this is thinner than tubes and AppendDatasets preserves
+    # them reliably on ParaView 5.10.
+    streamline_tube = display_streamlines
+    streamline_display = Show(streamline_tube, view)
+    try:
+        streamline_display.Representation = "Wireframe"
+        streamline_display.LineWidth = 0.6
+        ColorBy(streamline_display, ("POINTS", "U", "Magnitude"))
+        streamline_display.SetScalarBarVisibility(view, False)
+        streamline_display.Opacity = 0.9
+    except Exception:
+        pass
+    def set_streamline_visibility(visible):
+        # Reusing Show(proxy) after Hide(proxy) is unreliable with some
+        # ParaView 5.10 OpenGL backends. Drive the representation explicitly.
+        streamline_display.Visibility = 1 if visible else 0
     products["streamlines"] = {{
         "enabled": True,
         "vector": "U",
         "seed_geometry": "line_perpendicular_to_freestream",
-        "seed_center_chord": [-0.25, 0.0],
-        "seed_length_chord": 1.5,
-        "seed_resolution": 120,
+        "seed_center_chord": [-1.0, 0.0],
+        "seed_lower_extent_chord": 0.60,
+        "seed_upper_extent_chord": 0.45,
+        "seed_resolution": 100,
+        "near_body_seed": None,
+        "rendering": "volume-integrated point-data line cells, front-offset for visibility",
         "alpha_deg": alpha_deg,
         "maximum_length_chord": 8.0,
+        "output_points": streamline_point_count,
+        "output_cells": streamline_cell_count,
     }}
+    products["display_frame"] = {{
+        "coordinate_rotation_deg_about_z": -alpha_deg,
+        "vectors_rotated_with_geometry": True,
+        "interpretation": "freestream parallel to display x; airfoil shown at incidence",
+    }}
+    set_streamline_visibility(False)
+    show_airfoil_overlay(latest)
     products["cp_field"] = color_cp()
     set_camera("airfoil")
-    set_title("Cp", latest)
+    set_title(str(products["cp_field"] or "pressure"), latest)
     Render(view)
     cp_final = output_dir / ("Cp_airfoil_%s_final.png" % stage_slug)
     SaveScreenshot(str(cp_final), view, ImageResolution=[1600, 1000])
     products["cp_final_png"] = str(cp_final.relative_to(output_dir))
-    products["cp_streamlines_final_png"] = str(cp_final.relative_to(output_dir))
+    products["cp_streamlines_final_png"] = None
 
     products["velocity_field"] = color_velocity()
     set_camera("wake")
@@ -759,42 +1028,219 @@ if selected_times:
     velocity_final = output_dir / ("Velocity_%s_final.png" % stage_slug)
     SaveScreenshot(str(velocity_final), view, ImageResolution=[1600, 1000])
     products["velocity_final_png"] = str(velocity_final.relative_to(output_dir))
-    products["velocity_streamlines_final_png"] = str(velocity_final.relative_to(output_dir))
+    products["velocity_streamlines_final_png"] = None
+    set_streamline_visibility(True)
+    Hide(visual_source, view)
+    streamline_lut = GetColorTransferFunction("U")
+    velocity_bounds = field_range("U", available_array("U"), True)
+    if velocity_bounds is not None:
+        streamline_lut.RescaleTransferFunction(*velocity_bounds)
+    streamline_display.SetScalarBarVisibility(view, True)
+    style_scalar_bar(streamline_lut, "|U| [m/s]")
+    show_airfoil_overlay(latest)
+    view.CameraFocalPoint = [0.5 * chord_m, 0.0, seed_z]
+    view.CameraPosition = [0.5 * chord_m, 0.0, seed_z + 5.0 * max(chord_m, 1.0e-6)]
+    view.CameraViewUp = [0.0, 1.0, 0.0]
+    view.CameraParallelScale = max(0.58 * chord_m, 1.0e-6)
+    set_title("velocity streamlines", latest)
+    Render(view)
+    streamline_final = output_dir / ("Velocity_streamlines_%s_final.png" % stage_slug)
+    SaveScreenshot(str(streamline_final), view, ImageResolution=[1600, 1000])
+    products["streamlines_final_png"] = str(streamline_final.relative_to(output_dir))
+    streamline_display.SetScalarBarVisibility(view, False)
+    set_streamline_visibility(False)
+    Show(visual_source, view)
 
-    velocity_contours = None
-    if available_array("U"):
+    # Boundary-layer containment audit at the aft airfoil.  Showing mesh edges
+    # on top of |U| makes the resolved shear layer and the prism-to-triangle
+    # interface directly inspectable without loading the whole case manually.
+    try:
+        display.Representation = "Surface With Edges"
+        aft_x = 0.90 * chord_m * math.cos(math.radians(alpha_deg))
+        aft_y = -0.90 * chord_m * math.sin(math.radians(alpha_deg))
+        view.CameraFocalPoint = [aft_x, aft_y, seed_z]
+        view.CameraPosition = [aft_x, aft_y, seed_z + 5.0 * max(chord_m, 1.0e-6)]
+        view.CameraViewUp = [0.0, 1.0, 0.0]
+        velocity_lut = GetColorTransferFunction("U")
+        velocity_lut.RescaleTransferFunction(0.0, max(1.15 * velocity_m_s, 1.0e-6))
+        view.CameraParallelScale = max(0.11 * chord_m, 1.0e-6)
+        set_title("|U| and mesh: aft boundary layer", latest)
+        Render(view)
+        boundary_layer_final = output_dir / ("Velocity_BL_TE_mesh_%s_final.png" % stage_slug)
+        SaveScreenshot(str(boundary_layer_final), view, ImageResolution=[1600, 1000])
+        products["velocity_boundary_layer_te_mesh_png"] = str(
+            boundary_layer_final.relative_to(output_dir)
+        )
+    except Exception as exc:
+        products["velocity_boundary_layer_te_mesh"] = {{
+            "status": "UNAVAILABLE", "reason": str(exc)
+        }}
+    finally:
         try:
+            display.Representation = "Surface"
+        except Exception:
+            pass
+
+    products["velocity_contours"] = {{"status": "UNAVAILABLE"}}
+    velocity_contours = None
+    velocity_contour_name = (
+        "UMean" if not is_iteration_stage and available_array("UMean") else "U"
+    )
+    if available_array(velocity_contour_name):
+        try:
+            velocity_magnitude = Calculator(
+                registrationName="VelocityMagnitude",
+                Input=contour_plane,
+            )
+            velocity_magnitude.ResultArrayName = "UMagnitude"
+            velocity_magnitude.Function = "mag(%s)" % velocity_contour_name
+            velocity_magnitude.UpdatePipeline(time=latest)
             velocity_contours = Contour(
                 registrationName="VelocityMagnitudeContours",
-                Input=streamline_source,
+                Input=velocity_magnitude,
             )
-            velocity_contours.ContourBy = ["POINTS", "U"]
-            velocity_contours.Isosurfaces = [0.5 * velocity_m_s, velocity_m_s]
+            velocity_contours.ContourBy = ["POINTS", "UMagnitude"]
+            velocity_range = robust_range(
+                velocity_contour_name,
+                available_array(velocity_contour_name),
+                True,
+            )
+            if velocity_range is None or velocity_range[1] <= velocity_range[0]:
+                velocity_range = (0.0, max(1.15 * velocity_m_s, 1.0e-6))
+            velocity_contours.Isosurfaces = [
+                velocity_range[0]
+                + (velocity_range[1] - velocity_range[0]) * i / 21.0
+                for i in range(1, 21)
+            ]
             velocity_contours.UpdatePipeline(time=latest)
-            contour_display = Show(velocity_contours, view)
-            try:
-                ColorBy(contour_display, None)
-            except Exception:
-                contour_display.ColorArrayName = [None, ""]
-            contour_display.DiffuseColor = [0.12, 0.12, 0.12]
-            contour_display.LineWidth = 1.4
-            contour_display.Opacity = 0.9
-            set_title("|U| with streamlines and contours", latest)
+            velocity_contour_front = Transform(
+                registrationName="VelocityContoursFront", Input=velocity_contours
+            )
+            velocity_contour_front.Transform.Translate = [
+                0.0, 0.0, (bounds[5] - seed_z) + 0.002 * chord_m,
+            ]
+            velocity_contour_front.UpdatePipeline(time=latest)
+            Hide(visual_source, view)
+            contour_display = Show(velocity_contour_front, view)
+            ColorBy(contour_display, ("POINTS", "UMagnitude"))
+            velocity_contour_lut = GetColorTransferFunction("UMagnitude")
+            velocity_contour_lut.RescaleTransferFunction(*velocity_range)
+            contour_display.LineWidth = 1.3
+            contour_display.Opacity = 0.95
+            contour_display.SetScalarBarVisibility(view, True)
+            style_scalar_bar(velocity_contour_lut, "|U| [m/s]")
+            set_camera("nearfield")
+            set_title("|U| contours: near-airfoil", latest)
+            show_airfoil_overlay(latest)
             Render(view)
-            contour_final = output_dir / ("Velocity_streamlines_contours_%s_final.png" % stage_slug)
-            SaveScreenshot(str(contour_final), view, ImageResolution=[1600, 1000])
-            products["velocity_contours"] = {{
-                "array": "U",
+            nearfield_contour_final = output_dir / (
+                "Velocity_contours_%s_final.png" % stage_slug
+            )
+            SaveScreenshot(str(nearfield_contour_final), view, ImageResolution=[1600, 1000])
+            products["velocity_contours"]["nearfield_image"] = str(
+                nearfield_contour_final.relative_to(output_dir)
+            )
+            products["velocity_contours"].update({{
+                "array": velocity_contour_name,
                 "association": "POINTS",
-                "isovalues_m_s": [0.5 * velocity_m_s, velocity_m_s],
-                "image": str(contour_final.relative_to(output_dir)),
-            }}
-            Hide(velocity_contours, view)
+                "isovalues_m_s": list(velocity_contours.Isosurfaces),
+                "image": str(nearfield_contour_final.relative_to(output_dir)),
+                "view_x_over_c": [-0.5, 2.0],
+            }})
+            contour_display.SetScalarBarVisibility(view, False)
+            Hide(velocity_contour_front, view)
+            Show(visual_source, view)
+            set_streamline_visibility(False)
+            Delete(velocity_contour_front)
+            Delete(velocity_contours)
+            Delete(velocity_magnitude)
         except Exception as exc:
             products["velocity_contours"] = {{"status": "UNAVAILABLE", "reason": str(exc)}}
 
-    vorticity_field = color_scalar_field("vorticity", vector_magnitude=True)
+    pressure_name = (
+        "CpMean" if not is_iteration_stage and available_array("CpMean")
+        else "pMean" if not is_iteration_stage and available_array("pMean")
+        else "Cp" if available_array("Cp")
+        else "p" if available_array("p")
+        else None
+    )
+    products["pressure_contours"] = {{"status": "UNAVAILABLE"}}
+    pressure_contours = None
+    pressure_contour_front = None
+    pressure_display = None
+    if pressure_name:
+        try:
+            pressure_range = robust_range(
+                pressure_name, available_array(pressure_name), False
+            )
+            if pressure_range is not None and pressure_range[1] > pressure_range[0]:
+                pressure_contours = Contour(
+                    registrationName="PressureContours",
+                    Input=contour_plane,
+                )
+                pressure_contours.ContourBy = ["POINTS", pressure_name]
+                pressure_contours.Isosurfaces = [
+                    pressure_range[0] + (pressure_range[1] - pressure_range[0]) * i / 21.0
+                    for i in range(1, 21)
+                ]
+                pressure_contours.UpdatePipeline(time=latest)
+                pressure_contour_front = Transform(
+                    registrationName="PressureContoursFront", Input=pressure_contours
+                )
+                pressure_contour_front.Transform.Translate = [
+                    0.0, 0.0, (bounds[5] - seed_z) + 0.002 * chord_m,
+                ]
+                pressure_contour_front.UpdatePipeline(time=latest)
+                Hide(visual_source, view)
+                pressure_display = Show(pressure_contour_front, view)
+                ColorBy(pressure_display, ("POINTS", pressure_name))
+                pressure_lut = GetColorTransferFunction(pressure_name)
+                pressure_lut.RescaleTransferFunction(*pressure_range)
+                pressure_display.LineWidth = 1.3
+                pressure_display.SetScalarBarVisibility(view, True)
+                style_scalar_bar(pressure_lut, "%s contours" % pressure_name)
+                show_airfoil_overlay(latest)
+                set_camera("nearfield")
+                set_title("%s contours: near-airfoil" % pressure_name, latest)
+                Render(view)
+                pressure_path = output_dir / (
+                    "Pressure_contours_%s_final.png" % stage_slug
+                )
+                SaveScreenshot(str(pressure_path), view, ImageResolution=[1600, 1000])
+                products["pressure_contours"] = {{
+                    "array": pressure_name,
+                    "association": "POINTS",
+                    "image": str(pressure_path.relative_to(output_dir)),
+                    "view_x_over_c": [-0.5, 2.0],
+                }}
+                pressure_display.SetScalarBarVisibility(view, False)
+                Hide(pressure_contour_front, view)
+                Show(visual_source, view)
+        except Exception as exc:
+            products["pressure_contours"] = {{"status": "UNAVAILABLE", "reason": str(exc)}}
+
+    vorticity_contours = None
+    vorticity_contour_front = None
+    vorticity_contour_display = None
+    vorticity_name = (
+        "vorticityMean"
+        if not is_iteration_stage and available_array("vorticityMean")
+        else "vorticity"
+    )
+    vorticity_field = color_scalar_field(vorticity_name, vector_magnitude=True)
     if vorticity_field:
+        set_streamline_visibility(False)
+        visual_vorticity_range = robust_range(
+            vorticity_name, vorticity_field["association"], True
+        )
+        if visual_vorticity_range is not None:
+            visual_vorticity_upper = max(
+                1.0e-12, 0.07 * visual_vorticity_range[1]
+            )
+            GetColorTransferFunction("vorticity").RescaleTransferFunction(
+                0.0, visual_vorticity_upper
+            )
+            products["vorticity_visual_upper"] = visual_vorticity_upper
         set_camera("wake")
         set_title("|vorticity|", latest)
         Render(view)
@@ -802,21 +1248,243 @@ if selected_times:
         SaveScreenshot(str(vorticity_final), view, ImageResolution=[1600, 1000])
         products["vorticity_field"] = vorticity_field
         products["vorticity_final_png"] = str(vorticity_final.relative_to(output_dir))
+        try:
+            vorticity_calculator = Calculator(
+                registrationName="VorticityMagnitude",
+                Input=contour_plane,
+            )
+            vorticity_calculator.ResultArrayName = "vorticityMagnitude"
+            vorticity_calculator.Function = "mag(%s)" % vorticity_name
+            vorticity_calculator.UpdatePipeline(time=latest)
+            vorticity_range = field_range(
+                vorticity_name, vorticity_field["association"], True
+            )
+            if vorticity_range is not None:
+                robust_vorticity = robust_range(
+                    vorticity_name, vorticity_field["association"], True
+                ) or vorticity_range
+                display_upper = max(1.0e-12, 0.07 * robust_vorticity[1])
+                if display_upper > max(0.0, robust_vorticity[0]):
+                    vorticity_contours = Contour(
+                        registrationName="VorticityMagnitudeContours",
+                        Input=vorticity_calculator,
+                    )
+                    vorticity_contours.ContourBy = ["POINTS", "vorticityMagnitude"]
+                    vorticity_contours.Isosurfaces = [
+                        display_upper * (i + 1) / 20.0 for i in range(20)
+                    ]
+                    vorticity_contours.UpdatePipeline(time=latest)
+                    vorticity_contour_front = Transform(
+                        registrationName="VorticityContoursFront",
+                        Input=vorticity_contours,
+                    )
+                    vorticity_contour_front.Transform.Translate = [
+                        0.0, 0.0, (bounds[5] - seed_z) + 0.002 * chord_m,
+                    ]
+                    vorticity_contour_front.UpdatePipeline(time=latest)
+                    Hide(visual_source, view)
+                    set_streamline_visibility(False)
+                    vorticity_contour_display = Show(
+                        vorticity_contour_front, view
+                    )
+                    ColorBy(
+                        vorticity_contour_display,
+                        ("POINTS", "vorticityMagnitude"),
+                    )
+                    vorticity_contour_lut = GetColorTransferFunction(
+                        "vorticityMagnitude"
+                    )
+                    vorticity_contour_lut.RescaleTransferFunction(
+                        0.0, display_upper
+                    )
+                    vorticity_contour_display.LineWidth = 1.3
+                    vorticity_contour_display.SetScalarBarVisibility(view, True)
+                    style_scalar_bar(
+                        vorticity_contour_lut, "|vorticity| [1/s]"
+                    )
+                    show_airfoil_overlay(latest)
+                    set_camera("nearfield")
+                    set_title("|vorticity| contours: near-airfoil", latest)
+                    Render(view)
+                    vorticity_contour_path = output_dir / (
+                        "Vorticity_contours_%s_final.png" % stage_slug
+                    )
+                    SaveScreenshot(
+                        str(vorticity_contour_path), view,
+                        ImageResolution=[1600, 1000],
+                    )
+                    products["vorticity_contours"] = {{
+                        "array": "vorticityMagnitude",
+                        "association": "POINTS",
+                        "image": str(vorticity_contour_path.relative_to(output_dir)),
+                        "view_x_over_c": [-0.5, 2.0],
+                    }}
+                    vorticity_contour_display.SetScalarBarVisibility(view, False)
+                    Hide(vorticity_contour_front, view)
+                    Show(visual_source, view)
+                lower = max(0.0, robust_vorticity[0], 0.01 * display_upper)
+                high_vorticity = Threshold(
+                    registrationName="HighVorticity",
+                    Input=vorticity_calculator,
+                )
+                high_vorticity.Scalars = ["POINTS", "vorticityMagnitude"]
+                try:
+                    high_vorticity.LowerThreshold = lower
+                    high_vorticity.UpperThreshold = vorticity_range[1]
+                except Exception:
+                    high_vorticity.ThresholdRange = [lower, vorticity_range[1]]
+                high_vorticity.UpdatePipeline(time=latest)
+                Hide(visual_source, view)
+                set_streamline_visibility(False)
+                high_display = Show(high_vorticity, view)
+                ColorBy(high_display, ("POINTS", "vorticityMagnitude"))
+                GetColorTransferFunction("vorticityMagnitude").RescaleTransferFunction(
+                    lower, display_upper
+                )
+                high_display.SetScalarBarVisibility(view, True)
+                vorticity_bar = GetScalarBar(
+                    GetColorTransferFunction("vorticityMagnitude"), view
+                )
+                vorticity_bar.Title = "|vorticity| [1/s]"
+                vorticity_bar.ComponentTitle = ""
+                vorticity_bar.WindowLocation = "Lower Right Corner"
+                vorticity_bar.TitleFontSize = 12
+                vorticity_bar.LabelFontSize = 10
+                vorticity_bar.ScalarBarLength = 0.30
+                try:
+                    vorticity_bar.TitleColor = [0.0, 0.0, 0.0]
+                    vorticity_bar.LabelColor = [0.0, 0.0, 0.0]
+                except Exception:
+                    pass
+                set_camera("wake")
+                show_airfoil_overlay(latest)
+                set_streamline_visibility(False)
+                if vorticity_contour_display is not None:
+                    vorticity_contour_display.Visibility = 1
+                set_title("High-vorticity regions with vorticity contours", latest)
+                Render(view)
+                threshold_png = output_dir / ("Vorticity_threshold_%s_final.png" % stage_slug)
+                SaveScreenshot(str(threshold_png), view, ImageResolution=[1600, 1000])
+                products["vorticity_threshold_png"] = str(threshold_png.relative_to(output_dir))
+                products["vorticity_threshold_minimum"] = lower
+                if vorticity_contour_display is not None:
+                    vorticity_contour_display.Visibility = 0
+                Hide(high_vorticity, view)
+                Show(visual_source, view)
+                set_streamline_visibility(False)
+                Delete(high_vorticity)
+            Delete(vorticity_calculator)
+        except Exception as exc:
+            try:
+                Show(visual_source, view)
+                set_streamline_visibility(False)
+            except Exception:
+                pass
+            products["vorticity_threshold"] = {{"status": "UNAVAILABLE", "reason": str(exc)}}
 
-    yplus_field = color_scalar_field("yPlus")
-    if yplus_field:
-        set_camera("airfoil")
-        set_title("y+", latest)
-        Render(view)
-        yplus_final = output_dir / ("yPlus_%s_final.png" % stage_slug)
-        SaveScreenshot(str(yplus_final), view, ImageResolution=[1600, 1000])
-        products["yplus_field"] = yplus_field
-        products["yplus_final_png"] = str(yplus_final.relative_to(output_dir))
+    q_field = color_scalar_field("Q")
+    if q_field:
+        products["q_field"] = q_field
+        try:
+            q_bounds = field_range("Q", q_field["association"])
+            if q_bounds is not None and q_bounds[1] > 0.0:
+                # A geometric Contour of point-interpolated Q is empty for some
+                # one-cell-thick OpenFOAM meshes. Thresholding cell-centred Q>0
+                # preserves the actual positive regions and is the robust 2-D
+                # equivalent of displaying Q-positive vortex cores.
+                q_positive = Threshold(registrationName="PositiveQRegions", Input=visual_source)
+                q_positive.Scalars = [q_field["association"], "Q"]
+                try:
+                    q_positive.ThresholdMethod = "Between"
+                    q_positive.LowerThreshold = 0.0
+                    q_positive.UpperThreshold = q_bounds[1]
+                except Exception:
+                    q_positive.ThresholdRange = [0.0, q_bounds[1]]
+                q_positive.UpdatePipeline(time=latest)
+                Hide(visual_source, view)
+                q_display = Show(q_positive, view)
+                ColorBy(q_display, (q_field["association"], "Q"))
+                robust_q = robust_range("Q", q_field["association"]) or q_bounds
+                q_upper = max(
+                    1.0e-12,
+                    0.35 * robust_q[1] if robust_q[1] > 0.0 else q_bounds[1],
+                )
+                q_display_minimum = 0.01 * q_upper
+                try:
+                    q_positive.LowerThreshold = q_display_minimum
+                except Exception:
+                    q_positive.ThresholdRange = [q_display_minimum, q_bounds[1]]
+                q_positive.UpdatePipeline(time=latest)
+                GetColorTransferFunction("Q").RescaleTransferFunction(0.0, q_upper)
+                q_display.SetScalarBarVisibility(view, True)
+                style_scalar_bar(GetColorTransferFunction("Q"), "Q [1/s^2]")
+                set_camera("wake")
+                view.CameraFocalPoint = [1.15 * chord_m, 0.0, seed_z]
+                view.CameraPosition = [
+                    1.15 * chord_m, 0.0,
+                    seed_z + 5.0 * max(chord_m, 1.0e-6),
+                ]
+                view.CameraParallelScale = max(0.90 * chord_m, 1.0e-6)
+                show_airfoil_overlay(latest)
+                set_streamline_visibility(False)
+                if pressure_display is not None:
+                    pressure_display.Visibility = 1
+                    pressure_display.SetScalarBarVisibility(view, False)
+                    set_title("Q-positive regions with pressure contours", latest)
+                    Render(view)
+                    q_pressure_png = output_dir / (
+                        "Q_pressure_contours_%s_final.png" % stage_slug
+                    )
+                    SaveScreenshot(
+                        str(q_pressure_png), view, ImageResolution=[1600, 1000]
+                    )
+                    products["q_pressure_contours_png"] = str(
+                        q_pressure_png.relative_to(output_dir)
+                    )
+                    pressure_display.Visibility = 0
+                if vorticity_contour_display is not None:
+                    vorticity_contour_display.Visibility = 1
+                    vorticity_contour_display.SetScalarBarVisibility(view, False)
+                    set_title("Q-positive regions with vorticity contours", latest)
+                    Render(view)
+                    q_vorticity_png = output_dir / (
+                        "Q_vorticity_contours_%s_final.png" % stage_slug
+                    )
+                    SaveScreenshot(
+                        str(q_vorticity_png), view, ImageResolution=[1600, 1000]
+                    )
+                    products["q_vorticity_contours_png"] = str(
+                        q_vorticity_png.relative_to(output_dir)
+                    )
+                    vorticity_contour_display.Visibility = 0
+                products["q_positive_filter"] = "Threshold(Q >= 0) for one-cell-thick 2-D mesh"
+                products["q_positive_threshold"] = q_display_minimum
+                products["q_positive_policy"] = (
+                    "Q>0 with a 1% robust-colour-range display floor to suppress numerical speckle"
+                )
+                products["q_positive_colour_upper"] = q_upper
+                Hide(q_positive, view)
+                Show(visual_source, view)
+                set_streamline_visibility(False)
+                Delete(q_positive)
+        except Exception as exc:
+            try:
+                Show(visual_source, view)
+                set_streamline_visibility(False)
+            except Exception:
+                pass
+            products["q_positive_contour"] = {{"status": "UNAVAILABLE", "reason": str(exc)}}
 
     products["courant_policy"] = "NOT_APPLICABLE_TO_RANS" if is_iteration_stage else "URANS_ONLY"
     if not is_iteration_stage:
         products["courant_field"] = color_courant()
         if products["courant_field"]:
+            try:
+                display.Representation = "Surface With Edges"
+                display.EdgeColor = [0.15, 0.15, 0.15]
+                display.LineWidth = 0.6
+            except Exception:
+                pass
             set_camera("airfoil")
             scene.AnimationTime = latest
             source.UpdatePipeline(time=latest)
@@ -825,11 +1493,17 @@ if selected_times:
             courant_final = output_dir / ("Courant_%s_final.png" % stage_slug)
             SaveScreenshot(str(courant_final), view, ImageResolution=[1600, 1000])
             products["courant_final_png"] = str(courant_final.relative_to(output_dir))
-            products["courant_hotspots_png"] = save_courant_hotspots(latest)
+            products["courant_hotspots_png"] = None
+            products["courant_hotspots_policy"] = "not_generated; final Courant field only"
+            try:
+                display.Representation = "Surface"
+            except Exception:
+                pass
 
-    color_velocity()
+    set_streamline_visibility(False)
+    color_velocity(instantaneous=True)
     set_camera("wake")
-    for index, value in enumerate(selected_times):
+    for index, value in enumerate(selected_times if include_animations else []):
         scene.AnimationTime = value
         source.UpdatePipeline(time=value)
         title_source.Text = "%s | |U| | %s = %.6g" % (
@@ -844,9 +1518,9 @@ if selected_times:
             ImageResolution=[1280, 720],
         )
 
-    products["pressure_field"] = color_cp()
+    products["pressure_field"] = color_cp(instantaneous=True)
     set_camera("wake")
-    for index, value in enumerate(selected_times):
+    for index, value in enumerate(selected_times if include_animations else []):
         scene.AnimationTime = value
         source.UpdatePipeline(time=value)
         title_source.Text = "%s | Cp | %s = %.6g" % (
@@ -860,9 +1534,53 @@ if selected_times:
             view,
             ImageResolution=[1280, 720],
         )
+    if pressure_display is not None and pressure_contour_front is not None:
+        Hide(visual_source, view)
+        pressure_display.Visibility = 1
+        pressure_display.SetScalarBarVisibility(view, True)
+        set_camera("nearfield")
+        show_airfoil_overlay(latest)
+        for index, value in enumerate(selected_times if include_animations else []):
+            scene.AnimationTime = value
+            source.UpdatePipeline(time=value)
+            pressure_contour_front.UpdatePipeline(time=value)
+            title_source.Text = "%s | pressure contours | %s = %.6g" % (
+                stage_label, frame_axis_label, value,
+            )
+            Render(view)
+            SaveScreenshot(
+                str(pressure_contour_dir / ("pressure_contours_%04d.png" % index)),
+                view, ImageResolution=[1280, 720],
+            )
+        pressure_display.SetScalarBarVisibility(view, False)
+        pressure_display.Visibility = 0
+        Show(visual_source, view)
+
+    if vorticity_contour_display is not None and vorticity_contour_front is not None:
+        Hide(visual_source, view)
+        vorticity_contour_display.Visibility = 1
+        vorticity_contour_display.SetScalarBarVisibility(view, True)
+        set_camera("nearfield")
+        show_airfoil_overlay(latest)
+        for index, value in enumerate(selected_times if include_animations else []):
+            scene.AnimationTime = value
+            source.UpdatePipeline(time=value)
+            vorticity_contour_front.UpdatePipeline(time=value)
+            title_source.Text = "%s | vorticity contours | %s = %.6g" % (
+                stage_label, frame_axis_label, value,
+            )
+            Render(view)
+            SaveScreenshot(
+                str(vorticity_contour_dir / ("vorticity_contours_%04d.png" % index)),
+                view, ImageResolution=[1280, 720],
+            )
+        vorticity_contour_display.SetScalarBarVisibility(view, False)
+        vorticity_contour_display.Visibility = 0
+        Show(visual_source, view)
 
 products["status"] = "RENDERED" if selected_times else "NO_WRITTEN_TIMES"
-products["frame_count"] = len(selected_times)
+products["frame_count"] = len(selected_times) if include_animations else 0
+products["animation_generation"] = "included" if include_animations else "deferred"
 products["applied_scales"] = scale_evidence
 scales_path = output_dir / "visualization_scales.json"
 scales_path.write_text(
@@ -870,37 +1588,37 @@ scales_path.write_text(
         "schema_version": 1,
         "path_base": "manifest_directory",
         "selected_times": selected_times,
+        "range_times": range_times,
         "policy": products["scale_policy"],
         "fields": scale_evidence,
-        "shared_by": ["final_images", "animation_frames"],
+        "shared_by": (
+            ["final_images", "animation_frames"]
+            if include_animations else ["final_images"]
+        ),
     }}, indent=2) + "\\n",
     encoding="utf-8",
 )
 products["visualization_scales"] = scales_path.name
-state_path = output_dir / ("final_%s.pvsm" % stage_slug)
-SaveState(str(state_path))
 relative_foam_path = os.path.relpath(foam_path, output_dir).replace("\\\\", "/")
-try:
-    state_text = state_path.read_text(encoding="utf-8")
-    state_text = state_text.replace(foam_path, relative_foam_path)
-    state_text = state_text.replace(foam_path.replace("/", "\\\\"), relative_foam_path)
-    state_path.write_text(state_text, encoding="utf-8")
-except Exception:
-    pass
-portable_loader = output_dir / ("load_%s_portable.py" % stage_slug)
-portable_loader.write_text(
-    "from pathlib import Path\\n"
-    "import os\\n"
-    "from paraview.simple import LoadState\\n"
-    "root = Path(__file__).resolve().parent\\n"
-    "os.chdir(root)\\n"
-    "state = root / " + repr(state_path.name) + "\\n"
-    "LoadState(str(state))\\n",
-    encoding="utf-8",
-)
-products["state"] = state_path.name
-products["portable_loader"] = portable_loader.name
 products["case_reference"] = relative_foam_path
+# SaveState can block for many minutes with OpenFOAM readers under WSL. The
+# automatic path therefore writes images/animations only. A portable .foam
+# marker remains the authoritative interactive entry point; state export is
+# an explicit opt-in for users who accept its additional cost.
+if os.environ.get("RAMAIR_PVBATCH_SAVE_STATE", "0") == "1":
+    state_path = output_dir / ("final_%s.pvsm" % stage_slug)
+    SaveState(str(state_path))
+    try:
+        state_text = state_path.read_text(encoding="utf-8")
+        state_text = state_text.replace(foam_path, relative_foam_path)
+        state_text = state_text.replace(foam_path.replace("/", "\\\\"), relative_foam_path)
+        state_path.write_text(state_text, encoding="utf-8")
+    except Exception:
+        pass
+    products["state"] = state_path.name
+else:
+    products["state"] = None
+    products["state_policy"] = "disabled_for_automatic_batch_to_avoid_WSL_SaveState_stall"
 (output_dir / "paraview_products.json").write_text(
     json.dumps(products, indent=2) + "\\n",
     encoding="utf-8",
@@ -915,7 +1633,7 @@ def _encode_frame_sequence(
     frame_pattern: Path,
     output_path: Path,
     *,
-    frame_rate: int = 8,
+    frame_rate: int = 2,
 ) -> dict[str, Any]:
     executable = shutil.which("ffmpeg")
     if not executable:
@@ -992,8 +1710,10 @@ def generate_automatic_paraview_products(
     field_scale_mode: str = "exact",
     robust_percentiles: tuple[float, float] = (1.0, 99.0),
     manual_scales: dict[str, tuple[float, float]] | None = None,
+    time_range_s: tuple[float, float] | None = None,
+    include_animations: bool = True,
 ) -> dict[str, Any]:
-    """Render a Cp close-up and bounded U/Cp animations with ``pvbatch``."""
+    """Render the final diagnostic set and, optionally, bounded animations."""
     activate_openfoam_environment()
     case_dir = case_dir.resolve()
     output_dir = output_dir.resolve()
@@ -1005,6 +1725,7 @@ def generate_automatic_paraview_products(
     marker = case_dir / f"{case_dir.name}.foam"
     marker.touch(exist_ok=True)
     inputs = read_json(case_dir / "case_input_summary.json")
+    inputs = {**read_json(case_dir / "case_config.json"), **inputs}
     chord = case_chord_m(case_dir) or 1.0
     try:
         velocity = float(inputs.get("velocity_m_s", 1.0))
@@ -1018,6 +1739,28 @@ def generate_automatic_paraview_products(
         maximum_courant = float(inputs.get("maxCo", 1.0))
     except (TypeError, ValueError):
         maximum_courant = 1.0
+    effective_time_range = time_range_s
+    if effective_time_range is None and str(stage_label).strip().upper() == "URANS":
+        ceiling = case_physical_time_ceiling_s(case_dir)
+        if ceiling is not None:
+            effective_time_range = (0.0, ceiling * (1.0 + 1.0e-8))
+    # This directory is a reproducible generated product package. Remove only
+    # old visual assets so obsolete views cannot reappear in the application
+    # after a new post-process run.
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if include_animations:
+        for asset in output_dir.rglob("*"):
+            if asset.is_file() and asset.suffix.lower() in {".png", ".mp4", ".webm", ".gif"}:
+                asset.unlink(missing_ok=True)
+        for frame_directory in (
+            "velocity_frames", "pressure_frames",
+            "pressure_contour_frames", "vorticity_contour_frames",
+        ):
+            shutil.rmtree(output_dir / frame_directory, ignore_errors=True)
+    else:
+        for asset in output_dir.glob("*"):
+            if asset.is_file() and asset.suffix.lower() == ".png":
+                asset.unlink(missing_ok=True)
     script = write_automatic_products_script(
         output_dir / "render_automatic_products.py",
         marker,
@@ -1032,27 +1775,41 @@ def generate_automatic_paraview_products(
         field_scale_mode=field_scale_mode,
         robust_percentiles=robust_percentiles,
         manual_scales=manual_scales,
+        time_range_s=effective_time_range,
+        include_animations=include_animations,
     )
     command = [str(executable), "--force-offscreen-rendering", str(script)]
     started = time.monotonic()
-    try:
-        completed = subprocess.run(
+    process = subprocess.Popen(
             command,
             cwd=str(case_dir),
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             env=paraview_environment(),
-            timeout=max(30, int(timeout_s)),
-            check=False,
+            start_new_session=True,
         )
+    try:
+        stdout, _ = process.communicate(timeout=max(30, int(timeout_s)))
+        completed_returncode = process.returncode
         timed_out = False
     except subprocess.TimeoutExpired as exc:
-        completed = None
         timed_out = True
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+            stdout, _ = process.communicate(timeout=10)
+        except (ProcessLookupError, subprocess.TimeoutExpired):
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            stdout, _ = process.communicate()
+        completed_returncode = None
         log_text = (exc.stdout or "") if isinstance(exc.stdout, str) else ""
+        if stdout:
+            log_text += stdout
     else:
-        log_text = completed.stdout or ""
+        log_text = stdout or ""
     output_dir.mkdir(parents=True, exist_ok=True)
     log_path = output_dir / "log.pvbatch_automatic_products"
     log_path.write_text(log_text, encoding="utf-8", errors="replace")
@@ -1060,29 +1817,45 @@ def generate_automatic_paraview_products(
     velocity_video = _encode_frame_sequence(
         output_dir / "velocity_frames" / "velocity_%04d.png",
         output_dir / "velocity_airfoil_wake.mp4",
-    ) if manifest.get("frame_count", 0) >= 2 else {"status": "SKIPPED", "reason": "fewer_than_two_frames"}
+    ) if include_animations and manifest.get("frame_count", 0) >= 2 else {"status": "SKIPPED", "reason": "animations_deferred" if not include_animations else "fewer_than_two_frames"}
     pressure_video = _encode_frame_sequence(
         output_dir / "pressure_frames" / "pressure_Cp_%04d.png",
         output_dir / "pressure_Cp_airfoil_wake.mp4",
-    ) if manifest.get("frame_count", 0) >= 2 else {"status": "SKIPPED", "reason": "fewer_than_two_frames"}
+    ) if include_animations and manifest.get("frame_count", 0) >= 2 else {"status": "SKIPPED", "reason": "animations_deferred" if not include_animations else "fewer_than_two_frames"}
+    pressure_contour_video = _encode_frame_sequence(
+        output_dir / "pressure_contour_frames" / "pressure_contours_%04d.png",
+        output_dir / "pressure_contours.mp4",
+    ) if include_animations and manifest.get("frame_count", 0) >= 2 else {"status": "SKIPPED", "reason": "animations_deferred" if not include_animations else "fewer_than_two_frames"}
+    vorticity_contour_video = _encode_frame_sequence(
+        output_dir / "vorticity_contour_frames" / "vorticity_contours_%04d.png",
+        output_dir / "vorticity_contours.mp4",
+    ) if include_animations and manifest.get("frame_count", 0) >= 2 else {"status": "SKIPPED", "reason": "animations_deferred" if not include_animations else "fewer_than_two_frames"}
     report = {
         "status": (
             "TIMEOUT_PARTIAL"
             if timed_out
             else "OK"
-            if completed is not None and completed.returncode == 0 and manifest.get("status") == "RENDERED"
+            if completed_returncode == 0 and manifest.get("status") == "RENDERED"
             else "FAILED"
         ),
         "command": command,
-        "returncode": None if completed is None else int(completed.returncode),
+        "returncode": completed_returncode,
         "elapsed_s": time.monotonic() - started,
         "log": str(log_path),
         "products": manifest,
         "velocity_animation": velocity_video,
         "pressure_animation": pressure_video,
+        "pressure_contour_animation": pressure_contour_video,
+        "vorticity_contour_animation": vorticity_contour_video,
+        "animation_frame_rate_fps": 2,
+        "include_animations": bool(include_animations),
         "storage_strategy": "Direct OpenFOAM reader; no duplicated VTK volume database.",
     }
-    (output_dir / "automatic_products_report.json").write_text(
+    report_name = (
+        "automatic_products_report.json"
+        if include_animations else "automatic_static_products_report.json"
+    )
+    (output_dir / report_name).write_text(
         json.dumps(report, indent=2) + "\n",
         encoding="utf-8",
     )
@@ -1126,6 +1899,8 @@ def launch_paraview_case(case_dir: Path) -> dict[str, Any]:
             "log": str(log_path),
             "details": details,
         }
+    if returncode is None:
+        _reap_interactive_process(process, "paraview-case")
     return {
         "status": "OPEN_REQUESTED",
         "method": "scripted-paraview-openfoam-reader",
@@ -1157,9 +1932,11 @@ def launch_paraview_vtk_set(
     support = Path(support_dir).resolve()
     support.mkdir(parents=True, exist_ok=True)
     script_path = support / "open_resolved_vtk_set.py"
-    state_path = support / "resolved_vtk_set.pvsm"
     screenshot = support / "resolved_vtk_set.png"
-    script = f'''from paraview.simple import *
+    ready_path = support / "resolved_vtk_set.ready.json"
+    script = f'''from pathlib import Path
+import json
+from paraview.simple import *
 try:
     from paraview.simple import _DisableFirstRenderCameraReset
     _DisableFirstRenderCameraReset()
@@ -1167,9 +1944,15 @@ except Exception:
     pass
 paths = {json.dumps([str(path) for path in paths])}
 view = GetActiveViewOrCreate("RenderView")
+focus_bounds = []
 for index, path in enumerate(paths):
     reader = LegacyVTKReader(FileNames=[path])
+    reader.UpdatePipeline()
     display = Show(reader, view)
+    if "/airfoil_wall/" in path.replace("\\\\", "/"):
+        bounds = reader.GetDataInformation().GetBounds()
+        if bounds and (bounds[1] - bounds[0]) > 0 and (bounds[3] - bounds[2]) > 0:
+            focus_bounds.append(bounds)
     if index == 0:
         try:
             arrays = list(reader.PointData.keys()) + list(reader.CellData.keys())
@@ -1179,15 +1962,6 @@ for index, path in enumerate(paths):
         except Exception:
             pass
 ResetCamera(view)
-focus_bounds = []
-for source in GetSources().values():
-    try:
-        bounds = source.GetDataInformation().GetBounds()
-        if bounds and (bounds[1] - bounds[0]) > 0 and (bounds[3] - bounds[2]) > 0:
-            if (bounds[1] - bounds[0]) < 0.75 * max(1.0e-12, view.CameraParallelScale * 2.0):
-                focus_bounds.append(bounds)
-    except Exception:
-        pass
 if focus_bounds:
     xmin = min(item[0] for item in focus_bounds); xmax = max(item[1] for item in focus_bounds)
     ymin = min(item[2] for item in focus_bounds); ymax = max(item[3] for item in focus_bounds)
@@ -1200,12 +1974,18 @@ if focus_bounds:
     view.CameraParallelScale = max(0.35 * chord, 0.65 * (ymax - ymin), 1.0e-6)
 Render(view)
 SaveScreenshot({json.dumps(str(screenshot))}, view, ImageResolution=[1600, 1000])
-SaveState({json.dumps(str(state_path))})
+Path({json.dumps(str(ready_path))}).write_text(json.dumps({{
+    "status": "READY",
+    "selected_time": {float(selected_time)!r},
+    "reader_paths": paths,
+    "screenshot": {json.dumps(str(screenshot))},
+    "state_policy": "disabled_to_avoid_interactive_copy_mode_dialog",
+}}, indent=2) + "\\n", encoding="utf-8")
 '''
     script_path.write_text(script, encoding="utf-8")
     log_path = support / "log.paraview_vtk_launch"
     log_stream = log_path.open("a", encoding="utf-8")
-    command = [str(executable), "--script", str(script_path)]
+    command = [str(executable), "--disable-registry", "--script", str(script_path)]
     process = subprocess.Popen(
         command,
         cwd=str(support),
@@ -1214,6 +1994,7 @@ SaveState({json.dumps(str(state_path))})
         env=paraview_environment(),
         start_new_session=True,
     )
+    _reap_interactive_process(process, "paraview-vtk")
     return {
         "status": "OPEN_REQUESTED",
         "pid": int(process.pid),
@@ -1222,7 +2003,9 @@ SaveState({json.dumps(str(state_path))})
         "selected_time": float(selected_time),
         "reader_paths": [str(path) for path in paths],
         "script": str(script_path),
-        "state": str(state_path),
+        "state": None,
+        "ready_file": str(ready_path),
+        "state_policy": "disabled_to_avoid_interactive_copy_mode_dialog",
         "screenshot": str(screenshot),
         "log": str(log_path),
     }
@@ -1337,6 +2120,12 @@ if __name__ == "__main__":
     parser.add_argument("case", type=Path)
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--automatic-products", action="store_true")
+    parser.add_argument(
+        "--include-animations",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Render frame sequences and encode videos in addition to final images.",
+    )
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--maximum-frames", type=int, default=24)
     parser.add_argument("--timeout-s", type=int, default=600)
@@ -1373,6 +2162,7 @@ if __name__ == "__main__":
                 }.items()
                 if bounds is not None
             },
+            include_animations=bool(arguments.include_animations),
         )
     elif arguments.prepare_only:
         result = prepare_paraview_case(arguments.case)

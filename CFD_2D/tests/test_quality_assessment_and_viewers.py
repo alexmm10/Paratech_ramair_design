@@ -42,10 +42,13 @@ def test_scripted_paraview_reader_loads_internal_mesh_latest_time_and_writes_evi
     assert "OpenFOAMReader(FileName=foam_path)" in text
     assert 'source.MeshRegions = ["internalMesh"]' in text
     assert "source.TimestepValues" in text
-    assert "scene.AnimationTime = available_times[-1]" in text
+    assert "scene.AnimationTime = (physical_times or available_times)[-1]" in text
     assert "source.UpdatePipeline(time=scene.AnimationTime)" in text
     assert "SaveScreenshot" in text
-    assert "SaveState" in text
+    assert "SaveState(" not in text
+    assert '"status": "READY"' in text
+    assert "is_iteration_stage" not in text
+    assert "velocity_m_s" not in text
     compile(text, str(script), "exec")
 
 
@@ -87,7 +90,25 @@ def test_automatic_products_script_is_bounded_and_uses_direct_openfoam_reader(tm
     assert 'set_camera("airfoil")' in text
     assert 'StreamTracer(' in text
     assert 'SeedType="Line"' in text
-    assert "streamlines.SeedType.Resolution = 120" in text
+    assert 'CleanToGrid(' in text
+    assert 'registrationName="AerodynamicMidPlane"' in text
+    assert 'streamlines.SurfaceStreamlines = 0' in text
+    assert "nearfield_streamlines" not in text
+    assert 'pressure_display.SetScalarBarVisibility(view, True)' in text
+    assert 'vorticity_contour_display.SetScalarBarVisibility(view, True)' in text
+    assert 'pressure_surface_display' not in text
+    assert "streamlines.SeedType.Resolution = 100" in text
+    assert 'registrationName="RotatedFreestreamStreamlines"' in text
+    assert 'streamline_display.LineWidth = 0.6' in text
+    assert "set_streamline_visibility" in text
+    assert "streamline_display.Visibility" in text
+    assert '"Velocity_contours_%s_final.png"' in text
+    assert '"Pressure_contours_%s_final.png"' in text
+    assert '"Vorticity_contours_%s_final.png"' in text
+    assert 'set_camera("nearfield")' in text
+    assert "seed_center_x = -1.0 * chord_m" in text
+    assert 'visual_source.Transform.Rotate = [0.0, 0.0, -alpha_deg]' in text
+    assert 'products["courant_hotspots_png"] = None' in text
     assert '"line_perpendicular_to_freestream"' in text
     assert 'stage_label = "URANS"' in text
     assert 'frame_axis_label = "iteration" if is_iteration_stage else "t [s]"' in text
@@ -95,5 +116,7 @@ def test_automatic_products_script_is_bounded_and_uses_direct_openfoam_reader(tm
     assert "%s final | %s" in text
     assert "velocity_%04d.png" in text
     assert "pressure_Cp_%04d.png" in text
+    assert "selected_times if include_animations else []" in text
+    assert "Velocity_streamlines_contours_%s_final.png" not in text
     assert "foamToVTK" not in text
     compile(text, str(script), "exec")

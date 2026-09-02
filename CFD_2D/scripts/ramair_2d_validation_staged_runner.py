@@ -140,7 +140,9 @@ def configure_stage(
     from_latest = effective in {CONTINUE_STAGE, RESUME_EXISTING}
     stage_steps = int(stage.get("steps") or 1)
     delta_t = Decimal(str(stage["dt_s"]))
-    intended_end = Decimal(str(stage["start_s"])) + delta_t * Decimal(stage_steps)
+    intended_end = Decimal(str(stage.get("end_s"))) if stage.get("end_s") is not None else (
+        Decimal(str(stage["start_s"])) + delta_t * Decimal(stage_steps)
+    )
     control_path = case / "system/controlDict"
     schemes_path = case / "system/fvSchemes"
     solution_path = case / "system/fvSolution"
@@ -151,8 +153,16 @@ def configure_stage(
     control = _replace_entry(control, "stopAt", "endTime")
     control = _replace_entry(control, "endTime", format(intended_end, ".12g"))
     control = _replace_entry(control, "deltaT", f"{float(stage['dt_s']):.12g}")
-    control = _replace_entry(control, "adjustTimeStep", "no")
-    control = _replace_entry(control, "writeControl", "timeStep")
+    adaptive = bool(stage.get("adjust_time_step", False))
+    control = _replace_entry(control, "adjustTimeStep", "yes" if adaptive else "no")
+    if adaptive:
+        control = _replace_entry(control, "maxCo", f"{float(stage.get('maxCo', 50.0)):.12g}")
+        control = _replace_entry(
+            control, "maxDeltaT", f"{float(stage.get('maxDeltaT_s', stage['dt_s'])):.12g}",
+        )
+        control = _replace_entry(control, "writeControl", "adjustableRunTime")
+    else:
+        control = _replace_entry(control, "writeControl", "timeStep")
     boundary_target_index: int | None = None
     if preserve_temporal_history:
         write_interval = 1
@@ -163,12 +173,25 @@ def configure_stage(
             delta_t=delta_t,
             stage_steps=stage_steps,
         )
-    control = _replace_entry(control, "writeInterval", str(write_interval))
+    if adaptive:
+        requested_write = float(stage.get("write_interval_s", stage["dt_s"]))
+        control = _replace_entry(control, "writeInterval", f"{requested_write:.12g}")
+    else:
+        control = _replace_entry(control, "writeInterval", str(write_interval))
+    requested_purge = stage.get("purge_write")
+    effective_purge: int | None = None
+    if requested_purge is not None:
+        effective_purge = max(0, int(requested_purge))
     if preserve_temporal_history:
+        effective_purge = max(3, int(effective_purge or 0))
+    if effective_purge is not None:
         if re.search(r"(?m)^\s*purgeWrite\s+[^;]+;", control):
-            control = _replace_entry(control, "purgeWrite", "3")
+            control = _replace_entry(control, "purgeWrite", str(effective_purge))
         else:
-            control += "\n// Retain current and two old states for backward.\npurgeWrite 3;\n"
+            control += (
+                "\n// Rolling retention; backward needs at least three states.\n"
+                f"purgeWrite {effective_purge};\n"
+            )
     control_path.write_text(control, encoding="utf-8")
 
     schemes = schemes_path.read_text(encoding="utf-8")
@@ -182,10 +205,10 @@ def configure_stage(
     if count != 1:
         raise ValueError("Could not update ddtSchemes.default")
     schemes_path.write_text(updated, encoding="utf-8")
-    # Space/time convergence phases must execute the frozen number of outer
-    # correctors. General-purpose cases may use an adaptive outer residual
-    # exit, but retaining it here would change the experiment between meshes.
-    if solution_path.is_file():
+    # Frozen convergence studies remove adaptive outer-loop exit. General
+    # validation runs explicitly retain it to cap work while preserving a
+    # maximum of five PIMPLE outer corrections.
+    if solution_path.is_file() and not bool(stage.get("retain_outer_residual_control", False)):
         solution = solution_path.read_text(encoding="utf-8")
         token = "outerCorrectorResidualControl"
         start = solution.find(token)
@@ -219,6 +242,10 @@ def configure_stage(
         "write_interval_steps": write_interval,
         "boundary_target_time_index": boundary_target_index,
         "retains_temporal_history": preserve_temporal_history,
+        "purge_write_latest_states": effective_purge,
+        "adjust_time_step": adaptive,
+        "maxCo": float(stage.get("maxCo", 50.0)) if adaptive else None,
+        "maxDeltaT_s": float(stage.get("maxDeltaT_s", stage["dt_s"])) if adaptive else None,
         "first_order_bootstrap": bool(stage.get("first_order_bootstrap", False)),
     }
 
@@ -233,6 +260,8 @@ def runner_command(
     run: bool,
     decompose_times: list[float] | None = None,
     reconstruct_times: list[float] | None = None,
+    automatic_core_selection: bool = True,
+    renumber_before_decompose: bool = True,
 ) -> list[str]:
     command = [
         sys.executable,
@@ -245,6 +274,8 @@ def runner_command(
         "--stop-grace-min", "5",
         "--stop-mode", "writeNow",
         "--start-mode", normalize_start_mode(start_mode),
+        "--automatic-core-selection" if automatic_core_selection else "--no-automatic-core-selection",
+        "--renumber-before-decompose" if renumber_before_decompose else "--no-renumber-before-decompose",
     ]
     if expected_start_time is not None:
         command += ["--expected-start-time", f"{float(expected_start_time):.12g}"]
@@ -670,6 +701,8 @@ def execute(
     startup_mode: str,
     n_cores: int,
     timeout_min: float,
+    automatic_core_selection: bool = True,
+    renumber_before_decompose: bool = True,
 ) -> int:
     project_root = Path(project_root).resolve()
     run_root = Path(run_root).resolve()
@@ -726,6 +759,8 @@ def execute(
                 start_mode=mode,
                 expected_start_time=expected,
                 run=run,
+                automatic_core_selection=automatic_core_selection,
+                renumber_before_decompose=renumber_before_decompose,
             )
         )
     execution_plan = {
@@ -900,6 +935,8 @@ def execute(
                     else None
                 ),
                 reconstruct_times=reconstruct_times,
+                automatic_core_selection=automatic_core_selection,
+                renumber_before_decompose=renumber_before_decompose,
             )
             returncode, run_status = _run_phase_command(
                 command,
@@ -1097,6 +1134,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--startup-mode", choices=["progressive", "direct"], default="progressive")
     parser.add_argument("--n-cores", type=int, default=8)
     parser.add_argument("--timeout-min", type=float, default=1440.0)
+    parser.add_argument(
+        "--automatic-core-selection", action=argparse.BooleanOptionalAction, default=True
+    )
+    parser.add_argument(
+        "--renumber-before-decompose", action=argparse.BooleanOptionalAction, default=True
+    )
     parser.add_argument("--run", action="store_true")
     return parser.parse_args()
 
@@ -1110,6 +1153,8 @@ def main() -> int:
         startup_mode=args.startup_mode,
         n_cores=max(1, min(8, int(args.n_cores))),
         timeout_min=max(0.1, float(args.timeout_min)),
+        automatic_core_selection=bool(args.automatic_core_selection),
+        renumber_before_decompose=bool(args.renumber_before_decompose),
     )
 
 

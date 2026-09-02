@@ -388,25 +388,43 @@ def compare_pimple_outer_correctors(records: Iterable[dict[str, Any]]) -> dict[s
         return {"status": "INSUFFICIENT_PIMPLE_CASES", "rows": rows}
     reference = rows[-1]
     comparisons = []
+    missing_metrics: list[dict[str, Any]] = []
+
+    def optional_difference(row: dict[str, Any], key: str) -> float | None:
+        left = row.get(key)
+        right = reference.get(key)
+        if left is None or right is None:
+            missing_metrics.append(
+                {"nOuterCorrectors": int(row["nOuterCorrectors"]), "metric": key}
+            )
+            return None
+        return relative_percent(float(left), float(right))
+
+    def optional_ratio(row: dict[str, Any], key: str) -> float | None:
+        left = row.get(key)
+        right = reference.get(key)
+        if left is None or right is None:
+            missing_metrics.append(
+                {"nOuterCorrectors": int(row["nOuterCorrectors"]), "metric": key}
+            )
+            return None
+        return float(left) / max(float(right), 1.0e-30)
+
     for row in rows[:-1]:
         comparisons.append(
             {
                 "nOuterCorrectors": int(row["nOuterCorrectors"]),
-                "mean_CL_difference_percent": relative_percent(
-                    row["mean_CL"], reference["mean_CL"]
+                "mean_CL_difference_percent": optional_difference(row, "mean_CL"),
+                "mean_CD_difference_percent": optional_difference(row, "mean_CD"),
+                "dominant_St_difference_percent": optional_difference(
+                    row, "dominant_strouhal"
                 ),
-                "mean_CD_difference_percent": relative_percent(
-                    row["mean_CD"], reference["mean_CD"]
-                ),
-                "dominant_St_difference_percent": relative_percent(
-                    row["dominant_strouhal"], reference["dominant_strouhal"]
-                ),
-                "cpu_step_ratio": float(row["cpu_seconds_per_step"])
-                / max(float(reference["cpu_seconds_per_step"]), 1.0e-30),
+                "cpu_step_ratio": optional_ratio(row, "cpu_seconds_per_step"),
             }
         )
     return {
         "status": "COMPARISON_AVAILABLE",
         "reference_outer_correctors": int(reference["nOuterCorrectors"]),
         "comparisons": comparisons,
+        "missing_optional_metrics": missing_metrics,
     }

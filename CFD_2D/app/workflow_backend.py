@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import re
 import shlex
 import signal
 import shutil
@@ -40,7 +41,7 @@ from paraview_case_viewer import (  # noqa: E402
 )
 from ramair_2d_rans_paraview_final import resolve_final_vtk_artifacts  # noqa: E402
 from project_layout import LEGACY_ALIASES, find_project_root, project_path  # noqa: E402
-from ramair_case_library import mutable_schema3_manifest, schema3_manifest  # noqa: E402
+from ramair_case_library import geometry_identity, mutable_schema3_manifest, schema3_manifest  # noqa: E402
 from ramair_workcase_schema import refresh_package_revision  # noqa: E402
 from ramair_2d_study_registry import (  # noqa: E402
     active_workspace_root as _validation_active_workspace_root,
@@ -92,7 +93,6 @@ ACTIVE_WORKCASE_CONFIG_TARGETS = {
     "catia_system": (("geometry", Path("Configurations/ramair_catia_system_config.json")),),
     "workflow": (
         ("case", Path("CFD Configurations/cfd2d_workflow_config.json")),
-        ("mesh", Path("Configurations/cfd2d_workflow_config.json")),
     ),
     "mesh": (("mesh", Path("Configurations/cfd2d_mesh_config.json")),),
     "solver": (
@@ -132,7 +132,10 @@ def write_json_with_backup(path: Path, data: Any, project_root: Path) -> Path | 
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex}.tmp")
     try:
-        temporary.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        temporary.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False, default=str) + "\n",
+            encoding="utf-8",
+        )
         temporary.replace(path)
     finally:
         temporary.unlink(missing_ok=True)
@@ -379,7 +382,7 @@ def sync_active_workcase_config(project_root: Path, name: str) -> list[Path]:
         manifest["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
         _write_bytes_atomic(
             manifest_path,
-            (json.dumps(manifest, indent=2, ensure_ascii=False) + "\n").encode("utf-8"),
+            (json.dumps(manifest, indent=2, ensure_ascii=False, default=str) + "\n").encode("utf-8"),
         )
     return written
 
@@ -398,7 +401,7 @@ def set_workcase_selection(project_root: Path, case_name: str | None) -> Path:
     }
     _write_bytes_atomic(
         path,
-        (json.dumps(payload, indent=2, ensure_ascii=False) + "\n").encode("utf-8"),
+        (json.dumps(payload, indent=2, ensure_ascii=False, default=str) + "\n").encode("utf-8"),
     )
     return path
 
@@ -436,7 +439,13 @@ def available_variants(project_root: Path) -> list[str]:
             for path in package_root.iterdir()
             if path.is_dir() and path.name != "validation" and (path / "manifest.json").is_file()
         )
-    return sorted(variants)
+    # Mesh-refinement folders are revisions of one physical geometry, not new
+    # profiles.  Keeping them out of this selector prevents duplicate labels and
+    # accidental activation through the geometry case builder.
+    refinement_suffix = re.compile(
+        r"(?:_(?:coarse|medium|fine)|_light_f\d+p\d+|_te_reduced_[A-Za-z0-9]+)$"
+    )
+    return sorted(name for name in variants if not refinement_suffix.search(name))
 
 
 def safe_alpha_dir(alpha: float) -> str:
@@ -778,6 +787,7 @@ def case_writer_command(
     alphas: list[float] | None = None,
     existing_case_action: str = "archive",
     reynolds: float | None = None,
+    solver_config_path: Path | None = None,
 ) -> list[str]:
     command = python_command(
         project_root,
@@ -796,6 +806,8 @@ def case_writer_command(
         command.append("--no-mesh-approved-required")
     if overwrite:
         command += ["--overwrite", "--existing-case-action", existing_case_action]
+    if solver_config_path is not None:
+        command += ["--solver-config", solver_config_path]
     return command
 
 
@@ -894,6 +906,9 @@ def staged_runner_command(
     steady_additional_iterations: int = 500,
     steady_pyfoam_live_monitor: bool = True,
     steady_paraview_snapshots: int = 6,
+    transient_phase_plan: Path | None = None,
+    automatic_core_selection: bool = True,
+    renumber_before_decompose: bool = True,
 ) -> list[str]:
     command = python_command(
         project_root,
@@ -918,6 +933,14 @@ def staged_runner_command(
     )
     if run:
         command.append("--run")
+    command.append(
+        "--automatic-core-selection" if automatic_core_selection
+        else "--no-automatic-core-selection"
+    )
+    command.append(
+        "--renumber-before-decompose" if renumber_before_decompose
+        else "--no-renumber-before-decompose"
+    )
     if stop_after_min is not None and stop_after_min > 0:
         command += ["--stop-after-min", str(float(stop_after_min))]
     if steady_initialization:
@@ -938,6 +961,8 @@ def staged_runner_command(
         command.append("--no-cleanup-processor-directories")
     if stop_when_force_stable:
         command.append("--stop-when-force-stable")
+    if transient_phase_plan is not None:
+        command += ["--transient-phase-plan", transient_phase_plan]
     return command
 
 
@@ -972,6 +997,11 @@ def sweep_runner_command(
     postprocess_after_each: bool,
     continue_after_error: bool,
     average_from_fraction: float,
+    transient_phase_plan: Path | None = None,
+    restart_existing: bool = False,
+    solver_config_path: Path | None = None,
+    automatic_core_selection: bool = True,
+    renumber_before_decompose: bool = True,
 ) -> list[str]:
     command = python_command(
         project_root,
@@ -995,6 +1025,14 @@ def sweep_runner_command(
     )
     if run:
         command.append("--run")
+    command.append(
+        "--automatic-core-selection" if automatic_core_selection
+        else "--no-automatic-core-selection"
+    )
+    command.append(
+        "--renumber-before-decompose" if renumber_before_decompose
+        else "--no-renumber-before-decompose"
+    )
     if steady_initialization:
         command.append("--steady-initialization")
     if continue_transient_after_steady_timeout:
@@ -1003,6 +1041,10 @@ def sweep_runner_command(
         command.append("--no-continue-transient-after-steady-timeout")
     if not resume_existing:
         command.append("--no-resume-existing")
+    if restart_existing:
+        command.append("--restart-existing")
+    if solver_config_path is not None:
+        command += ["--solver-config", solver_config_path]
     if resume_additional_time_star is not None and resume_additional_time_star > 0:
         command += ["--resume-additional-time-star", str(float(resume_additional_time_star))]
     if not continue_after_timeout:
@@ -1021,6 +1063,8 @@ def sweep_runner_command(
         command.append("--postprocess-after-each")
     if not continue_after_error:
         command.append("--no-continue-after-error")
+    if transient_phase_plan is not None:
+        command += ["--transient-phase-plan", transient_phase_plan]
     return command
 
 
@@ -1059,6 +1103,17 @@ def request_openfoam_clean_stop(case_dir: Path, mode: str = "writeNow") -> Path:
     )
     temporary.replace(marker)
     return backup
+
+
+def interrupt_openfoam_case(case_dir: Path) -> dict[str, Any]:
+    """Signal the recorded solver group even when its Streamlit job became orphaned."""
+    case_dir = Path(case_dir).resolve()
+    result = _signal_solver_process(case_dir, signal.SIGINT)
+    return {
+        **result,
+        "case_dir": str(case_dir),
+        "policy": "SIGINT_only_after_clean_write_request",
+    }
 
 
 def request_openfoam_sweep_stop(command: list[str]) -> Path:
@@ -1252,7 +1307,11 @@ def postprocess_command(
     velocity_profile_stations: list[float] | None = None,
     velocity_profile_sample_points: int = 40,
     automatic_paraview_products: bool = False,
+    include_paraview_animations: bool = True,
+    paraview_animations_only: bool = False,
     paraview_maximum_frames: int = 24,
+    paraview_time_range_s: tuple[float, float] | None = None,
+    rans_average_tail_samples: int = 500,
 ) -> list[str]:
     command = python_command(
         project_root,
@@ -1263,6 +1322,7 @@ def postprocess_command(
         "--average-from-fraction", average_from_fraction,
         "--openfoam-postprocess-timeout-s", max(30, int(timeout_s)),
         "--velocity-profile-sample-points", max(10, int(velocity_profile_sample_points)),
+        "--rans-average-tail-samples", max(1, int(rans_average_tail_samples)),
     )
     if velocity_profile_stations:
         command += ["--velocity-profile-stations", *[str(float(value)) for value in velocity_profile_stations]]
@@ -1281,6 +1341,17 @@ def postprocess_command(
             "--automatic-paraview-products",
             "--paraview-maximum-frames", str(max(2, int(paraview_maximum_frames))),
         ]
+        if paraview_time_range_s is not None:
+            start_s, end_s = (float(value) for value in paraview_time_range_s)
+            if start_s > end_s:
+                raise ValueError("The ParaView time interval must satisfy start <= end")
+            command += ["--paraview-time-range-s", str(start_s), str(end_s)]
+        if not include_paraview_animations:
+            command.append("--no-include-paraview-animations")
+    if paraview_animations_only:
+        if not automatic_paraview_products:
+            command.append("--automatic-paraview-products")
+        command.append("--paraview-animations-only")
     if not wall_profile_analysis:
         command.append("--no-wall-profile-analysis")
     return command
@@ -1300,6 +1371,7 @@ def batch_postprocess_command(
     velocity_profile_sample_points: int,
     automatic_paraview_products: bool = False,
     paraview_maximum_frames: int = 24,
+    paraview_time_range_s: tuple[float, float] | None = None,
 ) -> list[str]:
     command = python_command(
         project_root,
@@ -1323,6 +1395,11 @@ def batch_postprocess_command(
             "--automatic-paraview-products",
             "--paraview-maximum-frames", str(max(2, int(paraview_maximum_frames))),
         ]
+        if paraview_time_range_s is not None:
+            start_s, end_s = (float(value) for value in paraview_time_range_s)
+            if start_s > end_s:
+                raise ValueError("The ParaView time interval must satisfy start <= end")
+            command += ["--paraview-time-range-s", str(start_s), str(end_s)]
     return command
 
 
@@ -1332,10 +1409,11 @@ def validation_publish_command(
     variant: str,
     alphas: list[float],
     action: str = "add",
+    allow_incomplete: bool = False,
 ) -> list[str]:
     if action not in {"add", "remove"}:
         raise ValueError("Validation publication action must be add or remove")
-    return python_command(
+    command = python_command(
         project_root,
         "CFD_2D/scripts/ramair_2d_validation_publish.py",
         "--case-root", project_root,
@@ -1343,6 +1421,9 @@ def validation_publish_command(
         "--action", action,
         "--alphas", *[str(float(value)) for value in alphas],
     )
+    if action == "add" and allow_incomplete:
+        command.append("--allow-incomplete")
+    return command
 
 
 def mesh_refinement_study_command(
@@ -1370,7 +1451,9 @@ def validation_study_command(
     mesh_id: str | None = None,
     topology: str | None = None,
     mesh_level: str | None = None,
+    alpha_deg: float | None = None,
     run_ids: Iterable[str] | None = None,
+    case_specs: Iterable[str] | None = None,
     overwrite: bool = False,
     run: bool = False,
     startup_mode: str | None = None,
@@ -1398,7 +1481,7 @@ def validation_study_command(
     allowed = {
         "init", "status", "select-mesh", "prepare", "budget",
         "execute", "checkpoint", "preset", "analyze", "analyze-checkpoint",
-        "report", "reference-table", "rans-base", "rans-queue",
+        "report", "reference-table", "rans-base", "rans-queue", "rans-selection-queue",
         "storage-inventory", "storage-cleanup", "pimple-study",
         "open-light", "open-refinement", "rans-review", "execution-registry",
         "rans-delete", "inspect-case", "restart", "quick-check",
@@ -1418,6 +1501,10 @@ def validation_study_command(
         command += ["--run-id", run_id]
     if mesh_id:
         command += ["--mesh-id", mesh_id]
+    if alpha_deg is not None:
+        if action not in {"rans-base", "rans-queue", "rans-review"}:
+            raise ValueError("alpha_deg is only valid for RANS base/queue/review actions")
+        command += ["--alpha-deg", str(float(alpha_deg))]
     if topology is not None:
         if action != "pimple-study" or topology not in {"closed", "open"}:
             raise ValueError("topology is only valid for a PIMPLE study")
@@ -1428,6 +1515,10 @@ def validation_study_command(
         command += ["--mesh-level", mesh_level]
     for value in run_ids or ():
         command += ["--run-id", value]
+    for value in case_specs or ():
+        if action != "rans-selection-queue":
+            raise ValueError("case_specs is only valid for rans-selection-queue")
+        command += ["--case", str(value)]
     if overwrite:
         command.append("--overwrite")
     if preset is not None:
@@ -1501,7 +1592,7 @@ def validation_study_command(
             str(int(manual_extension_iterations)),
         ]
     if continue_on_nonfatal_failure:
-        if action != "rans-queue":
+        if action not in {"rans-queue", "rans-selection-queue"}:
             raise ValueError(
                 "continue_on_nonfatal_failure is only valid for rans-queue"
             )
@@ -1967,7 +2058,22 @@ def saved_mesh_catalog(project_root: Path, active_case_name: str) -> list[dict[s
     active_case = next((item for item in cases if item.get("folder") == active_case_name), {})
     active_entity = str((active_case.get("active_entities") or {}).get("geometry") or "")
     active_revision = str(((active_case.get("entities") or {}).get(active_entity) or {}).get("revision_id") or "")
-    active_variant = str(active_case.get("variant") or active_case.get("main_profile") or "")
+    active_geometry_stage = (active_case.get("stages") or {}).get("geometry") or {}
+    active_geometry_name = str(active_geometry_stage.get("active_package") or "")
+    active_geometry_package = (active_geometry_stage.get("packages") or {}).get(active_geometry_name) or {}
+    workflow = read_json(config_path(project_root, "workflow"), {}) or {}
+    selected_variant = str((workflow.get("geometry") or {}).get("variant") or "")
+    package_variant = str(active_geometry_package.get("variant") or active_case.get("variant") or "")
+    active_variant = selected_variant or package_variant
+    if selected_variant and selected_variant != package_variant:
+        active_entity = ""
+        active_revision = ""
+        active_identity = geometry_identity(project_root, selected_variant)
+    else:
+        active_identity = dict(active_geometry_package.get("geometry_identity") or {})
+        if not active_identity and active_variant:
+            active_identity = geometry_identity(project_root, active_variant)
+    active_signature = str(active_identity.get("signature") or "")
     rows: list[dict[str, Any]] = []
     for case in cases:
         mesh_stage = (case.get("stages") or {}).get("mesh") or {}
@@ -1983,14 +2089,19 @@ def saved_mesh_catalog(project_root: Path, active_case_name: str) -> list[dict[s
                 and geometry_dependency.get("entity_id") == active_entity
                 and geometry_dependency.get("revision_id") == active_revision
             )
+            package_variant = str(package.get("variant") or case.get("variant") or case.get("main_profile") or "")
+            package_identity = dict(package.get("geometry_identity") or {})
+            package_signature = str(package_identity.get("signature") or "")
+            signature_match = bool(active_signature and package_signature and active_signature == package_signature)
             legacy_variant_match = bool(
                 not geometry_dependency
                 and active_variant
-                and str(case.get("variant") or case.get("main_profile") or "") == active_variant
+                and package_variant == active_variant
             )
             compatibility = dict(package.get("compatibility") or {})
-            compatible = (exact_dependency or legacy_variant_match) and compatibility.get("status", "compatible") == "compatible"
+            compatible = (exact_dependency or signature_match or legacy_variant_match) and compatibility.get("status", "compatible") == "compatible"
             package_root, _ = _saved_mesh_package_path(project_root, str(case.get("folder")), str(package_name))
+            saved_config = read_json(package_root / "Configurations/cfd2d_mesh_config.json", {}) or {}
             quality_path = package_root / "Mesh Data/mesh_quality_report.json"
             quality = read_json(quality_path, {}) or {}
             rows.append({
@@ -1998,13 +2109,19 @@ def saved_mesh_catalog(project_root: Path, active_case_name: str) -> list[dict[s
                 "package_name": package_name,
                 "entity_id": package.get("entity_id"),
                 "revision_id": package.get("revision_id"),
-                "variant": case.get("variant") or case.get("main_profile"),
+                "variant": package_variant,
+                "geometry_identity": package_identity,
                 "compatible": compatible,
                 "compatibility_reason": (
                     "exact_geometry_revision" if exact_dependency else
+                    "matching_geometry_signature" if signature_match else
                     "legacy_variant_match" if legacy_variant_match else
                     "different_geometry_revision"
                 ),
+                "configuration_reusable_as_seed": True,
+                "hard_incompatibility": not compatible,
+                "condition_basis": dict(package.get("mesh_condition_basis") or {}),
+                "mesh_level": str(saved_config.get("mesh_level_origin") or saved_config.get("mesh_level") or "custom"),
                 "approval": dict(package.get("approval") or {}),
                 "saved_at": package.get("saved_at"),
                 "file_count": package.get("file_count"),
@@ -2013,6 +2130,8 @@ def saved_mesh_catalog(project_root: Path, active_case_name: str) -> list[dict[s
                 "quality_report": str(quality_path) if quality_path.is_file() else "",
                 "package_path": str(package_root),
                 "active_in_case": str(mesh_stage.get("active_package") or "") == str(package_name),
+                "same_work_case": str(case.get("folder") or "") == str(active_case_name),
+                "result_load_allowed": compatible and str(case.get("folder") or "") == str(active_case_name),
             })
     return sorted(rows, key=lambda item: (not bool(item["compatible"]), str(item.get("case_name")), str(item.get("package_name"))))
 
@@ -2056,6 +2175,10 @@ class JobManager:
         _write_execution_json_atomic(Path(job.status_path), asdict(job))
 
     def start(self, stage: str, command: list[str]) -> Job:
+        # Streamlit actions frequently pass Path objects for project files.
+        # Popen accepts path-like values, but the persisted Job schema must be
+        # JSON-safe and the displayed command must be deterministic.
+        command = [str(value) for value in command]
         active = [
             job
             for job in self.list_jobs(limit=20)
@@ -2494,6 +2617,25 @@ def _write_checkmesh_paraview_script(
     convert = _wsl_windows_path if windows_paths else lambda path: str(path.resolve())
     foam_value = convert(foam_marker) if foam_marker is not None else None
     vtk_values = [convert(path) for path in vtk_files]
+    quality_names: list[str] = []
+    quality_tokens = {
+        "interpolation": "FAIL_low_face_interpolation_weight",
+        "volumeratio": "FAIL_low_cell_volume_ratio",
+        "volume_ratio": "FAIL_low_cell_volume_ratio",
+        "skew": "FAIL_high_skewness",
+        "nonorth": "FAIL_high_non_orthogonality",
+        "non_orth": "FAIL_high_non_orthogonality",
+        "determinant": "FAIL_low_cell_determinant",
+        "shortedge": "INFO_short_edges",
+        "facearea": "FAIL_face_area_ratio",
+    }
+    for index, path in enumerate(vtk_files, start=1):
+        compact = re.sub(r"[^a-z0-9]+", "", path.stem.lower())
+        label = next(
+            (value for token, value in quality_tokens.items() if token.replace("_", "") in compact),
+            f"QUALITY_SET_{index}_{re.sub(r'[^A-Za-z0-9]+', '_', path.stem).strip('_')}",
+        )
+        quality_names.append(label)
     ignored_focus_tokens = ("shortedge", "twointernalfaces", "underdetermined")
     focus_indices = [
         index
@@ -2522,6 +2664,7 @@ view.CameraParallelProjection = 1
 
 foam_path = {repr(foam_value)}
 vtk_paths = {json.dumps(vtk_values)}
+quality_names = {json.dumps(quality_names)}
 focus_indices = {json.dumps(focus_indices)}
 palette = {json.dumps(palette)}
 base = None
@@ -2529,6 +2672,7 @@ base_display = None
 
 if foam_path:
     base = OpenDataFile(foam_path)
+    RenameSource("BASE_MESH_context", base)
     try:
         base.MeshRegions = ["internalMesh"]
     except Exception:
@@ -2550,6 +2694,7 @@ problem_highlights = []
 focus_bounds = []
 for index, vtk_path in enumerate(vtk_paths):
     source = OpenDataFile(vtk_path)
+    RenameSource(quality_names[index], source)
     source.UpdatePipeline()
     display = Show(source, view)
     display.Representation = "Surface With Edges"
@@ -2571,8 +2716,10 @@ for index, vtk_path in enumerate(vtk_paths):
         focus_bounds.append(bounds)
         try:
             edges = ExtractEdges(Input=source)
+            RenameSource(quality_names[index] + "__edges", edges)
             edges.UpdatePipeline()
             tube = Tube(Input=edges)
+            RenameSource(quality_names[index] + "__highlight", tube)
             diagonal = max(
                 ((bounds[1] - bounds[0]) ** 2 + (bounds[3] - bounds[2]) ** 2 + (bounds[5] - bounds[4]) ** 2) ** 0.5,
                 1.0e-6,
@@ -3019,16 +3166,29 @@ def open_validation_mesh_viewer(
     return request
 
 
-def open_checkmesh_problem_viewer(project_root: Path, variant: str) -> int:
-    """Open the converted mesh and exact checkMesh VTK problem sets in ParaView."""
-    mesh_root = project_root / "CFD_2D/meshes" / variant
+def open_checkmesh_problem_viewer(project_root: Path, variant: str | Path) -> int:
+    """Open a converted mesh and its exact checkMesh VTK problem sets."""
+    candidate = Path(variant)
+    mesh_root = (
+        candidate.resolve()
+        if candidate.is_absolute() or candidate.is_dir()
+        else project_root / "CFD_2D/meshes" / str(variant)
+    )
     problem_dir = mesh_root / "checkMesh_problem_locations"
     vtk_files = sorted(problem_dir.glob("*.vtk")) if problem_dir.is_dir() else []
+    # Experimental meshes retain the exact sets next to log.checkMesh because
+    # their temporary OpenFOAM conversion case is intentionally removed.
+    vtk_files.extend(path for path in sorted(mesh_root.glob("*.vtk")) if path not in vtk_files)
     if not vtk_files:
-        raise FileNotFoundError(f"No checkMesh problem VTK files were found under {problem_dir}")
+        raise FileNotFoundError(f"No checkMesh problem VTK files were found under {mesh_root}")
     foam_marker: Path | None = None
-    if (mesh_root / "constant/polyMesh/boundary").is_file():
-        foam_marker = mesh_root / "checkMesh_quality.foam"
+    foam_case = mesh_root
+    if not (foam_case / "constant/polyMesh/boundary").is_file():
+        experimental_case = mesh_root / "openfoam_mesh_check_case"
+        if (experimental_case / "constant/polyMesh/boundary").is_file():
+            foam_case = experimental_case
+    if (foam_case / "constant/polyMesh/boundary").is_file():
+        foam_marker = foam_case / "checkMesh_quality.foam"
         foam_marker.touch(exist_ok=True)
 
     requested = os.environ.get("RAMAIR_PARAVIEW_EXECUTABLE")

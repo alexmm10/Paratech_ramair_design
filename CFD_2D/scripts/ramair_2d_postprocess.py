@@ -280,17 +280,32 @@ def readable_axis_limits(values: pd.Series) -> tuple[float, float]:
     return lower - pad, upper + pad
 
 
-def plot_force_coeffs(win: pd.DataFrame, mean: pd.DataFrame, output: Path) -> None:
+def plot_force_coeffs(
+    history: pd.DataFrame,
+    mean: pd.DataFrame,
+    output: Path,
+    *,
+    average_window: pd.DataFrame | None = None,
+    x_label: str = r"Physical time, $t$ [s]",
+    title: str = "Aerodynamic coefficients: complete history and averaging window",
+) -> None:
     try:
         import matplotlib.pyplot as plt
-        if not win.empty:
-            columns = [name for name in ("Cl", "Cd", "Cm") if name in win.columns]
+        if not history.empty:
+            columns = [name for name in ("Cl", "Cd", "Cm") if name in history.columns]
             if not columns:
                 return
             fig, axes = plt.subplots(len(columns), 1, figsize=(9, 2.6 * len(columns)), sharex=True)
             axes = np.atleast_1d(axes)
             for ax, c in zip(axes, columns):
-                history_line, = ax.plot(win["Time"], win[c], label=c, linewidth=1.15)
+                history_line, = ax.plot(history["Time"], history[c], label=c, linewidth=1.15)
+                if average_window is not None and not average_window.empty:
+                    ax.axvspan(
+                        float(average_window["Time"].min()),
+                        float(average_window["Time"].max()),
+                        color=history_line.get_color(), alpha=0.12,
+                        label="averaging interval",
+                    )
                 if c in mean.columns:
                     m = float(mean[c].iloc[0])
                     if np.isfinite(m):
@@ -302,16 +317,16 @@ def plot_force_coeffs(win: pd.DataFrame, mean: pd.DataFrame, output: Path) -> No
                             alpha=0.75,
                             label=f"{c} mean={m:.5g}",
                         )
-                ax.set_ylim(*readable_axis_limits(win[c]))
+                ax.set_ylim(*readable_axis_limits(history[c]))
                 ax.set_ylabel(c)
                 ax.grid(True, linewidth=0.3)
                 ax.legend(fontsize=8, loc="best")
-            axes[-1].set_xlabel(r"Physical time, $t$ [s]")
-            axes[0].set_title("Aerodynamic coefficients: selected final window")
+            axes[-1].set_xlabel(x_label)
+            axes[0].set_title(title)
             fig.tight_layout()
             save_scientific_figure(
-                fig, output, data=win,
-                metadata={"source": "OpenFOAM forceCoeffs", "filters": ["selected averaging window"]},
+                fig, output, data=history,
+                metadata={"source": "OpenFOAM forceCoeffs", "overlay": "selected averaging window"},
             )
     except Exception as exc:
         raise RuntimeError(f"Could not plot force coefficients to {output}: {exc}") from exc
@@ -364,7 +379,7 @@ def write_aerodynamic_efficiency_products(
         )
         ax.set_xlabel(x_label)
         ax.set_ylabel(r"$C_L/C_D$ [-]")
-        ax.set_ylim(0.0, 100.0)
+        ax.set_ylim(0.0, 75.0)
         ax.set_title(title)
         ax.grid(True, linewidth=0.3, alpha=0.6)
         ax.legend(fontsize=8)
@@ -479,13 +494,29 @@ def plot_courant(
         ax.grid(True, linewidth=0.3)
         ax.set_xlabel(r"Physical time, $t$ [s]")
         ax.set_ylabel("Courant number, Co [-]")
+        dt = _delta_t_table(df)
+        dt_axis = ax.twinx()
+        if not dt.empty:
+            dt_axis.plot(
+                dt["Time"], dt["deltaT"], color="#7b3294", linewidth=1.0,
+                alpha=0.82, label=r"$\Delta t$",
+            )
+        if maximum_delta_t_s is not None and math.isfinite(maximum_delta_t_s) and maximum_delta_t_s > 0.0:
+            dt_axis.axhline(
+                maximum_delta_t_s, color="#b22222", linestyle="--", linewidth=0.9,
+                label=f"maxDeltaT={maximum_delta_t_s:.4g} s",
+            )
+        dt_axis.set_ylabel(r"Time step, $\Delta t$ [s]")
+        if not dt.empty and (dt["deltaT"] > 0.0).all():
+            dt_axis.set_yscale("log")
         handles, labels = ax.get_legend_handles_labels()
-        ax.legend(handles, labels, fontsize=8)
-        ax.set_title("Courant number history")
+        dt_handles, dt_labels = dt_axis.get_legend_handles_labels()
+        ax.legend(handles + dt_handles, labels + dt_labels, fontsize=8, loc="best")
+        ax.set_title("Courant number and adaptive time-step history")
         fig.tight_layout()
         save_scientific_figure(
             fig, out, data=df,
-            metadata={"source": "OpenFOAM solver log", "transformation": "Courant history; deltaT is exported in a separate panel"},
+            metadata={"source": "OpenFOAM solver log", "transformation": "Courant and deltaT share the physical-time axis; separate y axes"},
         )
     except Exception as exc:
         raise RuntimeError(f"Could not plot Courant history to {out}: {exc}") from exc
@@ -523,6 +554,26 @@ def run_optional_command_variants(command_variants: list[list[str]], cwd: Path, 
     return {"status": "FAIL", "attempts": attempts, "reason": "all_command_variants_failed_or_missing"}
 
 
+POSTPROCESS_VOLUME_FIELDS = (
+    "U", "p", "Cp", "nuTilda", "nut", "Co", "yPlus",
+    "wallShearStress", "vorticity", "Q", "UMean", "pMean",
+    "nuTildaMean", "UPrime2Mean", "pPrime2Mean",
+)
+
+
+def available_postprocess_fields(case_dir: Path) -> list[str]:
+    """Return only relevant fields that exist at the latest written state."""
+    positive = [(value, path) for value, path in numeric_time_dirs(case_dir) if value > 0.0]
+    if not positive:
+        return []
+    latest = positive[-1][1]
+    return [
+        field
+        for field in POSTPROCESS_VOLUME_FIELDS
+        if (latest / field).is_file() or (latest / f"{field}.gz").is_file()
+    ]
+
+
 def reconstruct_pending_parallel_times(
     *,
     case_dir: Path,
@@ -542,6 +593,9 @@ def reconstruct_pending_parallel_times(
     logs_dir = out_dir / "openfoam_postprocess_logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
     command = ["reconstructPar"] if all_times else ["reconstructPar", "-latestTime"]
+    fields = available_postprocess_fields(processor_dirs[0])
+    if fields:
+        command += ["-fields", f"({' '.join(fields)})"]
     return run_optional_command(command, case_dir, logs_dir / "log.reconstructPar_postprocess", timeout_s)
 
 
@@ -549,9 +603,13 @@ def derived_field_inventory(
     case_dir: Path,
     out_dir: Path,
     *,
-    simulation_mode: str = "URANS",
+    simulation_mode: str = "AUTO",
 ) -> dict[str, Any]:
-    requested = ["U", "p", "Cp", "nuTilda", "nut", "yPlus", "wallShearStress", "vorticity"]
+    requested = [
+        "U", "p", "Cp", "nuTilda", "nut", "yPlus", "wallShearStress",
+        "vorticity", "Q", "UMean", "pMean", "nuTildaMean",
+        "UPrime2Mean", "pPrime2Mean",
+    ]
     if str(simulation_mode).upper() == "URANS":
         requested.insert(3, "Co")
     rows: list[dict[str, Any]] = []
@@ -603,21 +661,81 @@ def latest_steady_archive(case_dir: Path) -> Path | None:
     return max(candidates, key=lambda path: path.stat().st_mtime) if candidates else None
 
 
+def detect_simulation_mode(case_dir: Path, requested_mode: str) -> tuple[str, dict[str, Any]]:
+    """Resolve iteration-count RANS versus physical-time URANS evidence.
+
+    Validation post-processing used to default to URANS, which could label a
+    timed-out SIMPLE history as physical time. Explicit RANS/URANS requests are
+    preserved; AUTO requires actual transient evidence.
+    """
+    requested = str(requested_mode or "AUTO").strip().upper()
+    if requested in {"RANS", "URANS"}:
+        return requested, {"requested": requested, "reason": "explicit"}
+    positive_times = [value for value, _ in numeric_time_dirs(case_dir) if value > 0.0]
+    staged = read_json(case_dir / "staged_run_status.json", {}) or {}
+    fv_schemes = ""
+    schemes_path = case_dir / "system" / "fvSchemes"
+    if schemes_path.is_file():
+        fv_schemes = schemes_path.read_text(encoding="utf-8", errors="replace")
+    transient_scheme = bool(re.search(
+        r"ddtSchemes\s*\{[^}]*default\s+(?:backward|CrankNicolson|Euler)",
+        fv_schemes,
+        flags=re.IGNORECASE | re.DOTALL,
+    ))
+    staged_transient_evidence = bool(
+        staged.get("transient_phases")
+        or staged.get("transient_runner_returncode") is not None
+        or str(staged.get("status") or "").upper().startswith("TRANSIENT_STAGE_")
+    )
+    transfer_evidence = bool(
+        staged.get("transient_time_origin")
+        or staged.get("steady_to_transient_continuity")
+        or (staged.get("steady_transfer") or {}).get("transferred_to_transient_zero")
+    )
+    physical_time_evidence = bool(positive_times) and (
+        transfer_evidence
+        or staged_transient_evidence
+        or (transient_scheme and max(positive_times) < 10.0)
+    )
+    mode = "URANS" if physical_time_evidence else "RANS"
+    return mode, {
+        "requested": requested,
+        "resolved": mode,
+        "positive_time_count": len(positive_times),
+        "latest_positive_time": max(positive_times) if positive_times else None,
+        "transient_scheme": transient_scheme,
+        "transfer_evidence": transfer_evidence,
+        "staged_transient_evidence": staged_transient_evidence,
+        "reason": "physical_time_evidence" if physical_time_evidence else "no_physical_time_evidence",
+    }
+
+
 def prepare_steady_stage_results(
     case_dir: Path,
     out_dir: Path,
     *,
+    project_root: Path,
+    variant: str,
+    run_openfoam_tools: bool,
+    wall_profile_analysis: bool,
+    velocity_profile_stations: list[float],
+    velocity_profile_sample_points: int,
+    simulation_mode: str,
     automatic_paraview_products: bool,
+    include_paraview_animations: bool,
     paraview_maximum_frames: int,
     timeout_s: int,
     field_scale_mode: str,
     robust_percentiles: tuple[float, float],
     manual_scales: dict[str, tuple[float, float]],
+    average_tail_samples: int,
 ) -> dict[str, Any]:
     """Expose the latest SIMPLE stage separately from physical URANS time."""
     stage_dir = out_dir / "RANS"
     stage_dir.mkdir(parents=True, exist_ok=True)
     archive = latest_steady_archive(case_dir)
+    if archive is None and str(simulation_mode).upper() == "RANS":
+        archive = case_dir
     if archive is None:
         report = {"status": "NOT_AVAILABLE", "reason": "steady_archive_missing"}
         (stage_dir / "stage_summary.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
@@ -634,7 +752,84 @@ def prepare_steady_stage_results(
             target = stage_dir / name
             shutil.copy2(source, target)
             copied.append(str(target))
-    paraview_case = archive / "paraview_case"
+    records, force_sources = read_force_coefficient_history(archive, include_processor0=True)
+    force_summary: dict[str, Any] = {"status": "NOT_AVAILABLE"}
+    if records:
+        force_history = pd.DataFrame(records).drop_duplicates(subset=["Time"], keep="last")
+        force_history = force_history.sort_values("Time").reset_index(drop=True)
+        tail_count = min(max(1, int(average_tail_samples)), len(force_history))
+        force_window = force_history.tail(tail_count).copy()
+        columns = [name for name in ("Cl", "Cd", "Cm") if name in force_window.columns]
+        mean = force_window[columns].mean().to_frame("mean").T
+        std = force_window[columns].std().to_frame("std").T
+        if "Cl" in mean and "Cd" in mean:
+            mean["L_D"] = mean["Cl"] / mean["Cd"].replace(0, np.nan)
+        force_history.to_csv(stage_dir / "forceCoeffs_RANS_full_history.csv", index=False)
+        force_window.to_csv(stage_dir / "forceCoeffs_RANS_averaging_window.csv", index=False)
+        mean.to_csv(stage_dir / "forceCoeffs_RANS_mean.csv", index=False)
+        std.to_csv(stage_dir / "forceCoeffs_RANS_std.csv", index=False)
+        plot_force_coeffs(
+            force_history,
+            mean,
+            stage_dir / "forceCoeffs_RANS_history.png",
+            average_window=force_window,
+            x_label="SIMPLE iteration",
+            title="RANS coefficients: complete iteration history and final averaging window",
+        )
+        force_summary = {
+            "status": "AVAILABLE",
+            "time_semantics": "SIMPLE iteration counter; not physical seconds",
+            "history_samples": int(len(force_history)),
+            "averaging_tail_samples_requested": int(average_tail_samples),
+            "averaging_tail_samples_used": int(tail_count),
+            "averaging_start_iteration": float(force_window["Time"].min()),
+            "averaging_end_iteration": float(force_window["Time"].max()),
+            "mean": json_safe(mean.iloc[0].to_dict()),
+            "std": json_safe(std.iloc[0].to_dict()),
+            "source_files": [str(path) for path in force_sources],
+        }
+        (stage_dir / "RANS_force_summary.json").write_text(
+            json.dumps(force_summary, indent=2) + "\n", encoding="utf-8"
+        )
+    paraview_case = (
+        archive / "paraview_case"
+        if (archive / "paraview_case" / "system" / "controlDict").is_file()
+        else archive
+    )
+    rans_field_exports: dict[str, Any] = {"status": "DISABLED"}
+    rans_wall_analysis: dict[str, Any] = {"status": "DISABLED"}
+    if paraview_case.is_dir() and (run_openfoam_tools or wall_profile_analysis):
+        if run_openfoam_tools:
+            rans_field_exports = run_openfoam_post_exports(
+                paraview_case,
+                stage_dir,
+                export_vtk=False,
+                run_openfoam_postprocess=True,
+                timeout_s=timeout_s,
+                export_vtk_all_times=False,
+                simulation_mode="RANS",
+            )
+        if wall_profile_analysis:
+            try:
+                rans_inputs = read_json(paraview_case / "case_input_summary.json", {}) or {}
+                rans_wall_analysis = analyze_wall_boundary_layer(
+                    project_root=project_root,
+                    case_dir=paraview_case,
+                    output_dir=stage_dir,
+                    variant=variant,
+                    run_openfoam_tools=run_openfoam_tools,
+                    timeout_s=timeout_s,
+                    stations_xc=velocity_profile_stations,
+                    sample_points=velocity_profile_sample_points,
+                    solver_module=str(rans_inputs.get("solver_module", "incompressibleFluid")),
+                    simulation_mode="RANS",
+                    include_temporal_separation_history=False,
+                )
+            except Exception as exc:
+                rans_wall_analysis = {
+                    "status": "ERROR",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
     automatic = (
         generate_automatic_paraview_products(
             paraview_case,
@@ -646,6 +841,7 @@ def prepare_steady_stage_results(
             field_scale_mode=field_scale_mode,
             robust_percentiles=robust_percentiles,
             manual_scales=manual_scales,
+            include_animations=include_paraview_animations,
         )
         if automatic_paraview_products and (paraview_case / "system" / "controlDict").is_file()
         else {
@@ -661,12 +857,15 @@ def prepare_steady_stage_results(
         "paraview_case": str(paraview_case) if paraview_case.is_dir() else None,
         "copied_products": copied,
         "automatic_paraview_products": automatic,
+        "openfoam_field_exports": rans_field_exports,
+        "wall_boundary_layer_analysis": rans_wall_analysis,
+        "force_summary": force_summary,
     }
     (stage_dir / "stage_summary.json").write_text(json.dumps(json_safe(report), indent=2) + "\n", encoding="utf-8")
     return report
 
 
-def mirror_urans_stage_results(out_dir: Path) -> dict[str, Any]:
+def mirror_urans_stage_results(out_dir: Path, case_dir: Path) -> dict[str, Any]:
     """Provide an explicit URANS view while preserving legacy root outputs."""
     stage_dir = out_dir / "URANS"
     stage_dir.mkdir(parents=True, exist_ok=True)
@@ -684,7 +883,6 @@ def mirror_urans_stage_results(out_dir: Path) -> dict[str, Any]:
         "courant_history.csv",
         "courant_history.png",
         "deltaT_history.csv",
-        "deltaT_history.png",
         "postprocess_window_manifest.json",
         "scalar_signal_inventory.json",
         "available_time_directories.csv",
@@ -705,8 +903,6 @@ def mirror_urans_stage_results(out_dir: Path) -> dict[str, Any]:
         "separation_events.csv",
         "separation_overlay_cp_cf.png",
         "separation_summary.md",
-        "separation_time_history.csv",
-        "separation_time_history.png",
     ):
         source = out_dir / name
         if source.is_file() and source.stat().st_size <= 25 * 1024 * 1024:
@@ -717,6 +913,7 @@ def mirror_urans_stage_results(out_dir: Path) -> dict[str, Any]:
         "status": "AVAILABLE" if copied else "NOT_AVAILABLE",
         "stage": "URANS/PIMPLE",
         "time_semantics": "physical seconds",
+        "paraview_case": str(case_dir),
         "copied_products": copied,
         "compatibility_note": "Root result files are retained for existing workflows.",
     }
@@ -731,7 +928,7 @@ def run_openfoam_post_exports(
     run_openfoam_postprocess: bool,
     timeout_s: int,
     export_vtk_all_times: bool = False,
-    simulation_mode: str = "URANS",
+    simulation_mode: str = "AUTO",
 ) -> list[dict[str, Any]]:
     logs_dir = out_dir / "openfoam_postprocess_logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
@@ -739,14 +936,41 @@ def run_openfoam_post_exports(
     latest_times = [t for t, _ in numeric_time_dirs(case_dir) if t > 0]
     if not latest_times:
         return [{"status": "SKIPPED", "reason": "no_positive_time_directories"}]
+    latest_time, latest_dir = [
+        item for item in numeric_time_dirs(case_dir) if item[0] > 0
+    ][-1]
+
+    def field_path(name: str) -> Path | None:
+        for candidate in (latest_dir / name, latest_dir / f"{name}.gz"):
+            if candidate.is_file() and candidate.stat().st_size > 0:
+                return candidate
+        return None
+
+    primary_mtime = max(
+        (path.stat().st_mtime for path in (field_path("U"), field_path("p")) if path),
+        default=0.0,
+    )
     if run_openfoam_postprocess:
         # Cp is written by the case's pressure function object. OpenFOAM
         # Foundation 14 does not register a `pressureCoefficient` shortcut for
         # `foamPostProcess -func`, so invoking it here creates a false failure.
-        functions = ["yPlus", "wallShearStress", "vorticity"]
+        functions = ["yPlus", "wallShearStress", "vorticity", "Q"]
         if str(simulation_mode).upper() == "URANS":
             functions.insert(0, "CourantNo")
+        result_fields = {"CourantNo": "Co"}
         for func in functions:
+            result_field = result_fields.get(func, func)
+            existing = field_path(result_field)
+            if existing is not None and existing.stat().st_mtime + 1.0 >= primary_mtime:
+                results.append({
+                    "status": "SKIPPED",
+                    "reason": "latest_field_already_current",
+                    "function": func,
+                    "field": result_field,
+                    "time": float(latest_time),
+                    "path": str(existing),
+                })
+                continue
             time_args = [] if export_vtk_all_times else ["-latestTime"]
             results.append(run_optional_command_variants([
                 ["foamPostProcess", "-solver", "incompressibleFluid", "-func", func, *time_args],
@@ -756,6 +980,9 @@ def run_openfoam_post_exports(
             ], case_dir, logs_dir / f"log.postProcess_{func}", timeout_s))
     if export_vtk:
         vtk_cmd = ["foamToVTK"] if export_vtk_all_times else ["foamToVTK", "-latestTime"]
+        selected_fields = available_postprocess_fields(case_dir)
+        if selected_fields:
+            vtk_cmd += ["-fields", f"({' '.join(selected_fields)})"]
         results.append(run_optional_command(vtk_cmd, case_dir, logs_dir / "log.foamToVTK", timeout_s))
     return results
 
@@ -805,6 +1032,7 @@ def write_visualization_guide(case_dir: Path, out_dir: Path, export_results: lis
         "postProcess -func yPlus -latestTime",
         "postProcess -func wallShearStress -latestTime",
         "postProcess -func vorticity -latestTime",
+        "postProcess -func Q -latestTime",
         "postProcess -func CourantNo -latestTime",
         "foamToVTK -latestTime",
         "foamToVTK        # exports all written time directories; can consume much more disk space",
@@ -816,6 +1044,7 @@ def write_visualization_guide(case_dir: Path, out_dir: Path, export_results: lis
         "- yPlus: whether near-wall resolution matches the turbulence-wall treatment.",
         "- wallShearStress: wall load/shear consistency and separation clues.",
         "- vorticity magnitude: shear layers, wake roll-up and recirculation structures.",
+        "- Q: rotation-dominated structures (Q>0) and strain-dominated regions (Q<0).",
         "- Co: cell Courant field at each normal URANS field-write time; inspect its maxima to locate the cells limiting deltaT.",
         "- forceCoeffs: Cl/Cd/Cm history and whether the values settle.",
         "- residuals: initial residual decay/plateau for U, p and nuTilda.",
@@ -853,14 +1082,20 @@ def postprocess(
     velocity_profile_stations: list[float] | None = None,
     velocity_profile_sample_points: int = 40,
     automatic_paraview_products: bool = False,
+    include_paraview_animations: bool = True,
+    paraview_animations_only: bool = False,
     paraview_maximum_frames: int = 24,
     field_scale_mode: str = "exact",
     robust_percentiles: tuple[float, float] = (1.0, 99.0),
     manual_scales: dict[str, tuple[float, float]] | None = None,
+    paraview_time_range_s: tuple[float, float] | None = None,
     direct_case_dir: Path | None = None,
     direct_output_dir: Path | None = None,
     simulation_mode: str = "URANS",
+    rans_average_tail_samples: int = 500,
 ) -> Path:
+    postprocess_started = time.monotonic()
+    stage_timings: dict[str, float] = {}
     case_root = project_root_from_case_root(case_root).resolve()
     manual_scales = dict(manual_scales or {})
     safe = f"alpha_{alpha:+.3f}".replace("+", "p").replace("-", "m").replace(".", "p")
@@ -875,7 +1110,75 @@ def postprocess(
         else cfd_root(case_root) / "results" / variant / safe
     )
     out_dir.mkdir(parents=True, exist_ok=True)
+    for obsolete_name in (
+        "deltaT_history.png",
+        "separation_time_history.png",
+        "separation_time_history.csv",
+        "reverse_flow_occupancy.png",
+        "reverse_flow_occupancy.csv",
+    ):
+        for obsolete in out_dir.rglob(obsolete_name):
+            obsolete.unlink(missing_ok=True)
     ensure_ross_placeholders(case_root)
+    requested_simulation_mode = simulation_mode
+    simulation_mode, simulation_mode_evidence = detect_simulation_mode(
+        case_dir, requested_simulation_mode
+    )
+    if paraview_animations_only:
+        if not case_dir.exists():
+            raise FileNotFoundError(f"OpenFOAM case not found: {case_dir}")
+        animation_reports: dict[str, Any] = {}
+        archive = latest_steady_archive(case_dir)
+        if archive is not None:
+            rans_case = (
+                archive / "paraview_case"
+                if (archive / "paraview_case" / "system" / "controlDict").is_file()
+                else archive
+            )
+            if (rans_case / "system" / "controlDict").is_file():
+                animation_reports["RANS"] = generate_automatic_paraview_products(
+                    rans_case,
+                    out_dir / "RANS" / "ParaView",
+                    maximum_frames=max(2, int(paraview_maximum_frames)),
+                    timeout_s=max(30, int(openfoam_postprocess_timeout_s)),
+                    time_semantics="SIMPLE iteration counter; not physical seconds",
+                    stage_label="RANS",
+                    field_scale_mode=field_scale_mode,
+                    robust_percentiles=robust_percentiles,
+                    manual_scales=manual_scales,
+                    include_animations=True,
+                )
+        if str(simulation_mode).upper() == "URANS":
+            animation_reports["URANS"] = generate_automatic_paraview_products(
+                case_dir,
+                out_dir / "URANS" / "ParaView",
+                maximum_frames=max(2, int(paraview_maximum_frames)),
+                timeout_s=max(30, int(openfoam_postprocess_timeout_s)),
+                time_semantics="physical seconds",
+                stage_label="URANS",
+                field_scale_mode=field_scale_mode,
+                robust_percentiles=robust_percentiles,
+                manual_scales=manual_scales,
+                time_range_s=paraview_time_range_s,
+                include_animations=True,
+            )
+        report = {
+            "schema_version": 1,
+            "status": "COMPLETED",
+            "simulation_mode": simulation_mode,
+            "simulation_mode_evidence": simulation_mode_evidence,
+            "scope": "animations_only",
+            "field_policy": (
+                "OpenFOAMReader reads existing U/p/Cp/vorticity/Q fields directly; "
+                "no VTK database or unrelated final diagnostics are reconstructed."
+            ),
+            "stages": animation_reports,
+            "elapsed_s": time.monotonic() - postprocess_started,
+        }
+        (out_dir / "animation_postprocess_report.json").write_text(
+            json.dumps(report, indent=2) + "\n", encoding="utf-8"
+        )
+        return out_dir
     if not case_dir.exists():
         summary = {
             "variant": variant,
@@ -886,12 +1189,14 @@ def postprocess(
         }
     else:
         case_inputs = read_json(case_dir / "case_input_summary.json", {}) or {}
+        stage_started = time.monotonic()
         reconstruction = reconstruct_pending_parallel_times(
             case_dir=case_dir,
             out_dir=out_dir,
             all_times=export_vtk_all_times,
             timeout_s=max(30, int(openfoam_postprocess_timeout_s)),
         )
+        stage_timings["parallel_reconstruction_s"] = time.monotonic() - stage_started
         times = numeric_time_dirs(case_dir)
         positive_times = [float(value) for value, _ in times if float(value) > 0.0]
         temporal_animation = {
@@ -926,11 +1231,8 @@ def postprocess(
                 out_dir / "courant_history.png",
                 maximum_delta_t_s=maximum_delta_t_s,
             )
-            plot_delta_t(
-                courant,
-                out_dir / "deltaT_history.png",
-                maximum_delta_t_s=maximum_delta_t_s,
-            )
+            (out_dir / "deltaT_history.png").unlink(missing_ok=True)
+        stage_started = time.monotonic()
         export_results = run_openfoam_post_exports(
             case_dir,
             out_dir,
@@ -940,8 +1242,10 @@ def postprocess(
             export_vtk_all_times=export_vtk_all_times,
             simulation_mode=simulation_mode,
         )
+        stage_timings["openfoam_field_exports_s"] = time.monotonic() - stage_started
         wall_analysis: dict[str, Any] = {"status": "DISABLED"}
         if wall_profile_analysis:
+            stage_started = time.monotonic()
             try:
                 wall_analysis = analyze_wall_boundary_layer(
                     project_root=case_root,
@@ -954,9 +1258,11 @@ def postprocess(
                     sample_points=max(10, int(velocity_profile_sample_points)),
                     solver_module=str(case_inputs.get("solver_module", "incompressibleFluid")),
                     simulation_mode=simulation_mode,
+                    include_temporal_separation_history=False,
                 )
             except Exception as exc:
                 wall_analysis = {"status": "ERROR", "error": f"{type(exc).__name__}: {exc}"}
+            stage_timings["wall_profile_analysis_s"] = time.monotonic() - stage_started
         field_inventory = derived_field_inventory(
             case_dir,
             out_dir,
@@ -980,16 +1286,30 @@ def postprocess(
         # discover every written time without duplicating data.
         paraview_marker = case_dir / f"{case_dir.name}.foam"
         paraview_marker.touch(exist_ok=True)
+        stage_started = time.monotonic()
         rans_stage = prepare_steady_stage_results(
             case_dir,
             out_dir,
+            project_root=case_root,
+            variant=variant,
+            run_openfoam_tools=run_openfoam_postprocess,
+            wall_profile_analysis=wall_profile_analysis,
+            velocity_profile_stations=list(
+                velocity_profile_stations or [0.1, 0.3, 0.6, 0.9]
+            ),
+            velocity_profile_sample_points=max(10, int(velocity_profile_sample_points)),
+            simulation_mode=simulation_mode,
             automatic_paraview_products=automatic_paraview_products,
+            include_paraview_animations=include_paraview_animations,
             paraview_maximum_frames=max(2, int(paraview_maximum_frames)),
             timeout_s=max(30, int(openfoam_postprocess_timeout_s)),
             field_scale_mode=field_scale_mode,
             robust_percentiles=robust_percentiles,
             manual_scales=manual_scales,
+            average_tail_samples=max(1, int(rans_average_tail_samples)),
         )
+        stage_timings["rans_products_s"] = time.monotonic() - stage_started
+        stage_started = time.monotonic()
         automatic_products = (
             generate_automatic_paraview_products(
                 case_dir,
@@ -1001,11 +1321,14 @@ def postprocess(
                 field_scale_mode=field_scale_mode,
                 robust_percentiles=robust_percentiles,
                 manual_scales=manual_scales,
+                time_range_s=paraview_time_range_s,
+                include_animations=include_paraview_animations,
             )
             if automatic_paraview_products
             and str(simulation_mode).upper() == "URANS"
             else {"status": "DISABLED", "reason": "automatic_products_not_requested"}
         )
+        stage_timings["urans_paraview_products_s"] = time.monotonic() - stage_started
         open_requests: list[dict[str, Any]] = []
         if open_results_folder:
             open_requests.append(launch_path(out_dir))
@@ -1023,7 +1346,12 @@ def postprocess(
             (out_dir / "postprocess_window_manifest.json").write_text(
                 json.dumps(window_manifest, indent=2) + "\n", encoding="utf-8"
             )
-            plot_force_coeffs(win, mean, out_dir / "Cl_Cd_Cm_history.png")
+            plot_force_coeffs(
+                df,
+                mean,
+                out_dir / "Cl_Cd_Cm_history.png",
+                average_window=win,
+            )
             aerodynamic_efficiency = write_aerodynamic_efficiency_products(
                 win,
                 out_dir / "aerodynamic_efficiency.csv",
@@ -1142,21 +1470,35 @@ def postprocess(
                 "case_dir": str(case_dir),
                 "error": str(exc),
             }
-    urans_stage = mirror_urans_stage_results(out_dir) if (
-        case_dir.exists() and str(simulation_mode).upper() == "URANS"
-    ) else {
-        "status": "NOT_AVAILABLE",
-        "reason": (
-            "openfoam_case_missing"
-            if not case_dir.exists()
-            else "NOT_APPLICABLE_TO_RANS"
-        ),
-    }
+    if case_dir.exists() and str(simulation_mode).upper() == "URANS":
+        urans_stage = mirror_urans_stage_results(out_dir, case_dir)
+    else:
+        urans_stage = {
+            "status": "NOT_AVAILABLE",
+            "reason": (
+                "openfoam_case_missing"
+                if not case_dir.exists()
+                else "NO_PHYSICAL_URANS_TIME_EVIDENCE"
+            ),
+            "time_semantics": "not available; SIMPLE iterations remain under RANS",
+        }
+        urans_dir = out_dir / "URANS"
+        urans_dir.mkdir(parents=True, exist_ok=True)
+        (urans_dir / "stage_summary.json").write_text(
+            json.dumps(urans_stage, indent=2) + "\n", encoding="utf-8"
+        )
     summary["stages"] = {
         "RANS": summary.get("rans_stage", {"status": "NOT_AVAILABLE"}),
         "URANS": urans_stage,
     }
+    summary["simulation_mode"] = simulation_mode
+    summary["simulation_mode_evidence"] = simulation_mode_evidence
     summary["validation_update_mode"] = "manual_selection_in_application"
+    stage_timings["total_postprocess_s"] = time.monotonic() - postprocess_started
+    summary["stage_timings_s"] = stage_timings
+    (out_dir / "postprocess_stage_timings.json").write_text(
+        json.dumps(json_safe(stage_timings), indent=2) + "\n", encoding="utf-8"
+    )
     summary_path = out_dir / "case_summary.json"
     summary_path.write_text(json.dumps(json_safe(summary), indent=2), encoding="utf-8")
     product_candidates = [
@@ -1216,7 +1558,7 @@ def postprocess(
         "- `postprocess_window_manifest.json`: automatic final continuous force window and its evidence.\n"
         "- `scalar_signal_inventory.json`: force, probe, residual and Courant sources retained outside volume-field purge.\n"
         "- `available_time_directories.csv`: written OpenFOAM time folders available for field inspection.\n"
-        "- `written_field_inventory.csv`: availability of U, p, Cp, Co, turbulence, yPlus, wallShearStress and vorticity at each saved time.\n"
+        "- `written_field_inventory.csv`: availability of U, p, Cp, Co, turbulence, yPlus, wallShearStress, vorticity and Q at each saved time.\n"
         "- `wall_yplus_vs_xc.csv/png`: first-cell wall y+ versus x/c, separated into upper/lower surfaces.\n"
         "- `wall_cp_vs_xc.csv/png`: OpenFOAM Cp on upper/lower wall faces versus x/c.\n"
         "- `wall_shear_stress_vs_xc.csv/png`: raw and filtered tangential wall shear ordered by face connectivity.\n"
@@ -1250,9 +1592,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--variant", required=True)
     p.add_argument("--alpha", type=float, required=True)
     p.add_argument("--average-from-fraction", type=float, default=0.6)
+    p.add_argument(
+        "--rans-average-tail-samples", type=int, default=500,
+        help="Final SIMPLE samples used for RANS means; the complete iteration history remains plotted.",
+    )
     p.add_argument("--export-vtk", action="store_true", help="Run foamToVTK -latestTime when OpenFOAM utilities are available.")
     p.add_argument("--export-vtk-all-times", action="store_true", help="With --export-vtk, export every written OpenFOAM time directory instead of latestTime only.")
-    p.add_argument("--run-openfoam-postprocess", action="store_true", help="Run postProcess CourantNo/yPlus/wallShearStress/vorticity -latestTime when available.")
+    p.add_argument("--run-openfoam-postprocess", action="store_true", help="Run postProcess CourantNo/yPlus/wallShearStress/vorticity/Q -latestTime when available.")
     p.add_argument("--openfoam-postprocess-timeout-s", type=int, default=300)
     p.add_argument("--open-results-folder", action="store_true", help="Open the results folder after post-processing when a GUI opener is available.")
     p.add_argument("--open-paraview", action="store_true", help="Launch paraFoam/paraview for the OpenFOAM case when available.")
@@ -1260,7 +1606,25 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--velocity-profile-stations", type=float, nargs="+", default=[0.1, 0.3, 0.6, 0.9], help="x/c stations sampled on upper and lower surfaces.")
     p.add_argument("--velocity-profile-sample-points", type=int, default=40)
     p.add_argument("--automatic-paraview-products", action="store_true", help="Render a Cp close-up plus bounded velocity and Cp animations with pvbatch.")
+    p.add_argument(
+        "--include-paraview-animations",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Include bounded frame sequences and videos; disable for the fast final-state post-process.",
+    )
+    p.add_argument(
+        "--paraview-animations-only",
+        action="store_true",
+        help="Skip scalar/final-field reconstruction and render only the bounded ParaView animations.",
+    )
     p.add_argument("--paraview-maximum-frames", type=int, default=24, help="Maximum number of written times rendered per automatic animation.")
+    p.add_argument(
+        "--paraview-time-range-s",
+        type=float,
+        nargs=2,
+        metavar=("START", "END"),
+        help="Optional physical-time interval rendered for URANS animations.",
+    )
     p.add_argument(
         "--field-scale-mode",
         choices=("exact", "robust", "manual"),
@@ -1275,6 +1639,10 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--manual-cp-range", type=float, nargs=2)
     p.add_argument("--manual-u-range", type=float, nargs=2)
+    p.add_argument(
+        "--simulation-mode", choices=("AUTO", "RANS", "URANS"), default="AUTO",
+        help="AUTO separates SIMPLE iteration histories from physical URANS time using case evidence.",
+    )
     return p.parse_args()
 
 
@@ -1295,7 +1663,13 @@ def main() -> None:
         velocity_profile_stations=args.velocity_profile_stations,
         velocity_profile_sample_points=args.velocity_profile_sample_points,
         automatic_paraview_products=args.automatic_paraview_products,
+        include_paraview_animations=args.include_paraview_animations,
+        paraview_animations_only=args.paraview_animations_only,
         paraview_maximum_frames=args.paraview_maximum_frames,
+        paraview_time_range_s=(
+            tuple(args.paraview_time_range_s)
+            if args.paraview_time_range_s is not None else None
+        ),
         field_scale_mode=args.field_scale_mode,
         robust_percentiles=tuple(args.robust_percentiles),
         manual_scales={
@@ -1308,6 +1682,8 @@ def main() -> None:
         },
         direct_case_dir=args.case_dir,
         direct_output_dir=args.output_dir,
+        rans_average_tail_samples=max(1, int(args.rans_average_tail_samples)),
+        simulation_mode=args.simulation_mode,
     )
     print(f"Post-processing outputs in: {out.resolve()}")
 

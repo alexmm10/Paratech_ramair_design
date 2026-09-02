@@ -1,8 +1,8 @@
 # RamAir Project Context for Codex
 
-Context version: 2026-08-20
+Context version: 2026-08-26
 Application backend API: 26
-Validation Lab schema: 11
+Validation Lab schema: 13
 Solver configuration schema: 15
 Work Case manifest schema: 3
 Active workspace schema: 4
@@ -14,6 +14,16 @@ Postprocess manifest schema: 3
 ParaView products manifest schema: 1
 Canonical Windows source: `C:\Users\alejm\Desktop\PRACTICAS_INVICSA\3D design\DESIGN APP`  
 Canonical WSL runtime: `/home/alejm/ramair_cfd/DESIGN_APP`
+
+Latest open experimental mesh revision: `beta75_c1_base_safe_v30`.
+It is independent from `beta75_continuous_v14_v12_geometry_smooth_farfield_try_refining`
+and passes OpenFOAM 14 `checkMesh`. The external inlet guide is built from the
+exact compatible portion of the uncut base profile with bounded C1 Hermite lip
+bridges, all represented by one Gmsh spline; automatic interface sizing uses
+measured wall/inlet tangential spacing, while fixed interface sizing remains
+an explicit alternative. The revision report records 75 boundary-layer layers
+and the actual first height, wall-centre distance, thickness and mesh-quality
+statistics.
 
 ## 1. Purpose
 
@@ -44,10 +54,26 @@ future work and must not be inferred from diagnostic placeholders.
 - `run_ramair_cfd2d_app.py`: official Windows-to-WSL application launcher.
 - `CFD_2D/app/ramair_cfd2d_app.py`: Streamlit shell.
 - `CFD_2D/app/workflow_backend.py`: API 26 orchestration boundary.
-- `CFD_2D/app/validation_convergence_page.py`: isolated Validation Lab UI.
+- `CFD_2D/app/validation_convergence_page.py`: Validation/Convergence shell.
+- `CFD_2D/app/ls1_validation_page.py`: independent LS(1)-0417 polar validation.
+- `CFD_2D/scripts/ramair_2d_ls1_validation_study.py`: idempotent migration and
+  registry creation for the standalone polar-validation study.
 
 The UI orchestrates. Geometry, meshing, solver and postprocess algorithms live
 under `CFD_2D/scripts`.
+
+The canonical LS(1)-0417 polar validation registry is
+`CFD_2D/validation_studies/ls1_0417_closed_polar_M0p15_Re1p9e6`. It references
+the canonical geometry, mesh, OpenFOAM cases and fields in place; only solver
+snapshots, accepted/ignored point tables and figures live in the study. It is
+independent of the selected Work Case. Its retired legacy container is kept
+under `Previous Versions/Retired Work Cases` for recovery only.
+
+Full Work Case restoration is snapshot-oriented: its active package set may be
+restored with explicit compatibility warnings after revision drift. Loading a
+single stale package remains prohibited. Geometry selectors list physical
+profiles only; coarse/fine/light identifiers are mesh revisions and must not
+appear as separate profile choices.
 
 All new runtime publications use the schema-1 lifecycle states `PREPARED`,
 `RUNNING`, `PAUSED_RECOVERABLE`, `FAILED`, `COMPLETED`, `REVIEW_REQUIRED`,
@@ -61,8 +87,20 @@ manifest directory. Force statistics use the final continuous history segment
 and record the exact selection in `postprocess_window_manifest.json`.
 ParaView products publish relative case/state references, a portable Python
 loader and one `visualization_scales.json` shared by still images and animation
-frames. Cp, velocity/streamlines/contours, vorticity and y+ are rendered only
-when their real arrays exist.
+frames. Automatic batch rendering deliberately avoids `SaveState` and vector-U
+contours because both were measured bottlenecks under WSL. Cp, velocity and
+streamlines, the aft boundary layer with mesh edges, high-vorticity regions,
+positive-Q vortex cores, y+ and Courant are rendered only when their real arrays
+exist. RANS selects its initial/final written states; URANS can restrict frames
+to a user-selected physical-time interval. `fieldAverage` begins at the recorded
+production-window fraction and accumulates U/p means and second moments plus the
+nuTilda mean across restarts.
+
+Every new case summary records the initial-condition contract. The volume starts
+from uniform freestream velocity, zero gauge kinematic pressure, `nuTilda=3*nu`
+and `nut=0`; wall and farfield boundary conditions then develop through the
+mandatory SIMPLE initialization. The final RANS `U`, `p`, `nuTilda`, `nut` and
+`phi` fields are the initial state of URANS.
 
 The normal workflow requires a selected persistent Work Case. `Estado`, `Caso
 de trabajo`, `Validation & Convergence Lab` and file/log inspection remain
@@ -70,6 +108,13 @@ available without one. Geometry uses `ramair_geometry_workspace.py` as the
 shared schema-1 DTO/catalogue boundary: imported sources retain their original
 bytes under `Airfoil Profiles/Imported/<uuid>/original`, and crossport geometry
 is expanded into explicit per-hole records before preprocessing.
+
+Choosing a Work Case name is candidate selection only. The active context is
+changed exclusively by the explicit load action on `Caso de trabajo`; the
+sidebar is a read-only context viewer. Incomplete Work Cases remain valid
+containers and may be loaded before they own geometry, CFD or mesh packages.
+Changing geometry, CFD case or mesh inside a loaded Work Case never changes
+that container identity.
 
 ## 4. Data ownership
 
@@ -103,14 +148,28 @@ dependent packages become `stale`; they remain visible with warnings and are
 never silently restored. Selection order is active compatible revision, most
 recent compatible revision, then explicit creation by the caller.
 
-The Mesh UI resolves reusable packages against the exact active geometry
-entity/revision. Compatible saved meshes can be loaded or used as a
-configuration base; incompatible ones remain visible with warnings. Mesh
-configuration edits are active drafts (`sync_workcase=False`) until the real
-mesh is explicitly saved/replaced as a Work Case package, preventing a draft
-from changing an approved artifact revision. `MESH_APPROVED.flag` remains the
-technical eligibility of the active output; schema-3 package approval is the
-durable human decision with actor and evidence.
+The Mesh UI first resolves reusable packages against the exact active geometry
+entity/revision. It also records and compares a normalized geometry identity:
+profile path and SHA-256, chord, open/closed state, inlet fraction and geometry
+contract version. This permits the same geometry to carry several independent
+Coarse/Medium/Fine mesh revisions and recognizes equivalent geometry saved in
+another Work Case without trusting folder names. A mesh result from another or
+incompatible Work Case is not silently activated; only its generator settings
+may be imported explicitly as a warned seed. Mesh configuration edits are
+active drafts (`sync_workcase=False`) until the real mesh is explicitly
+saved/replaced as a Work Case package, preventing a draft from changing an
+approved artifact revision. `MESH_APPROVED.flag` remains the technical
+eligibility of the active output; schema-3 package approval is the durable
+human decision with actor and evidence.
+
+The CATIA/preprocessor configuration has one authoritative suspension enable
+state. Loaded boundaries default to `all_loaded`, with
+`explicit_rib_ids` retained for manual subsets. Rigging is presented as R/b or
+explicit angle, and saved legacy values remain readable. CATIA exports fabric
+as surfaces and suspension as lines; thickness and line section remain
+properties only. No verified local Preralta material table is currently
+available, so existing material placeholders are deliberately preserved rather
+than replaced with invented values.
 
 Mesh presets implement the reviewed fractional sequence Coarse `y+=1`, Medium
 `2/3`, Fine `4/9` and Extra Fine `8/27`. Coarse/Medium/Fine use 50 layers;
@@ -189,14 +248,17 @@ face zone must first be converted into boundary faces, but applying it here
 would duplicate a wall that the mesh already owns. Force integration includes
 both wall patches.
 
-## 6. Validation Lab schema 11
+## 6. Validation Lab schema 13
 
 The study ID is `closed_open_M0p15_Re1p9e6_alpha8`. It owns six mesh IDs:
 `closed_coarse`, `closed_medium`, `closed_fine`, `open_coarse`,
 `open_medium` and `open_fine`. Geometry, meshes and compatible RANS checkpoints
 are preserved independently from URANS cases.
 
-Schema 11 adds metadata-only campaign manifests under `campaigns/`. A campaign
+Schema 13 retains metadata-only campaign manifests under `campaigns/` and
+adds the fixed 20,000-iteration RANS checkpoint contract, closed-first
+16-degree/open-first 8-degree order, and the low-cost Cummings temporal
+packages. A campaign
 stores the exact geometry/mesh dependencies, RANS checkpoint requirement,
 temporal ladder, angles, settling and collection windows, acceptance rules,
 case states and immutable approval revisions. Existing runs are indexed at
@@ -476,6 +538,90 @@ requires mesh/time independence and comparison with reference data.
 
 ## 11. Current verified state and limitations
 
+### 2026-08-28 optional Extend and controlled Gmsh study
+
+- `ramair_2d_gmsh_experimental.py` owns surface-restricted `Extend`, smooth inlet
+  y1 profiles, Gmsh quality extraction and the OpenFOAM-weighted Q comparison.
+  External and internal controls are independent and off by default.
+- A real four-mode open check (OFF, exterior only, interior only and both)
+  confirmed that `Restrict` prevents the cavity field from propagating into the
+  farfield. The combined reduced probe preserved one fluid region, the baffle
+  split, shared inlet and all physical patches. Its aggressive settings failed
+  determinant and interpolation-weight checks, so it is retained as diagnostic
+  evidence rather than an approved mesh.
+- The controlled 2-D study found algorithm 6/smoothing 1 to be the practical
+  baseline. Algorithm 5 used 30,012 nodes versus 25,378 and reduced minSIGE from
+  0.2900 to 0.0471. Smoothing 5 raised minSIGE to 0.4305 but increased generation
+  time from about 1.40 s to 2.76 s. Combined Laplace2D/Relocate2D produced the
+  highest advisory Q (0.04284) while leaving the limiting determinant unchanged.
+- The open backend now distinguishes legacy manual, automatic four-segment and
+  manual four-segment Bump. The manual route was generated successfully with
+  its exact requested divisions/coefficients. A 0.015c closed TE approach
+  extension also generated successfully; its default remains 0 for strict
+  backward compatibility.
+- The closed viewer now requests the supported `windows_python` viewer instead
+  of the invalid `closed_experimental` identifier. Streamlit Bump toggles are
+  rendered before dependent controls, preventing stale visual/manual states.
+
+### 2026-08-27 recovery and experimental-mesh baseline
+
+- The closed experimental mesher now divides its continuous airfoil guide into
+  four physical arcs: TE cap, upper wall, curvature-detected LE and lower wall.
+  `ramair_2d_bump_matching.py` solves Gmsh Bump coefficients against one common
+  interface spacing without changing the requested element counts. With the
+  current geometry and divisions 22/220/120/220, the actual lengths produce
+  `hJ=6.97593e-4 m`; all four predicted interface ratios are within `1e-7` of
+  unity. The maximum predicted local growth is about 1.135, so the UI warns that
+  the requested 1.10 gate is not met instead of silently changing divisions.
+- `Laplace2D` is a diagnostic option only. A controlled closed comparison with
+  61,810 2-D elements showed no meaningful improvement over no optimization;
+  never enable it globally without new evidence on the exact candidate mesh.
+- Validation statistics include accepted-point `Cl/Cd(alpha)` and signed
+  relative differences. Values with near-zero reference denominators are marked
+  `OMITTED_NEAR_ZERO_REFERENCE`; they are not divided by an arbitrary epsilon.
+- RANS monitoring preserves full iteration history and the RANS-to-URANS gate
+  accepts only statistical/residual stability or the real configured iteration
+  ceiling. Timeouts preserve state but do not authorize a physical-stage change.
+- Current software verification: 306 tests pass after Python compilation;
+  OpenFOAM 14 also parses the generated production `fieldAverage` dictionary.
+
+- Experimental meshing is split into independent **Perfil abierto** and
+  **Perfil cerrado** tabs. The closed path is implemented by
+  `CFD_2D/scripts/ramair_2d_closed_experimental_mesh.py`; it meshes only the
+  exterior fluid around one continuous wall and intentionally contains no
+  internal-fluid cavity. Its first audited revision is
+  `closed_validation_beta75_experimental_v1` (116,836 cells, 75 BL layers,
+  native `checkMesh` pass, max non-orthogonality 42.599 deg, skewness 0.6098,
+  determinant 0.004714, weight 0.1208 and volume ratio 0.1374).
+- The open shared-source baseline is
+  `beta75_exact_shared_source_inlet_v33_interface045` (166,342 cells, 75 BL
+  layers, native `checkMesh` pass, max non-orthogonality 41.936 deg, skewness
+  0.61255, determinant 0.004288, weight 0.052277 and volume ratio 0.073566).
+  Its retained wall matches the uncut source within `6e-10 m`; the inlet is the
+  omitted segment of that same canonical profile, not a separately fitted
+  bridge. Keep v32 as the documented one-face low-weight failure.
+- Validation alpha directory parsing is canonical: `alpha_p12p000` means
+  `+12.0 deg`. Monitor mode detection tests URANS before RANS to avoid the
+  substring collision. The alpha-12 case was stopped cleanly at physical time
+  `0.254046 s` (`t*` approximately 12.97), with restart fields preserved and no
+  surviving OpenFOAM/MPI process.
+- A-E resume is physical-time aware. Completed phases are skipped; the next run
+  continues the remainder of D and then E. The optional strict D gate compares
+  Cl, Cd, Cm and Cl/Cd window statistics with the final steady mean and records
+  the exact accepted sampling window for downstream validation plots.
+- Historical closed 8-degree RANS results live under explicit
+  `closed_*__alpha_p8` identities. Bare `closed_*` entries now mean the intended
+  16-degree campaign and remain `RANS_BASE_NOT_CREATED`. Open 8-degree entries
+  retain their base names; open 16-degree entries use `__alpha_p16`.
+- Automatic mesh numerics must resolve quality from both active meshes and the
+  saved Results layout `Mesh Data/mesh_quality_report.json`. With the current
+  medium meshes, closed and open both select zero non-orthogonal correctors and
+  `Gauss linear corrected` from maxima of about 41.5 deg.
+- The software verification baseline for this recovery is 284 passing tests,
+  followed by four focused regression tests, successful Python compilation and
+  a clean launcher environment audit with OpenFOAM Foundation 14, Gmsh 4.15.2,
+  PyFoam 2026.6 and ParaView available.
+
 - Bounded real OpenFOAM checks on 2026-08-13 completed A(25 steps)->B(3) and
   C(3 Euler states)->D(2 backward steps) with two MPI ranks; temporary fields
   were removed and the compact report was retained.
@@ -486,3 +632,48 @@ requires mesh/time independence and comparison with reference data.
 - Open-coarse and open-fine are prepared from their exact checkpoint meshes;
   no solver was launched for either case during the integrity repair.
 - Full 3-D CFD, FEM and FSI are not implemented as validated production flows.
+- The independent LS(1)-0417 validation page owns paper-normalized `err` and
+  `err2` products. Their sample set is exactly the currently published RamAir
+  points; ignored, removed or merely completed simulations do not enter the
+  statistics.
+- The validation solver profile is separate from the space-time convergence
+  laboratory. Its required sequence is SIMPLE/RANS followed by A-E URANS; only
+  phase E is a production window. The convergence laboratory retains its fixed
+  time-step and fixed-subiteration contracts.
+- `CFD_2D/experimental_meshes/open_reference_from_scratch` is an experimental,
+  revisioned open-airfoil mesh workspace. The latest verified candidate is
+  `beta75_convex_fallback_inlet140_uniform`; it is usable for inspection and
+  further iteration, not automatically approved. It passes native `checkMesh`
+  with 200,116 cells, 75 measured BL layers, max non-orthogonality 45.9815 deg,
+  max skewness 1.01734, min determinant 0.00503807, min interpolation weight
+  0.06322 and min volume ratio 0.08998. The inlet guide is one Gmsh spline. The
+  mesher first audits the literal full-base LE; for the current lip locations it
+  finds two curvature reversals and therefore uses a bounded convex C1 closure
+  containing the compatible exact base samples. The 180-node/bump-0.9 and
+  160-node/uniform probes are retained as failed evidence. The manual
+  revision `beta75_continuous_v14_v12_geometry_smooth_farfield_try_refining`
+  and all intermediate trials remain untouched.
+- The canonical `reference_uncut_validation_1m` mesh was regenerated on
+  2026-08-26 after a stale `te_half` identity was detected. It contains 215,316
+  cells, passes OpenFOAM 14 `checkMesh` (max non-orthogonality 41.608 deg,
+  max skewness 0.5851, min determinant 0.02628) and owns a post-check approval
+  flag. Do not restore the archived stale manifest as the active validation mesh.
+- The LS(1)-0417 validation solver configuration is one flat closed-topology
+  contract: SIMPLE RANS diagnostics combine 1e-6 residuals with moving force
+  statistics; URANS uses editable A-E stages, adaptive physical-time writing,
+  maximum five PIMPLE outer correctors and intermediate p/U/nuTilda relaxation
+  0.3/0.9/0.7 with final factors equal to one. Convergence-lab URANS remains a
+  separate fixed-deltaT/fixed-write-step scientific contract.
+- Experimental Beta-law meshes solve `Beta` internally from the Schlichting
+  y+-derived full first-cell height, requested layer count and
+  `delta99*safety_factor`. Geometric mode instead derives the minimum integer
+  layer count from y1, growth ratio and the same target thickness. Never add a
+  second finite-volume factor of two.
+- Experimental tangential controls are centralized in the four-segment wall
+  discretization. Removed UI widgets still exist as backend compatibility keys
+  for historical JSON revisions; do not delete them without a schema migration.
+- Reference Extend evidence is revisioned and non-destructive. Closed
+  `closed_validation_quality_extend_external_smooth_v2` and open
+  `...extend_external_smooth_v3` pass `checkMesh` but do not supersede their
+  better-Q bases. Open internal/coupled Extend v1-v4 candidates fail the minimum
+  interpolation-weight criterion and must remain unapproved diagnostics.

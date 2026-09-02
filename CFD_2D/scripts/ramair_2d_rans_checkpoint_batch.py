@@ -49,6 +49,7 @@ from ramair_2d_rans_review import (
     review_manifest,
 )
 from ramair_2d_checkpoint_integrity import checkpoint_mesh_identity
+from ramair_2d_mesh_numerics import quality_controls_for_mesh
 
 
 READY_STATUSES = {
@@ -69,9 +70,48 @@ PARTIAL_STAGED_STATUSES = {
 # The canonical registry is the single source of truth for both the table and
 # queue. Completed/reviewed bases remain visible and are skipped by state.
 RANS_QUEUE_IDS = MESH_IDS
-RANS_INITIAL_TARGET = 10000
-RANS_EXTENSION_BLOCK = 2500
+RANS_INITIAL_TARGET = 20000
+RANS_EXTENSION_BLOCK = 20000
 RANS_MAXIMUM_TARGET = 20000
+
+
+def _primary_alpha(topology: str) -> float:
+    return 16.0 if str(topology) == "closed" else 8.0
+
+
+def _alpha_token(alpha_deg: float) -> str:
+    value = float(alpha_deg)
+    sign = "m" if value < 0.0 else "p"
+    text = f"{abs(value):.6f}".rstrip("0").rstrip(".").replace(".", "p")
+    return f"{sign}{text}"
+
+
+def mesh_angle_id(study: dict[str, Any], mesh_id: str, alpha_deg: float | None) -> str:
+    """Return a checkpoint identity while preserving legacy primary paths."""
+    base_id = str(mesh_id).split("__alpha_", 1)[0]
+    mesh = next(
+        row for row in study["mesh_registry"].get("meshes", [])
+        if str(row.get("id")) == base_id
+    )
+    alpha = _primary_alpha(str(mesh["topology"])) if alpha_deg is None else float(alpha_deg)
+    if math.isclose(alpha, _primary_alpha(str(mesh["topology"])), abs_tol=1.0e-12):
+        return base_id
+    return f"{base_id}__alpha_{_alpha_token(alpha)}"
+
+
+def _base_mesh_id(mesh_id: str) -> str:
+    return str(mesh_id).split("__alpha_", 1)[0]
+
+
+def _checkpoint_alpha(study: dict[str, Any], mesh_id: str) -> float:
+    base = _mesh(study, mesh_id)
+    marker = "__alpha_"
+    if marker not in str(mesh_id):
+        return _primary_alpha(str(base["topology"]))
+    token = str(mesh_id).split(marker, 1)[1]
+    sign = -1.0 if token.startswith("m") else 1.0
+    numeric = token[1:].replace("p", ".")
+    return sign * float(numeric)
 
 
 class RansCheckpointBlocked(RuntimeError):
@@ -92,14 +132,61 @@ class RansCheckpointBlocked(RuntimeError):
 
 
 def _mesh(study: dict[str, Any], mesh_id: str) -> dict[str, Any]:
+    base_id = _base_mesh_id(mesh_id)
     for row in study["mesh_registry"].get("meshes", []):
-        if str(row.get("id")) == mesh_id:
+        if str(row.get("id")) == base_id:
             return row
     raise KeyError(f"Unknown validation-study mesh: {mesh_id}")
 
 
 def _checkpoint_root(project_root: Path, mesh_id: str) -> Path:
     return active_workspace_root(project_root) / "checkpoints" / mesh_id
+
+
+def migrate_legacy_checkpoint_angle_labels(project_root: Path, study: dict[str, Any]) -> list[dict[str, Any]]:
+    """Preserve legacy a08 checkpoints after the closed primary angle changed to 16 degrees."""
+    migrations: list[dict[str, Any]] = []
+    for base_mesh_id in MESH_IDS:
+        source = _checkpoint_root(project_root, base_mesh_id)
+        manifest_path = source / "checkpoint_manifest.json"
+        manifest = read_json(manifest_path, {}) or {}
+        encoded = str(manifest.get("source_case") or "")
+        match = re.search(r"_a(\d{2})(?:_|$)", encoded)
+        if not source.is_dir() or not match:
+            continue
+        actual_alpha = float(int(match.group(1)))
+        expected_alpha = _checkpoint_alpha(study, base_mesh_id)
+        if math.isclose(actual_alpha, expected_alpha, abs_tol=1.0e-12):
+            continue
+        destination_id = mesh_angle_id(study, base_mesh_id, actual_alpha)
+        destination = _checkpoint_root(project_root, destination_id)
+        row = {
+            "source": str(source),
+            "destination": str(destination),
+            "base_mesh_id": base_mesh_id,
+            "actual_alpha_deg": actual_alpha,
+            "previous_interpretation_deg": expected_alpha,
+        }
+        if destination.exists():
+            row["status"] = "DESTINATION_ALREADY_EXISTS"
+            migrations.append(row)
+            continue
+        source.rename(destination)
+        moved_manifest = read_json(destination / "checkpoint_manifest.json", {}) or {}
+        moved_manifest.update({
+            "mesh_id": destination_id,
+            "base_mesh_id": base_mesh_id,
+            "alpha_deg": actual_alpha,
+            "angle_label_migration": row,
+        })
+        write_json_atomic(destination / "checkpoint_manifest.json", moved_manifest)
+        row["status"] = "MIGRATED"
+        migrations.append(row)
+    if migrations:
+        output = active_workspace_root(project_root) / "migrations" / "legacy_checkpoint_angle_labels.json"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        write_json_atomic(output, {"migrations": migrations, "updated_at": utc_stamp()})
+    return migrations
 
 
 def _queue_stop_marker(project_root: Path) -> Path:
@@ -141,7 +228,7 @@ def delete_active_base(
 ) -> dict[str, Any]:
     """Explicitly remove one active RANS base without touching Results or meshes."""
     project_root = Path(project_root).resolve()
-    if mesh_id not in MESH_IDS:
+    if _base_mesh_id(mesh_id) not in MESH_IDS:
         raise ValueError(f"Unknown validation mesh: {mesh_id}")
     if not confirm:
         raise ValueError("Explicit confirmation is required to delete a RANS base")
@@ -245,6 +332,32 @@ def _effective_rans_config(study: dict[str, Any], topology: str) -> dict[str, An
             effective[key] = {**dict(effective[key]), **value}
         else:
             effective[key] = value
+    return effective
+
+
+def _rans_config_for_mesh(
+    project_root: Path,
+    study: dict[str, Any],
+    mesh_id: str,
+) -> dict[str, Any]:
+    """Resolve SIMPLE non-orthogonal controls from the selected mesh evidence."""
+    mesh = _mesh(study, mesh_id)
+    effective = _effective_rans_config(study, str(mesh["topology"]))
+    package = Path(str(mesh.get("mesh_package") or ""))
+    if not package.is_absolute():
+        package = Path(project_root).resolve() / package
+    controls = quality_controls_for_mesh(package)
+    if not controls:
+        raise RuntimeError(
+            f"{mesh_id}: automatic SIMPLE numerics require a readable checkMesh report"
+        )
+    effective.update({
+        "mesh_quality_numerics_mode": "automatic",
+        "simple_non_orthogonal_correctors": int(controls["n_non_orthogonal_correctors"]),
+        "laplacian_scheme": str(controls["laplacian_scheme"]),
+        "maximum_non_orthogonality_deg": float(controls["maximum_non_orthogonality_deg"]),
+        "mesh_quality_source": str(controls.get("source") or package),
+    })
     return effective
 
 
@@ -382,7 +495,7 @@ def audit_simple_case_configuration(
     linear_solvers = dict(expected.get("linear_solvers") or {})
     relaxation_values = dict(expected.get("relaxation") or {})
     expected_values = {
-        "initial_iterations": int(expected.get("initial_iterations", 10000)),
+        "initial_iterations": int(expected.get("initial_iterations", 20000)),
         "native_residual_control_enabled": bool(
             expected.get("native_residual_control_enabled", False)
         ),
@@ -410,9 +523,9 @@ def audit_simple_case_configuration(
             linear_solvers.get("nuTilda", "PBiCGStab")
         ),
         "relaxation_p": float(relaxation_values.get("p", 0.3)),
-        "relaxation_U": float(relaxation_values.get("U", 0.5)),
+        "relaxation_U": float(relaxation_values.get("U", 0.7)),
         "relaxation_nuTilda": float(
-            relaxation_values.get("nuTilda", 0.5)
+            relaxation_values.get("nuTilda", 0.7)
         ),
         "velocity_divergence": (
             expected.get("initialization_schemes") or {}
@@ -462,19 +575,20 @@ def audit_simple_case_configuration(
 
 
 def compatibility_contract(
+    project_root: Path,
     study: dict[str, Any],
     mesh_id: str,
 ) -> dict[str, Any]:
     mesh = _mesh(study, mesh_id)
     condition = study["study_config"]["operating_condition"]
-    rans = _effective_rans_config(study, str(mesh["topology"]))
+    rans = _rans_config_for_mesh(project_root, study, mesh_id)
     physics = {
         "topology": mesh["topology"],
         "variant": mesh["variant"],
         "mach": condition["mach"],
         "reynolds": condition["reynolds"],
         "chord_m": condition["chord_m"],
-        "alpha_deg": 8.0,
+        "alpha_deg": _checkpoint_alpha(study, mesh_id),
         "rho_kg_m3": condition["rho_kg_m3"],
         "mu_pa_s": condition["mu_pa_s"],
         "turbulence_model": "SpalartAllmaras",
@@ -482,13 +596,18 @@ def compatibility_contract(
         "frontAndBack": "empty",
     }
     solver = {
-        "profile": "robust_sa_initialization_v2",
+        "profile": "fixed_20000_manual_review_v3",
         "potentialFoam": bool(rans.get("potentialFoam", True)),
         "simple_non_orthogonal_correctors": int(
             rans.get("simple_non_orthogonal_correctors", 0)
         ),
-        "initial_iterations": int(rans.get("initial_iterations", 10000)),
-        "extension_iterations": int(rans.get("extension_iterations", 2500)),
+        "laplacian_scheme": str(rans.get("laplacian_scheme", "Gauss linear corrected")),
+        "maximum_non_orthogonality_deg": float(
+            rans.get("maximum_non_orthogonality_deg", 0.0)
+        ),
+        "mesh_quality_source": str(rans.get("mesh_quality_source", "")),
+        "initial_iterations": int(rans.get("initial_iterations", 20000)),
+        "extension_iterations": int(rans.get("extension_iterations", 20000)),
         "maximum_iterations": int(rans.get("maximum_iterations", 20000)),
         "force_window_samples": int(rans.get("force_window_samples", 500)),
         "force_mean_tolerance_percent": float(
@@ -555,7 +674,7 @@ def canonical_rans_state(
 
 def checkpoint_status(project_root: Path, mesh_id: str) -> dict[str, Any]:
     study = load_study(project_root)
-    contract = compatibility_contract(study, mesh_id)
+    contract = compatibility_contract(project_root, study, mesh_id)
     path = _checkpoint_root(project_root, mesh_id) / "checkpoint_manifest.json"
     manifest = read_json(path, {}) or {}
     if not manifest:
@@ -880,7 +999,7 @@ def _configure_simple_template(case: Path, rans: dict[str, Any]) -> None:
     control_path = template / "controlDict"
     control = control_path.read_text(encoding="utf-8")
     control = _replace_foam_entry(
-        control, "endTime", str(int(rans.get("initial_iterations", 10000)))
+        control, "endTime", str(int(rans.get("initial_iterations", 20000)))
     )
     control = _replace_foam_entry(control, "purgeWrite", "2")
     control_path.write_text(control, encoding="utf-8")
@@ -957,6 +1076,13 @@ def _configure_simple_template(case: Path, rans: dict[str, Any]) -> None:
             schemes,
             count=1,
         )
+    if rans.get("laplacian_scheme"):
+        schemes = _replace_entry_in_dictionary(
+            schemes,
+            "laplacianSchemes",
+            "default",
+            str(rans["laplacian_scheme"]),
+        )
     schemes_path.write_text(schemes, encoding="utf-8")
 
 
@@ -989,8 +1115,8 @@ def prepare_base(project_root: Path, mesh_id: str, *, overwrite: bool = False) -
     manifest = prepare_checkpoint(project_root, mesh_id, overwrite=overwrite)
     study = load_study(project_root)
     mesh = _mesh(study, mesh_id)
-    rans = _effective_rans_config(study, str(mesh["topology"]))
-    contract = compatibility_contract(study, mesh_id)
+    rans = _rans_config_for_mesh(project_root, study, mesh_id)
+    contract = compatibility_contract(project_root, study, mesh_id)
     case = Path(manifest["case"])
     _configure_simple_template(case, rans)
     resolved_run = {
@@ -1026,8 +1152,8 @@ def prepare_base(project_root: Path, mesh_id: str, *, overwrite: bool = False) -
         physics_hash=contract["physics_hash"],
         solver_config_hash=contract["solver_config_hash"],
         compatibility=contract,
-        initial_block=int(rans.get("initial_iterations", 10000)),
-        extension_block=int(rans.get("extension_iterations", 2500)),
+        initial_block=int(rans.get("initial_iterations", 20000)),
+        extension_block=int(rans.get("extension_iterations", 20000)),
         max_iterations=int(rans.get("maximum_iterations", 20000)),
         iterations_completed=0,
         converged=False,
@@ -1312,6 +1438,7 @@ def _register_base_execution(
             "topology": manifest.get("topology"),
             "mesh_level": manifest.get("mesh_level"),
             "mesh_id": manifest.get("mesh_id"),
+            "alpha_deg": manifest.get("alpha_deg"),
             "stage": "SIMPLE",
             "status": manifest.get("status"),
             "started_at": manifest.get("prepared_at"),
@@ -1648,16 +1775,11 @@ def _execute_targeted_rans_blocks(
             gate_evaluated_at_absolute_iteration=after,
             minimum_convergence_iteration=minimum_convergence_iteration,
         )
+        # The Cummings convergence campaign deliberately runs all 20 000 SIMPLE
+        # iterations. Diagnostics are retained for the scientist, but never own
+        # the stop/acceptance decision.
         if automatic_status in AUTOMATIC_READY_STATUSES:
-            manifest["queue_action"] = f"AUTO_CONVERGED_AT_{after}"
-            manifest["queue_state"] = (
-                "AUTO_CONVERGED"
-                if automatic_status == RANS_AUTO_CONVERGED_STRICT
-                else "PLATEAU_WARNING"
-            )
-            return _finalize_manifest(
-                project_root, mesh_id, wall_times=[]
-            )
+            manifest["diagnostic_only_status"] = automatic_status
         if target < maximum:
             next_target = min(maximum, target + extension)
             manifest.update(
@@ -1678,7 +1800,7 @@ def _execute_targeted_rans_blocks(
             status="RANS_BASE_BOUNDED_NOT_CONVERGED",
             execution_status="COMPLETED",
             queue_state="REVIEW_REQUIRED",
-            queue_action="STOP_AT_MAX_REVIEW_REQUIRED",
+            queue_action="COMPLETED_20000_MANUAL_REVIEW_REQUIRED",
             converged=False,
             bounded=True,
             data_preserved_for_resume=True,
@@ -1712,7 +1834,7 @@ def _execute_base_unlocked(
         _queue_stop_marker(project_root).unlink(missing_ok=True)
     study = load_study(project_root)
     mesh = _mesh(study, mesh_id)
-    current_rans = _effective_rans_config(study, str(mesh["topology"]))
+    current_rans = _rans_config_for_mesh(project_root, study, mesh_id)
     checkpoint = _checkpoint_root(project_root, mesh_id)
     case = checkpoint / "case"
     existing_iteration = (
@@ -1727,7 +1849,7 @@ def _execute_base_unlocked(
         manifest = prepare_base(project_root, mesh_id, overwrite=overwrite)
     else:
         manifest = read_json(checkpoint / "checkpoint_manifest.json", {}) or {}
-        contract = compatibility_contract(study, mesh_id)
+        contract = compatibility_contract(project_root, study, mesh_id)
         mesh = _mesh(study, mesh_id)
         manifest.setdefault("schema_version", 2)
         manifest.setdefault("checkpoint_id", f"{mesh_id}_simple")
@@ -1739,8 +1861,8 @@ def _execute_base_unlocked(
         manifest.setdefault("solver_config_hash", contract["solver_config_hash"])
         manifest.setdefault("compatibility", contract)
         prepared_defaults = {
-            "initial_block": int(current_rans.get("initial_iterations", 10000)),
-            "extension_block": int(current_rans.get("extension_iterations", 2500)),
+            "initial_block": int(current_rans.get("initial_iterations", 20000)),
+            "extension_block": int(current_rans.get("extension_iterations", 20000)),
             "max_iterations": int(current_rans.get("maximum_iterations", 20000)),
             "iterations_completed": 0,
             "converged": False,
@@ -2264,11 +2386,13 @@ def _execute_queue_unlocked(
     project_root: Path,
     *,
     run: bool,
+    alpha_deg: float | None = None,
     continue_on_nonfatal_failure: bool | None = None,
 ) -> dict[str, Any]:
     """Visit all six canonical bases and execute only the incomplete ones."""
     project_root = Path(project_root).resolve()
     study = load_study(project_root)
+    queue_ids = [mesh_angle_id(study, mesh_id, alpha_deg) for mesh_id in RANS_QUEUE_IDS]
     rans = _rans_config(study)
     if continue_on_nonfatal_failure is None:
         continue_on_nonfatal_failure = bool(
@@ -2280,7 +2404,7 @@ def _execute_queue_unlocked(
     resolved_batch = freeze_batch_config(project_root, study)
     state = read_json(state_path, {}) or {
         "schema_version": 1,
-        "order": list(RANS_QUEUE_IDS),
+        "order": list(queue_ids),
         "items": {},
         "started_at": utc_stamp(),
     }
@@ -2296,11 +2420,11 @@ def _execute_queue_unlocked(
             "stopped_before_mesh_id",
         ):
             state.pop(stale_key, None)
-    state["order"] = list(RANS_QUEUE_IDS)
+    state["order"] = list(queue_ids)
     state["items"] = {
         mesh_id: value
         for mesh_id, value in dict(state.get("items") or {}).items()
-        if mesh_id in RANS_QUEUE_IDS
+        if mesh_id in queue_ids
     }
     state.update(status="RUNNING" if run else "PREPARED", updated_at=utc_stamp())
     state["batch_id"] = resolved_batch["batch_id"]
@@ -2311,8 +2435,9 @@ def _execute_queue_unlocked(
     )
     write_json_atomic(state_path, state)
     aggregate_audits: list[dict[str, Any]] = []
-    state["batch_total"] = len(RANS_QUEUE_IDS)
-    for queue_position, mesh_id in enumerate(RANS_QUEUE_IDS, 1):
+    state["batch_total"] = len(queue_ids)
+    state["alpha_deg"] = alpha_deg
+    for queue_position, mesh_id in enumerate(queue_ids, 1):
         previous = checkpoint_status(project_root, mesh_id)
         allowed = dict(previous.get("allowed_uses") or {})
         if run and (
@@ -2355,7 +2480,7 @@ def _execute_queue_unlocked(
             state.update(
                 current_mesh_id=mesh_id,
                 current_queue_position=queue_position,
-                queue_total=len(RANS_QUEUE_IDS),
+                queue_total=len(queue_ids),
                 current_target_iteration=target_for_iteration(
                     int(previous.get("iterations_completed", 0) or 0),
                     initial=RANS_INITIAL_TARGET,
@@ -2383,7 +2508,7 @@ def _execute_queue_unlocked(
         state["items"][mesh_id] = result
         state["current_mesh_id"] = mesh_id
         state["current_queue_position"] = queue_position
-        state["queue_total"] = len(RANS_QUEUE_IDS)
+        state["queue_total"] = len(queue_ids)
         state["resolved_batch_config"] = str(
             active_workspace_root(project_root) / "resolved_batch_config.json"
         )
@@ -2423,9 +2548,9 @@ def _execute_queue_unlocked(
             _register_base_execution(
                 project_root,
                 result,
-                activate=bool(run or mesh_id == RANS_QUEUE_IDS[0]),
+                activate=bool(run or mesh_id == queue_ids[0]),
                 queue_position=queue_position,
-                queue_total=len(RANS_QUEUE_IDS),
+                queue_total=len(queue_ids),
             )
         if (
             run
@@ -2471,19 +2596,19 @@ def _execute_queue_unlocked(
         state.pop("finished_at", None)
         state.update(
             status="PREPARED",
-            current_mesh_id=RANS_QUEUE_IDS[0],
+            current_mesh_id=queue_ids[0],
             current_queue_position=0,
             current_target_iteration=RANS_INITIAL_TARGET,
             prepared_at=utc_stamp(),
         )
-        first_manifest = state["items"].get(RANS_QUEUE_IDS[0])
+        first_manifest = state["items"].get(queue_ids[0])
         if isinstance(first_manifest, dict):
             _register_base_execution(
                 project_root,
                 first_manifest,
                 activate=True,
                 queue_position=1,
-                queue_total=len(RANS_QUEUE_IDS),
+                queue_total=len(queue_ids),
             )
     write_json_atomic(state_path, state)
     return state
@@ -2493,6 +2618,7 @@ def execute_queue(
     project_root: Path,
     *,
     run: bool,
+    alpha_deg: float | None = None,
     continue_on_nonfatal_failure: bool | None = None,
 ) -> dict[str, Any]:
     """Single-flight wrapper for the autonomous five-base RANS queue."""
@@ -2501,6 +2627,7 @@ def execute_queue(
         return _execute_queue_unlocked(
             project_root,
             run=False,
+            alpha_deg=alpha_deg,
             continue_on_nonfatal_failure=continue_on_nonfatal_failure,
         )
     active = active_workspace_root(project_root)
@@ -2515,7 +2642,7 @@ def execute_queue(
             study_id="validation_lab",
             run_id=batch_id,
             mode="RANS_BATCH",
-            command=[str(project_root), "queue", *RANS_QUEUE_IDS],
+            command=[str(project_root), "queue", str(alpha_deg), *RANS_QUEUE_IDS],
         )
     except DuplicateExecutionError as exc:
         return {
@@ -2528,6 +2655,7 @@ def execute_queue(
         result = _execute_queue_unlocked(
             project_root,
             run=True,
+            alpha_deg=alpha_deg,
             continue_on_nonfatal_failure=continue_on_nonfatal_failure,
         )
         lease.release(
@@ -2549,15 +2677,20 @@ def execute_queue(
 
 def checkpoint_table(project_root: Path) -> list[dict[str, Any]]:
     study = load_study(project_root)
+    migrate_legacy_checkpoint_angle_labels(project_root, study)
     meshes = {str(row["id"]): row for row in study["mesh_registry"]["meshes"]}
     rows: list[dict[str, Any]] = []
-    for mesh_id in MESH_IDS:
+    for base_mesh_id in MESH_IDS:
+      for alpha_deg in (8.0, 16.0):
+        mesh_id = mesh_angle_id(study, base_mesh_id, alpha_deg)
         state = checkpoint_status(project_root, mesh_id)
         rows.append(
             {
                 "mesh_id": mesh_id,
-                "topology": meshes[mesh_id]["topology"],
-                "level": meshes[mesh_id]["level"],
+                "base_mesh_id": base_mesh_id,
+                "topology": meshes[base_mesh_id]["topology"],
+                "level": meshes[base_mesh_id]["level"],
+                "alpha_deg": alpha_deg,
                 "status": state["status"],
                 "rans_state": state.get("rans_state"),
                 "iterations": int(state.get("iterations_completed", 0) or 0),

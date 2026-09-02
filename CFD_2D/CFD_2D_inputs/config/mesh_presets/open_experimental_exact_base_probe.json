@@ -1,0 +1,13 @@
+{
+  "schema_version": 2,
+  "name": "beta75_exact_base_probe_inlet180_bump090",
+  "boundary_layer": {
+    "prefer_exact_base_inlet": true,
+    "inlet_nodes": 180,
+    "inlet_bump_coefficient": 0.9
+  },
+  "execution": {
+    "gmsh_threads": 12,
+    "openfoam_timeout_s": 900
+  }
+}

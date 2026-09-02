@@ -132,6 +132,15 @@ def create_steady_paraview_case(
         source = steady_templates / name
         if source.is_file():
             shutil.copy2(source, target / "system" / name)
+    initial_zero = archive / "initial_zero"
+    initial_snapshot_included = initial_zero.is_dir()
+    if initial_snapshot_included:
+        shutil.copytree(
+            initial_zero,
+            target / "0",
+            copy_function=_hardlink_or_copy,
+            symlinks=True,
+        )
     selected = _selected_steady_snapshots(positive, snapshot_count)
     for _, source in selected:
         shutil.copytree(
@@ -160,7 +169,11 @@ def create_steady_paraview_case(
         "time_semantics": "SIMPLE iteration counter; values are not physical seconds",
         "source_case": str(case_dir.resolve()),
         "all_steady_iterations": [value for value, _ in positive],
-        "paraview_snapshots": [value for value, _ in selected],
+        "paraview_snapshots": (
+            ([0.0] if initial_snapshot_included else [])
+            + [value for value, _ in selected]
+        ),
+        "initial_snapshot_included": initial_snapshot_included,
         "snapshot_count_requested": int(snapshot_count),
         "foam_marker": str(marker),
         "scripted_paraview": prepared_view,
@@ -234,6 +247,14 @@ def runner_command(
         "--stop-grace-min", str(float(args.stop_grace_min)),
         "--stop-mode", args.stop_mode,
     ]
+    command.append(
+        "--automatic-core-selection" if args.automatic_core_selection
+        else "--no-automatic-core-selection"
+    )
+    command.append(
+        "--renumber-before-decompose" if args.renumber_before_decompose
+        else "--no-renumber-before-decompose"
+    )
     if args.run:
         command.append("--run")
     if potential_foam:
@@ -565,9 +586,34 @@ def evaluate_steady_transition(case_dir: Path, args: argparse.Namespace) -> dict
         args.steady_force_mean_tolerance_percent,
         args.steady_force_fluctuation_tolerance_percent,
     )
-    transition_ready = (native_convergence_message or residuals_acceptable) and force_report.get("status") == "STABLE"
+    latest_iteration = max(
+        (value for value, _ in numeric_time_dirs(case_dir) if value > 0.0),
+        default=0.0,
+    )
+    maximum_iterations = int(stage_cfg.get("maximum_iterations") or 0)
+    maximum_reached = bool(
+        maximum_iterations > 0
+        and latest_iteration >= maximum_iterations - max(1.0, 1.0e-9 * maximum_iterations)
+    )
+    statistically_stable = (
+        (native_convergence_message or residuals_acceptable)
+        and force_report.get("status") == "STABLE"
+    )
+    # The validation contract has exactly two valid automatic exits from
+    # SIMPLE: statistical/residual stability, or the configured hard iteration
+    # ceiling.  A wall-clock timeout alone never authorizes URANS.
+    transition_ready = statistically_stable or maximum_reached
     return {
         "status": "READY_FOR_TRANSIENT" if transition_ready else "NOT_READY_FOR_TRANSIENT",
+        "transition_reason": (
+            "STABLE_RANS" if statistically_stable
+            else "MAXIMUM_RANS_ITERATIONS_REACHED" if maximum_reached
+            else "RANS_NOT_STABLE_AND_MAXIMUM_NOT_REACHED"
+        ),
+        "latest_iteration": latest_iteration,
+        "maximum_iterations": maximum_iterations,
+        "maximum_iterations_reached": maximum_reached,
+        "statistically_stable": statistically_stable,
         "native_simple_convergence_message": native_convergence_message,
         "residuals_acceptable": residuals_acceptable,
         "residual_metrics": residual_metrics,
@@ -1038,12 +1084,234 @@ def reset_transient_time_origin(case_dir: Path) -> dict[str, Any]:
     }
 
 
+def _phase_d_steady_equivalence(
+    case: Path,
+    steady_archive: Path | None,
+    *,
+    stage_end_s: float,
+    tc_s: float,
+    settings: dict[str, Any],
+) -> dict[str, Any]:
+    """Strictly compare the final SIMPLE mean with the final phase-D window."""
+    if not bool(settings.get("enabled", False)):
+        return {"status": "DISABLED", "accepted": False}
+    if steady_archive is None or not steady_archive.is_dir():
+        return {"status": "MISSING_STEADY_ARCHIVE", "accepted": False}
+    steady_rows, steady_sources = read_force_coefficient_history(
+        steady_archive, include_processor0=False,
+    )
+    transient_rows, transient_sources = read_force_coefficient_history(
+        case, include_processor0=True,
+    )
+    minimum_samples = max(20, int(settings.get("minimum_samples", 200)))
+    window_star = max(0.1, float(settings.get("window_time_star", 2.5)))
+    start_s = float(stage_end_s) - window_star * float(tc_s)
+    d_window = [
+        row for row in transient_rows
+        if float(row.get("Time", -math.inf)) >= start_s - 1.0e-12
+        and float(row.get("Time", math.inf)) <= float(stage_end_s) + 1.0e-12
+    ]
+    steady_window = steady_rows[-minimum_samples:]
+    if len(steady_window) < minimum_samples or len(d_window) < minimum_samples:
+        return {
+            "status": "INSUFFICIENT_SAMPLES", "accepted": False,
+            "steady_samples": len(steady_window), "phase_D_samples": len(d_window),
+            "minimum_samples": minimum_samples,
+        }
+    floors = {
+        "Cl": 0.05, "Cd": 0.005, "Cm": 0.005, "Cl_over_Cd": 1.0,
+        **dict(settings.get("coefficient_floors") or {}),
+    }
+    mean_tolerance = float(settings.get("mean_difference_tolerance_percent", 0.30))
+    fluctuation_tolerance = float(settings.get("fluctuation_tolerance_percent", 0.50))
+
+    def values(rows: list[dict[str, float]], label: str) -> list[float]:
+        if label != "Cl_over_Cd":
+            return [float(row[label]) for row in rows if label in row and math.isfinite(float(row[label]))]
+        return [
+            float(row["Cl"]) / float(row["Cd"])
+            for row in rows
+            if "Cl" in row and "Cd" in row
+            and math.isfinite(float(row["Cl"])) and math.isfinite(float(row["Cd"]))
+            and abs(float(row["Cd"])) > 1.0e-12
+        ]
+
+    metrics: dict[str, Any] = {}
+    accepted = True
+    for label in ("Cl", "Cd", "Cm", "Cl_over_Cd"):
+        steady_values = values(steady_window, label)
+        transient_values = values(d_window, label)
+        if len(steady_values) < minimum_samples or len(transient_values) < minimum_samples:
+            metrics[label] = {"accepted": False, "reason": "missing_finite_samples"}
+            accepted = False
+            continue
+        steady_mean = statistics.fmean(steady_values)
+        transient_mean = statistics.fmean(transient_values)
+        scale = max(abs(steady_mean), abs(transient_mean), float(floors[label]))
+        difference = 100.0 * abs(transient_mean - steady_mean) / scale
+        fluctuation = 100.0 * statistics.pstdev(transient_values) / scale
+        item = difference <= mean_tolerance and fluctuation <= fluctuation_tolerance
+        accepted = accepted and item
+        metrics[label] = {
+            "steady_mean": steady_mean,
+            "phase_D_mean": transient_mean,
+            "relative_mean_difference_percent": difference,
+            "phase_D_fluctuation_percent": fluctuation,
+            "accepted": item,
+        }
+    return {
+        "status": "STEADY_EQUIVALENT" if accepted else "TRANSIENT_PRODUCTION_REQUIRED",
+        "accepted": accepted,
+        "window_time_star": window_star,
+        "window_start_s": start_s,
+        "window_end_s": float(stage_end_s),
+        "mean_difference_tolerance_percent": mean_tolerance,
+        "fluctuation_tolerance_percent": fluctuation_tolerance,
+        "metrics": metrics,
+        "steady_sources": steady_sources,
+        "phase_D_sources": transient_sources,
+    }
+
+
+def run_transient_phase_plan(
+    args: argparse.Namespace,
+    plan_path: Path,
+    *,
+    steady_archive: Path | None = None,
+) -> tuple[int, list[dict[str, Any]]]:
+    """Execute a study-specific A-E plan after the steady fields reach t=0."""
+    from ramair_2d_validation_staged_runner import configure_stage
+    from ramair_2d_urans_contract import FRESH_FROM_CHECKPOINT, RESUME_EXISTING
+
+    plan = read_json(plan_path, {}) or {}
+    stages = plan.get("stages") or []
+    if not isinstance(stages, list) or not stages:
+        raise ValueError(f"Transient phase plan has no stages: {plan_path}")
+    config = read_json(args.case / "case_config.json", {}) or {}
+    chord = float(config.get("chord_m", 1.0))
+    velocity = float(config.get("velocity_m_s", 0.0))
+    if chord <= 0.0 or velocity <= 0.0:
+        raise ValueError("case_config.json must provide positive chord_m and velocity_m_s")
+    convective_second = chord / velocity
+    target_dt_star = float(plan.get("target_deltaT_star", 0.0025))
+    field_write_star = float(config.get("field_write_interval_star", 0.1))
+    retained_snapshots = max(0, int(config.get("purgeWrite", 24)))
+    elapsed_star = 0.0
+    phase_reports: list[dict[str, Any]] = []
+    phase_d_gate: dict[str, Any] | None = None
+    current_times = [value for value, _ in numeric_time_dirs(args.case) if value > 0.0]
+    latest_time_s = max(current_times, default=0.0)
+    completion_tolerance_s = max(1.0e-12, abs(target_dt_star * convective_second) * 0.25)
+    for index, phase in enumerate(stages):
+        duration_star = float(phase["duration_time_star"])
+        dt_star = target_dt_star * float(phase.get("dt_factor", 1.0))
+        start_star = elapsed_star
+        elapsed_star += duration_star
+        stage = {
+            "stage": str(phase["stage"]),
+            "scheme": str(phase["scheme"]),
+            "dt_s": dt_star * convective_second,
+            "start_s": start_star * convective_second,
+            "end_s": elapsed_star * convective_second,
+            "steps": max(1, int(math.ceil(duration_star / dt_star))),
+            "adjust_time_step": bool(plan.get("adjust_time_step", True)),
+            "maxCo": float(plan.get("maxCo", 50.0)),
+            "maxDeltaT_s": dt_star * convective_second,
+            "write_interval_s": field_write_star * convective_second,
+            "purge_write": retained_snapshots,
+            "retain_outer_residual_control": bool(plan.get("outer_residual_control_enabled", True)),
+        }
+        if latest_time_s >= float(stage["end_s"]) - completion_tolerance_s:
+            phase_reports.append({
+                "phase": str(phase["stage"]),
+                "sampling": bool(phase.get("sampling", False)),
+                "status": "ALREADY_COMPLETED_ON_RESUME",
+                "latest_time_s": latest_time_s,
+                "target_end_s": float(stage["end_s"]),
+            })
+            continue
+        configuration = configure_stage(
+            args.case,
+            stage,
+            start_mode=RESUME_EXISTING if (index > 0 or current_times) else FRESH_FROM_CHECKPOINT,
+            preserve_temporal_history=str(phase["stage"]) in {"A", "B"},
+        )
+        command = runner_command(
+            args,
+            timeout_min=args.timeout_min,
+            resume=bool(index > 0 or current_times),
+            include_transient_convergence=False,
+            include_resume_extension=False,
+        )
+        completed = subprocess.run(command, cwd=str(args.case), text=True)
+        run_status = read_json(args.case / "run_status.json", {}) or {}
+        phase_report = {
+            "phase": str(phase["stage"]),
+            "sampling": bool(phase.get("sampling", False)),
+            "configuration": configuration,
+            "command": command,
+            "returncode": int(completed.returncode),
+            "run_status": run_status,
+        }
+        phase_reports.append(phase_report)
+        runner_status = str(run_status.get("status", "")).upper()
+        if completed.returncode != 0 or runner_status in {
+            "STOPPED_BY_USER", "STOPPED_PARTIAL", "STOPPED_FORCED_PARTIAL",
+            "TIMEOUT_PARTIAL", "RUN_TIMEOUT_PARTIAL",
+        }:
+            return int(completed.returncode), phase_reports
+        current_times = [value for value, _ in numeric_time_dirs(args.case) if value > 0.0]
+        latest_time_s = max(current_times, default=latest_time_s)
+        if str(phase["stage"]).upper() == "D":
+            phase_d_gate = _phase_d_steady_equivalence(
+                args.case,
+                steady_archive,
+                stage_end_s=float(stage["end_s"]),
+                tc_s=convective_second,
+                settings=dict(plan.get("phase_d_steady_equivalence") or {}),
+            )
+            phase_report["steady_equivalence_gate"] = phase_d_gate
+            (args.case / "validation_phase_D_steady_equivalence.json").write_text(
+                json.dumps(phase_d_gate, indent=2) + "\n", encoding="utf-8",
+            )
+            if bool(phase_d_gate.get("accepted")):
+                break
+    early_accept = bool(phase_d_gate and phase_d_gate.get("accepted"))
+    total_star = float(elapsed_star)
+    production_start_star = (
+        total_star - float(phase_d_gate.get("window_time_star", 0.0))
+        if early_accept else float(plan.get("production_start_time_star", 14.0))
+    )
+    sampling = {
+        "production_stage": "D" if early_accept else str(plan.get("production_stage", "E")),
+        "production_start_time_star": production_start_star,
+        "total_time_star": total_star if early_accept else float(plan.get("total_time_star", elapsed_star)),
+        "average_from_fraction": (
+            production_start_star / max(total_star, 1.0e-30)
+            if early_accept else float(plan.get("average_from_fraction", 14.0 / 64.0))
+        ),
+        "phase_D_steady_equivalence": phase_d_gate,
+        "phase_E_skipped": early_accept,
+        "phase_plan": str(plan_path.resolve()),
+    }
+    (args.case / "validation_sampling_window.json").write_text(
+        json.dumps(sampling, indent=2) + "\n", encoding="utf-8",
+    )
+    return 0, phase_reports
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run optional steady SIMPLE initialization and transient PIMPLE sequentially. Dry-run by default.")
     parser.add_argument("--case", type=Path, required=True)
     parser.add_argument("--solver", default="auto")
     parser.add_argument("--execution-backend", choices=["native", "pyfoam"], default="pyfoam")
     parser.add_argument("--n-cores", type=int, default=4)
+    parser.add_argument(
+        "--automatic-core-selection", action=argparse.BooleanOptionalAction, default=True,
+    )
+    parser.add_argument(
+        "--renumber-before-decompose", action=argparse.BooleanOptionalAction, default=True,
+    )
     parser.add_argument("--timeout-min", type=float, default=120.0, help="Transient per-case timeout.")
     parser.add_argument("--steady-initialization", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument(
@@ -1118,6 +1386,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--stop-after-min", type=float, default=None)
     parser.add_argument("--stop-mode", choices=["writeNow", "nextWrite", "noWriteNow"], default="writeNow")
     parser.add_argument("--run", action="store_true")
+    parser.add_argument(
+        "--transient-phase-plan",
+        type=Path,
+        default=None,
+        help="Optional progressive transient schedule executed after SIMPLE transfer.",
+    )
     args = parser.parse_args()
     if args.steady_force_mean_tolerance is not None:
         legacy = float(args.steady_force_mean_tolerance)
@@ -1458,7 +1732,15 @@ def main() -> int:
 
     transient_resume = bool(args.resume and positive_times and archive is None)
     transient_command = runner_command(args, timeout_min=args.timeout_min, resume=transient_resume)
-    transient_completed = subprocess.run(transient_command, cwd=str(args.case), text=True)
+    if args.transient_phase_plan is not None:
+        transient_returncode, phase_reports = run_transient_phase_plan(
+            args, args.transient_phase_plan.resolve(), steady_archive=archive,
+        )
+        report["transient_phase_plan"] = str(args.transient_phase_plan.resolve())
+        report["transient_phases"] = phase_reports
+    else:
+        transient_completed = subprocess.run(transient_command, cwd=str(args.case), text=True)
+        transient_returncode = int(transient_completed.returncode)
     transition_audit = None
     if archive is not None and report.get("steady_transfer"):
         transition_audit = audit_steady_to_transient_continuity(
@@ -1470,15 +1752,31 @@ def main() -> int:
             json.dumps(transition_audit, indent=2) + "\n",
             encoding="utf-8",
         )
+    transient_run_status = read_json(args.case / "run_status.json", {}) or {}
+    solver_status = str(transient_run_status.get("status") or "").upper()
+    if transient_returncode != 0:
+        staged_outcome = "TRANSIENT_STAGE_FAILED"
+    elif solver_status in {"RUN_COMPLETED", "CONVERGED_STATISTICALLY"}:
+        staged_outcome = "TRANSIENT_STAGE_FINISHED"
+    else:
+        staged_outcome = "TRANSIENT_STAGE_PARTIAL"
     report.update(
-        status="TRANSIENT_STAGE_FINISHED" if transient_completed.returncode == 0 else "TRANSIENT_STAGE_FAILED",
-        transient_runner_returncode=transient_completed.returncode,
-        transient_run_status=read_json(args.case / "run_status.json", {}),
+        status=staged_outcome,
+        production_complete=staged_outcome == "TRANSIENT_STAGE_FINISHED",
+        completion_reason=(
+            "production_target_reached"
+            if solver_status == "RUN_COMPLETED"
+            else "statistical_convergence_detector"
+            if solver_status == "CONVERGED_STATISTICALLY"
+            else solver_status.lower() or "incomplete_transient"
+        ),
+        transient_runner_returncode=transient_returncode,
+        transient_run_status=transient_run_status,
         steady_to_transient_continuity=transition_audit,
         finished_at=time.strftime("%Y-%m-%d %H:%M:%S"),
     )
     (args.case / "staged_run_status.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
-    return int(transient_completed.returncode)
+    return int(transient_returncode)
 
 
 if __name__ == "__main__":

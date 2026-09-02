@@ -911,14 +911,19 @@ def analyze_study(project_root: Path) -> dict[str, Any]:
             continue
         if summary.get("status") != "COMPLETED":
             continue
+        force_metrics = summary.get("metrics") or {}
+        cl_metrics = force_metrics.get("CL") or {}
+        cd_metrics = force_metrics.get("CD") or {}
+        cm_metrics = force_metrics.get("CM") or {}
+        cl_mode = (summary.get("dominant_modes") or {}).get("CL") or {}
         metrics.append(
             {
                 "nOuterCorrectors": entry["nOuterCorrectors"],
-                "mean_CL": summary.get("mean_CL"),
-                "mean_CD": summary.get("mean_CD"),
-                "mean_CM": summary.get("mean_CM"),
-                "rms_CL": summary.get("rms_CL"),
-                "dominant_strouhal": summary.get("dominant_strouhal"),
+                "mean_CL": cl_metrics.get("mean"),
+                "mean_CD": cd_metrics.get("mean"),
+                "mean_CM": cm_metrics.get("mean"),
+                "rms_CL": cl_metrics.get("rms"),
+                "dominant_strouhal": cl_mode.get("strouhal"),
                 "cpu_seconds_per_step": summary.get("cpu_seconds_per_step"),
                 "continuity_stable": summary.get("continuity_stable"),
                 "pimple_converged": summary.get("pimple_converged"),
@@ -988,11 +993,13 @@ def analyze_study(project_root: Path) -> dict[str, Any]:
                 },
             )
 
-        plot_values(
-            "pimple_outer_forces.png",
-            ["mean_CL", "mean_CD", "mean_CM"],
-            "Mean coefficient",
-        )
+        for key, label in (
+            ("mean_CL", "Mean CL"),
+            ("mean_CD", "Mean CD"),
+            ("mean_CM", "Mean Cm"),
+            ("rms_CL", "RMS CL"),
+        ):
+            plot_values(f"pimple_outer_{key}.png", [key], label)
         plot_values(
             "pimple_outer_frequency.png",
             ["dominant_strouhal"],
@@ -1003,6 +1010,60 @@ def analyze_study(project_root: Path) -> dict[str, Any]:
             ["cpu_seconds_per_step"],
             "CPU seconds per step",
         )
+        baseline = next(
+            (row for row in metrics if int(row["nOuterCorrectors"]) == 2),
+            None,
+        )
+        if baseline is not None:
+            relative_rows: list[dict[str, Any]] = []
+            for row in metrics:
+                for key in (
+                    "mean_CL", "mean_CD", "mean_CM", "rms_CL",
+                    "dominant_strouhal", "cpu_seconds_per_step",
+                ):
+                    value = row.get(key)
+                    reference = baseline.get(key)
+                    if value is None or reference in {None, 0}:
+                        continue
+                    relative_rows.append({
+                        "nOuterCorrectors": int(row["nOuterCorrectors"]),
+                        "metric": key,
+                        "relative_to_nOuter2_percent": (
+                            100.0 * (float(value) - float(reference))
+                            / abs(float(reference))
+                        ),
+                    })
+            if relative_rows:
+                write_json_atomic(
+                    reports / "pimple_relative_to_nOuter2.json",
+                    {"reference": 2, "rows": relative_rows},
+                )
+                for key in sorted({row["metric"] for row in relative_rows}):
+                    selected = [row for row in relative_rows if row["metric"] == key]
+                    fig, axis = plt.subplots(figsize=(6.4, 3.8))
+                    axis.bar(
+                        [row["nOuterCorrectors"] for row in selected],
+                        [row["relative_to_nOuter2_percent"] for row in selected],
+                        color="#4472c4",
+                    )
+                    axis.axhline(0.0, color="black", linewidth=0.7)
+                    axis.set(
+                        xlabel="nOuterCorrectors",
+                        ylabel="Difference from nOuter=2 [%]",
+                        title=f"{key}: relative change from nOuter=2",
+                    )
+                    axis.set_xticks([2, 3, 4])
+                    axis.grid(True, axis="y", alpha=0.25)
+                    fig.tight_layout()
+                    save_scientific_figure(
+                        fig,
+                        reports / f"pimple_relative_{key}_vs_nOuter2.png",
+                        data=selected,
+                        metadata={
+                            "source": "PIMPLE 2/3/4 sensitivity study",
+                            "reference": "nOuterCorrectors=2",
+                        },
+                    )
         # A truthful categorical convergence view; no synthetic residual values.
         fig, axis = plt.subplots(figsize=(7.2, 3.8))
         values = [
@@ -1025,6 +1086,18 @@ def analyze_study(project_root: Path) -> dict[str, Any]:
             metadata={
                 "source": "PIMPLE 2/3/4 sensitivity study",
                 "transformation": "Boolean per-step convergence encoded as 0/1",
+            },
+        )
+        write_json_atomic(
+            reports / "pimple_residual_reduction_availability.json",
+            {
+                "status": "AVAILABLE_ONLY_WHEN_OUTER_ITERATION_RESIDUALS_ARE_LOGGED",
+                "synthetic_values_used": False,
+                "note": (
+                    "The boolean per-step criterion is retained. Reduction order "
+                    "is not fabricated when OpenFOAM logs do not identify residuals "
+                    "by outer-corrector index."
+                ),
             },
         )
 

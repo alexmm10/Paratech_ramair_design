@@ -1739,10 +1739,10 @@ def default_system_config(cells: int = NUM_CELLS) -> dict:
             {"name": "BRK", "enabled": True, "type": "brake", "x_c": 0.95, "riser_group": "brake"}
         ],
         "loaded_rib_selection": {
-            "mode": "cell_boundaries",
-            "indices": [0, 2, 4, 5, 7, cells],
+            "mode": "all_loaded",
+            "rib_ids": [],
             "enforce_symmetric_pairs": True,
-            "description": "cell_boundaries are the loaded boundary ribs from left to right, indexed 0..num_cells. For 9 cells, [0,2,4,5,7,9] gives 6 loaded stations."
+            "description": "all_loaded selects every loaded boundary for the current canopy. explicit_rib_ids preserves a manual subset."
         },
         "anchors": {
             "surface": "lower",
@@ -1767,7 +1767,7 @@ def default_system_config(cells: int = NUM_CELLS) -> dict:
             "alpha_op_deg": 4.2,
             "gamma_deg": 17.05,
             "mu_deg": 1.0,
-            "theta_deg": None,
+            "theta_deg": 0.0,
             "angle_tolerance_deg": 0.25,
             "description": "If theta_deg is null, theta = alpha_op + mu - gamma. v16 deliberately does not export long rigging-measurement diagnostics; the suspension/payload system is positioned using this theta relation and the report only checks the angular closure error."
         },

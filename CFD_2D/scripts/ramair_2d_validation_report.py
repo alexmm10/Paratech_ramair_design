@@ -26,6 +26,7 @@ from ramair_2d_rans_review import (
     RANS_USER_ACCEPTED_STATISTICALLY_STEADY,
     generate_review_diagnostics,
 )
+from ramair_2d_rans_checkpoint_batch import checkpoint_table
 from ramair_scientific_plot_style import save_scientific_figure
 from ramair_2d_study_registry import (
     active_workspace_root,
@@ -228,6 +229,19 @@ def analyze_checkpoint(checkpoint_root: Path) -> dict[str, Any]:
             checkpoint_root / "courant.csv",
             courant.to_dict(orient="records"),
         )
+    dominant_modes: dict[str, dict[str, Any]] = {}
+    for label, spectrum in spectra.items():
+        dominant_st = spectrum["dominant_strouhal"]
+        wave_number = None
+        if dominant_st is not None and math.isfinite(float(dominant_st)):
+            if abs(float(dominant_st)) > 1.0e-15:
+                wave_number = 1.0 / float(dominant_st)
+        dominant_modes[label] = {
+            "frequency_hz": spectrum["dominant_frequency_hz"],
+            "strouhal": dominant_st,
+            "wave_number": wave_number,
+            "peak_amplitude": spectrum["peak_amplitude"],
+        }
     summary = {
         "status": "RANS_CHECKPOINT_ANALYZED",
         "mesh_id": manifest.get("mesh_id", checkpoint_root.name),
@@ -433,14 +447,7 @@ def analyze_run(run_root: Path) -> dict[str, Any]:
         "sampling_end_s": float(sampling[time_name].iloc[-1]),
         "sampling_samples": int(len(sampling)),
         "metrics": metrics,
-        "dominant_modes": {
-            label: {
-                "frequency_hz": spectrum["dominant_frequency_hz"],
-                "strouhal": spectrum["dominant_strouhal"],
-                "peak_amplitude": spectrum["peak_amplitude"],
-            }
-            for label, spectrum in spectra.items()
-        },
+        "dominant_modes": dominant_modes,
         "stationarity_passed": all(
             bool(metrics[label]["stationarity"]["passed"])
             for label in ("CL", "CD", "CM")
@@ -528,6 +535,7 @@ def _flatten_completed_runs(study: dict[str, Any]) -> list[dict[str, Any]]:
                 "mean_CM": (metrics.get("CM") or {}).get("mean"),
                 "rms_CL": (metrics.get("CL") or {}).get("rms"),
                 "dominant_St": (modes.get("CL") or {}).get("strouhal"),
+                "dominant_W": (modes.get("CL") or {}).get("wave_number"),
                 "psd_peak_amplitude": (modes.get("CL") or {}).get("peak_amplitude"),
                 "stationarity_passed": summary.get("stationarity_passed"),
                 "courant_max": (summary.get("courant_history") or {}).get("max"),
@@ -584,8 +592,13 @@ def _gci_records(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _rans_review_rows(study: dict[str, Any]) -> list[dict[str, Any]]:
     active = Path(study["study_manifest"]["active_workspace"])
     rows: list[dict[str, Any]] = []
-    for mesh in study["mesh_registry"].get("meshes", []):
-        checkpoint = active / "checkpoints" / str(mesh["id"])
+    mesh_lookup = {
+        str(mesh["id"]): mesh for mesh in study["mesh_registry"].get("meshes", [])
+    }
+    project_root = active.parents[2]
+    for candidate in checkpoint_table(project_root):
+        mesh = mesh_lookup[str(candidate["base_mesh_id"])]
+        checkpoint = active / "checkpoints" / str(candidate["mesh_id"])
         review = read_json(checkpoint / "rans_review_manifest.json", {}) or {}
         if not review:
             continue
@@ -654,6 +667,17 @@ def _rans_review_rows(study: dict[str, Any]) -> list[dict[str, Any]]:
         )
         yplus_path = wall_root / "wall_yplus_vs_xc.csv"
         yplus = pd.read_csv(yplus_path) if yplus_path.is_file() and yplus_path.stat().st_size else pd.DataFrame()
+        if str(mesh["topology"]) == "open" and not yplus.empty:
+            branch_column = next(
+                (name for name in ("branch", "wall_branch", "surface", "patch") if name in yplus),
+                None,
+            )
+            if branch_column:
+                external = yplus[
+                    yplus[branch_column].astype(str).str.lower().str.contains("external|outer")
+                ]
+                if not external.empty:
+                    yplus = external
         cf_path = wall_root / "skin_friction_coefficient_vs_xc.csv"
         cf = pd.read_csv(cf_path) if cf_path.is_file() and cf_path.stat().st_size else pd.DataFrame()
         checkpoint_manifest = read_json(checkpoint / "checkpoint_manifest.json", {}) or {}
@@ -669,12 +693,11 @@ def _rans_review_rows(study: dict[str, Any]) -> list[dict[str, Any]]:
             or checkpoint_manifest.get("median_seconds_per_iteration")
             or (checkpoint_manifest.get("timing_evidence") or {}).get("median_seconds_per_iteration")
         )
-        bubble_length = None
-        if separation_event and reattachment_event:
-            bubble_length = float(reattachment_event["s_over_c"]) - float(separation_event["s_over_c"])
         rows.append(
             {
-                "mesh_id": mesh["id"],
+                "mesh_id": candidate["mesh_id"],
+                "base_mesh_id": mesh["id"],
+                "alpha_deg": float(candidate["alpha_deg"]),
                 "topology": mesh["topology"],
                 "mesh_level": mesh["level"],
                 "cell_count": actual_cell_count,
@@ -709,7 +732,6 @@ def _rans_review_rows(study: dict[str, Any]) -> list[dict[str, Any]]:
                 "x_reattach_over_c": reattachment_event.get("x_over_c") if reattachment_event else None,
                 "s_sep_over_c": separation_event.get("s_over_c") if separation_event else None,
                 "s_reattach_over_c": reattachment_event.get("s_over_c") if reattachment_event else None,
-                "bubble_length_over_c": bubble_length,
                 "separation_confidence": (
                     separation_event.get("confidence") if separation_event else separation.get("confidence")
                 ),
@@ -720,14 +742,17 @@ def _rans_review_rows(study: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
     for topology in ("closed", "open"):
+      for alpha_deg in (8.0, 16.0):
         eligible = [
             row for row in rows
-            if row["topology"] == topology and row["included_in_rans_mesh_convergence"]
+            if row["topology"] == topology
+            and _rans_row_alpha(row, topology) == alpha_deg
+            and row["included_in_rans_mesh_convergence"]
         ]
         fine = next((row for row in eligible if row["mesh_level"] == "fine"), None)
         if fine:
             for row in eligible:
-                for metric in ("mean_CL", "mean_CD", "mean_CM", "mean_L_over_D", "x_sep_over_c", "bubble_length_over_c"):
+                for metric in ("mean_CL", "mean_CD", "mean_CM", "mean_L_over_D", "x_sep_over_c"):
                     value = row.get(metric)
                     reference = fine.get(metric)
                     row[f"relative_difference_{metric}_vs_fine_percent"] = (
@@ -740,58 +765,44 @@ def _rans_review_rows(study: dict[str, Any]) -> list[dict[str, Any]]:
 def _rans_gci_records(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     output: list[dict[str, Any]] = []
     for topology in ("closed", "open"):
-        valid = {
-            str(row["mesh_level"]): row
-            for row in rows
-            if row["topology"] == topology
-            and row["included_in_rans_mesh_convergence"]
-        }
-        if set(valid) != {"coarse", "medium", "fine"}:
-            continue
-        for metric in ("mean_CL", "mean_CD", "mean_CM"):
-            if any(valid[level].get(metric) is None for level in valid):
+        for alpha_deg in (8.0, 16.0):
+            valid = {
+                str(row["mesh_level"]): row
+                for row in rows
+                if row["topology"] == topology
+                and _rans_row_alpha(row, topology) == alpha_deg
+                and row["included_in_rans_mesh_convergence"]
+            }
+            if set(valid) != {"coarse", "medium", "fine"}:
                 continue
-            values = [float(valid[level][metric]) for level in ("coarse", "medium", "fine")]
-            pair_differences = [
-                abs(values[index + 1] - values[index])
-                for index in range(2)
-            ]
-            manual_uncertainties = [
-                abs(float(row.get(metric.replace("mean_", "std_")) or 0.0))
-                for row in valid.values()
-                if row.get("manual_acceptance")
-            ]
-            if (
-                manual_uncertainties
-                and max(manual_uncertainties) >= max(min(pair_differences), 1.0e-30)
-            ):
-                output.append(
-                    {
-                        "topology": topology,
-                        "metric": metric,
+            for metric in ("mean_CL", "mean_CD", "mean_CM"):
+                if any(valid[level].get(metric) is None for level in valid):
+                    continue
+                values = [float(valid[level][metric]) for level in ("coarse", "medium", "fine")]
+                pair_differences = [abs(values[index + 1] - values[index]) for index in range(2)]
+                manual_uncertainties = [
+                    abs(float(row.get(metric.replace("mean_", "std_")) or 0.0))
+                    for row in valid.values() if row.get("manual_acceptance")
+                ]
+                common = {"topology": topology, "alpha_deg": alpha_deg, "metric": metric}
+                if manual_uncertainties and max(manual_uncertainties) >= max(min(pair_differences), 1.0e-30):
+                    output.append({
+                        **common,
                         "status": "GCI_NOT_RELIABLE_RANS_REVIEW_UNCERTAINTY",
                         "maximum_manual_window_std": max(manual_uncertainties),
                         "minimum_spatial_difference": min(pair_differences),
-                    }
-                )
-                continue
-            output.append(
-                {
-                    "topology": topology,
-                    "metric": metric,
+                    })
+                    continue
+                output.append({
+                    **common,
                     **generalized_gci(
-                        coarse_value=values[0],
-                        medium_value=values[1],
-                        fine_value=values[2],
+                        coarse_value=values[0], medium_value=values[1], fine_value=values[2],
                         coarse_cells=int(valid["coarse"]["cell_count"]),
                         medium_cells=int(valid["medium"]["cell_count"]),
                         fine_cells=int(valid["fine"]["cell_count"]),
                     ),
-                    "contains_manual_acceptance": any(
-                        row.get("manual_acceptance") for row in valid.values()
-                    ),
-                }
-            )
+                    "contains_manual_acceptance": any(row.get("manual_acceptance") for row in valid.values()),
+                })
     return output
 
 
@@ -803,13 +814,24 @@ _RANS_SCALAR_METRICS = {
 }
 
 
+def _rans_row_alpha(row: dict[str, Any], topology: str) -> float:
+    """Read explicit angle while preserving pre-schema multi-angle reports."""
+    fallback = 16.0 if topology == "closed" else 8.0
+    try:
+        return float(row.get("alpha_deg", fallback))
+    except (TypeError, ValueError):
+        return fallback
+
+
 def _rans_scalar_change_records(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return signed coarse/fine differences relative to the medium grid."""
     records: list[dict[str, Any]] = []
     for topology in ("closed", "open"):
+      for alpha_deg in (8.0, 16.0):
         selected = {
             str(row.get("mesh_level")): row for row in rows
             if row.get("topology") == topology
+            and _rans_row_alpha(row, topology) == alpha_deg
             and row.get("included_in_rans_mesh_convergence")
         }
         medium = selected.get("medium")
@@ -830,8 +852,20 @@ def _rans_scalar_change_records(rows: list[dict[str, Any]]) -> list[dict[str, An
                 reference_f = float(reference)
                 difference = value - reference_f
                 near_zero = abs(reference_f) <= threshold
+                row_cells = int(row.get("cell_count") or 0)
+                medium_cells = int(medium.get("cell_count") or 0)
+                if level == "coarse" and row_cells > 0:
+                    cell_increase = 100.0 * (medium_cells - row_cells) / row_cells
+                elif level == "fine" and medium_cells > 0:
+                    cell_increase = 100.0 * (row_cells - medium_cells) / medium_cells
+                else:
+                    cell_increase = None
+                response_change = (
+                    None if near_zero else 100.0 * abs(difference) / abs(reference_f)
+                )
                 records.append({
                     "topology": topology,
+                    "alpha_deg": alpha_deg,
                     "metric": metric,
                     "mesh_level": level,
                     "reference_level": "medium",
@@ -849,6 +883,18 @@ def _rans_scalar_change_records(rows: list[dict[str, Any]]) -> list[dict[str, An
                         ("NOT_DEFINED_NEAR_ZERO_REFERENCE" if near_zero else "DEFINED")
                     ),
                     "near_zero_threshold": threshold,
+                    "cell_count_increase_percent": cell_increase,
+                    "cell_increase_at_least_30_percent": (
+                        None if cell_increase is None else cell_increase >= 30.0
+                    ),
+                    "response_change_percent": response_change,
+                    "response_change_at_most_3_percent": (
+                        None if response_change is None else response_change <= 3.0
+                    ),
+                    "mesh_independence_pair_pass": (
+                        None if cell_increase is None or response_change is None
+                        else cell_increase >= 30.0 and response_change <= 3.0
+                    ),
                 })
     return records
 
@@ -869,14 +915,18 @@ def _trend(values: list[float]) -> str:
 def _rans_trend_records(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for topology in ("closed", "open"):
+      for alpha_deg in (8.0, 16.0):
         selected = sorted(
-            [row for row in rows if row.get("topology") == topology and row.get("included_in_rans_mesh_convergence")],
+            [row for row in rows if row.get("topology") == topology
+             and _rans_row_alpha(row, topology) == alpha_deg
+             and row.get("included_in_rans_mesh_convergence")],
             key=lambda row: int(row.get("cell_count") or 0),
         )
         for metric in _RANS_SCALAR_METRICS:
             values = [float(row[metric]) for row in selected if row.get(metric) is not None]
             records.append({
                 "topology": topology,
+                "alpha_deg": alpha_deg,
                 "metric": metric,
                 "trend": _trend(values),
                 "available_levels": len(values),
@@ -952,6 +1002,9 @@ def _plot_rans_spatial_suite(
                     ]
                     axis.bar(positions + offset, heights, width=width, label=topology.title())
             axis.axhline(0.0, color="black", linewidth=0.7, linestyle="--")
+            if key == "delta_percent":
+                axis.axhline(3.0, color="#b3261e", linewidth=0.8, linestyle=":")
+                axis.axhline(-3.0, color="#b3261e", linewidth=0.8, linestyle=":")
             axis.set_title(f"{title}: {label}")
             axis.set_xlabel("Grid level relative to medium")
             axis.set_ylabel(ylabel)
@@ -1110,33 +1163,6 @@ def _plot_rans_wall_metrics(output: Path, rows: list[dict[str, Any]]) -> list[st
         )
         products.append(str(path))
 
-    for field, filename, ylabel, title in (
-        ("bubble_length_over_c", "bubble_length_vs_refinement.png", r"Bubble length, $L_b/c$ [-]", "Separated-bubble length versus mesh refinement"),
-    ):
-        values_all = [row for row in eligible if row.get(field) is not None]
-        if not values_all:
-            continue
-        figure, axis = plt.subplots(figsize=(8.2, 4.8), constrained_layout=True)
-        for topology, marker in (("closed", "o"), ("open", "s")):
-            values = sorted(
-                [row for row in values_all if row["topology"] == topology],
-                key=lambda row: level_order.get(str(row["mesh_level"]), 99),
-            )
-            if values:
-                axis.plot([row["mesh_level"].title() for row in values], [row[field] for row in values], marker=marker, label=topology.title())
-        axis.set(xlabel="Mesh refinement", ylabel=ylabel, title=title)
-        axis.legend()
-        path = output / filename
-        save_scientific_figure(
-            figure, path, data=values_all,
-            metadata={
-                "source": "selected RANS checkpoint connectivity-based wallShearStress analysis",
-                "transformation": "persistent sign-change events on branch arc length",
-                "grouping": "topology and mesh_level",
-                "sorting": "coarse, medium, fine",
-            },
-        )
-        products.append(str(path))
     return products
 
 
@@ -1172,14 +1198,33 @@ def generate_study_report(project_root: Path) -> dict[str, Any]:
                 for path in folder.glob(f"{stem}*"):
                     if path.is_file():
                         path.unlink()
-        _plot_rans_spatial(spatial_root, rans_rows)
-        rans_spatial_products.extend(
-            _plot_rans_spatial_suite(spatial_root, rans_rows, rans_changes, rans_gci)
-        )
-        rans_spatial_products.extend(_plot_rans_wall_metrics(spatial_root, rans_rows))
         for topology in ("closed", "open"):
-            topology_rows = [row for row in rans_rows if row["topology"] == topology]
-            _plot_rans_spatial(spatial_root / topology, topology_rows)
+            for alpha_deg in (8.0, 16.0):
+                selected_rows = [
+                    row for row in rans_rows
+                    if row["topology"] == topology
+                    and _rans_row_alpha(row, topology) == alpha_deg
+                ]
+                selected_changes = [
+                    row for row in rans_changes
+                    if row["topology"] == topology
+                    and _rans_row_alpha(row, topology) == alpha_deg
+                ]
+                selected_gci = [
+                    row for row in rans_gci
+                    if row["topology"] == topology
+                    and _rans_row_alpha(row, topology) == alpha_deg
+                ]
+                angle_root = spatial_root / topology / f"alpha_{int(alpha_deg)}"
+                _plot_rans_spatial(angle_root, selected_rows)
+                rans_spatial_products.extend(
+                    _plot_rans_spatial_suite(
+                        angle_root, selected_rows, selected_changes, selected_gci
+                    )
+                )
+                rans_spatial_products.extend(
+                    _plot_rans_wall_metrics(angle_root, selected_rows)
+                )
     if rans_gci:
         _write_csv_nonempty(output / "spatial_rans_gci.csv", rans_gci)
     matrix_rows = [
@@ -1205,7 +1250,7 @@ def generate_study_report(project_root: Path) -> dict[str, Any]:
                     key: row.get(key)
                     for key in (
                         "run_id", "topology", "mesh_level", "cell_count", "dt_s",
-                        "dt_star", "dominant_St", "psd_peak_amplitude",
+                        "dt_star", "dominant_St", "dominant_W", "psd_peak_amplitude",
                         "stationarity_passed",
                     )
                 }
@@ -1254,6 +1299,9 @@ def generate_study_report(project_root: Path) -> dict[str, Any]:
         ),
         "rans_gci_evaluations": rans_gci,
         "rans_scalar_change_records": len(rans_changes),
+        "rans_mesh_independence_pairs": [
+            row for row in rans_changes if row.get("mesh_level") != "medium"
+        ],
         "rans_trend_records": rans_trends,
         "rans_spatial_products": rans_spatial_products,
         "gci_evaluations": gci,
@@ -1272,7 +1320,7 @@ def generate_study_report(project_root: Path) -> dict[str, Any]:
         "",
         "## Scope",
         "",
-        "- Common angle: 8 deg",
+        "- RANS base angles: closed 16 deg; open 8 deg",
         "- Mach: 0.15",
         "- Reynolds: 1.9e6",
         "- Chord: 1 m",

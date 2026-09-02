@@ -26,23 +26,40 @@ from ramair_2d_run_lease import (  # noqa: E402
     acquire_run_lease,
 )
 from ramair_2d_validation_live_monitor import _parse_increment  # noqa: E402
+from ramair_2d_rans_checkpoint_batch import mesh_angle_id  # noqa: E402
+
+
+def test_rans_checkpoint_identity_preserves_primary_and_separates_secondary_angle() -> None:
+    study = {
+        "mesh_registry": {
+            "meshes": [
+                {"id": "closed_medium", "topology": "closed", "level": "medium"},
+                {"id": "open_medium", "topology": "open", "level": "medium"},
+            ]
+        }
+    }
+    assert mesh_angle_id(study, "closed_medium", 16.0) == "closed_medium"
+    assert mesh_angle_id(study, "closed_medium", 8.0) == "closed_medium__alpha_p8"
+    assert mesh_angle_id(study, "open_medium", 8.0) == "open_medium"
+    assert mesh_angle_id(study, "open_medium", 16.0) == "open_medium__alpha_p16"
 
 
 def test_absolute_simple_targets_never_gate_at_7840() -> None:
-    assert target_for_iteration(0) == 10000
-    assert target_for_iteration(7838) == 10000
-    assert target_for_iteration(10000) == 12500
-    assert target_for_iteration(12499) == 12500
-    assert target_for_iteration(12500) == 15000
+    assert target_for_iteration(0) == 20000
+    assert target_for_iteration(7838) == 20000
+    assert target_for_iteration(10000) == 20000
+    assert target_for_iteration(12499) == 20000
+    assert target_for_iteration(12500) == 20000
     assert target_for_iteration(19999) == 20000
     assert target_for_iteration(20000) == 20000
     assert gate_is_due(7840, 10000) is False
-    assert gate_is_due(10000, 10000) is True
+    assert gate_is_due(10000, 10000) is False
+    assert gate_is_due(20000, 20000) is True
     accounting = block_accounting(7838, block_start=0)
     assert accounting == {
         "absolute_simple_iteration": 7838,
         "block_start_iteration": 0,
-        "block_target_iteration": 10000,
+        "block_target_iteration": 20000,
         "block_completed_iterations": 7838,
     }
 
@@ -198,8 +215,10 @@ def test_validation_lab_has_final_horizontal_navigation_and_no_tabs() -> None:
         assert label in page
     assert "\n    tabs = st.tabs" not in page
     assert "\n    analysis_tabs = st.tabs" not in page
-    assert "Generar campos RANS finales" in page
-    assert "Generar postproceso completo" in page
+    assert "Postproceso RANS rápido" in page
+    assert "Generar animaciones RANS" in page
+    assert "Postproceso URANS rápido" in page
+    assert "Generar animaciones" in page
 
 
 def test_rans_queue_contract_has_six_visible_bases_and_no_urans_transfer() -> None:
@@ -212,4 +231,4 @@ def test_rans_queue_contract_has_six_visible_bases_and_no_urans_transfer() -> No
     )[1].split("def _execute_base_unlocked", 1)[0]
     assert "start-transient" not in targeted
     assert "AUTO_EXTEND_TO_" in targeted
-    assert "STOP_AT_MAX_REVIEW_REQUIRED" in targeted
+    assert "COMPLETED_20000_MANUAL_REVIEW_REQUIRED" in targeted

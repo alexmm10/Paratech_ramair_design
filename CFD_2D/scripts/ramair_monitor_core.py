@@ -56,12 +56,14 @@ def parse_openfoam_lines(
     delta_t_history = list(state.get("deltaT_history") or [])
     delta_t = state.get("deltaT")
     current_iteration = state.get("current_iteration")
+    steps_total = int(state.get("steps_total", len(iterations)) or 0)
     for line in lines:
         match = TIME_RE.search(line)
         if match:
             current_iteration = _finite(match.group(1))
             if current_iteration is not None:
                 iterations.append(current_iteration)
+                steps_total += 1
             continue
         match = DELTA_T_RE.search(line)
         if match:
@@ -123,6 +125,7 @@ def parse_openfoam_lines(
         "deltaT_history": delta_t_history[-limit:],
         "deltaT": delta_t,
         "current_iteration": current_iteration,
+        "steps_total": steps_total,
     }
 
 

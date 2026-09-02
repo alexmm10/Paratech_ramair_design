@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "name": "closed_validation_beta75_experimental_v1",
+  "topology": "closed",
+  "geometry": {
+    "closed_variant": "reference_uncut_validation_1m",
+    "reynolds": 1900000.0,
+    "rho_kg_m3": 0.66606662,
+    "mu_pa_s": 1.7894e-05,
+    "velocity_m_s": 51.04384,
+    "chord_m": 1.0,
+    "spanwise_thickness_chord": 0.01
+  },
+  "boundary_layer": {
+    "layers": 75,
+    "distribution_mode": "beta_law",
+    "thickness_safety_factor": 1.2,
+    "target_y_plus": 0.6666666666666666,
+    "wall_nodes_target": 1200,
+    "minimum_tangential_size_chord": 0.0003,
+    "maximum_tangential_size_chord": 0.005,
+    "wall_bump_coefficient": 0.45,
+    "leading_edge_nodes": 70,
+    "te_cap_nodes": 35,
+    "minimum_profile_point_spacing_chord": 1e-06
+  },
+  "external_volume": {
+    "domain_radius_chord": 50.0,
+    "interface_size_mode": "tangential_match",
+    "interface_tangential_factor": 0.7,
+    "farfield_size_chord": 5.0,
+    "radial_growth_rate": 0.13,
+    "mesh_algorithm": 6
+  },
+  "execution": {
+    "gmsh_threads": 12,
+    "openfoam_timeout_s": 900
+  }
+}

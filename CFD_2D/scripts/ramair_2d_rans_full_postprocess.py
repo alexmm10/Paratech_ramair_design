@@ -18,8 +18,21 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--variant", required=True)
     parser.add_argument("--wall-only", action="store_true")
+    parser.add_argument(
+        "--include-animations",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+    )
+    parser.add_argument("--animations-only", action="store_true")
     args = parser.parse_args()
     readiness = prepare_final_state(args.case.resolve())
+    case_config_path = args.case.resolve() / "case_config.json"
+    case_config = (
+        json.loads(case_config_path.read_text(encoding="utf-8"))
+        if case_config_path.is_file()
+        else {}
+    )
+    alpha_deg = float(case_config.get("alpha_deg", 0.0))
     wall_analysis: dict[str, object] | None = None
     if args.wall_only:
         field_generation = run_openfoam_post_exports(
@@ -42,14 +55,15 @@ def main() -> int:
             sample_points=40,
             solver_module="incompressibleFluid",
             simulation_mode="RANS",
+            include_temporal_separation_history=False,
         )
     else:
         generated_output = postprocess(
             args.project_root.resolve(),
             args.variant,
-            8.0,
+            alpha_deg,
             0.6,
-            export_vtk=True,
+            export_vtk=False,
             export_vtk_all_times=False,
             run_openfoam_postprocess=True,
             openfoam_postprocess_timeout_s=900,
@@ -58,7 +72,9 @@ def main() -> int:
             wall_profile_analysis=True,
             velocity_profile_stations=[0.1, 0.3, 0.6, 0.9],
             velocity_profile_sample_points=40,
-            automatic_paraview_products=False,
+            automatic_paraview_products=True,
+            include_paraview_animations=bool(args.include_animations),
+            paraview_animations_only=bool(args.animations_only),
             direct_case_dir=args.case,
             direct_output_dir=args.output,
             simulation_mode="RANS",
@@ -77,8 +93,10 @@ def main() -> int:
         "field_generation": field_generation if args.wall_only else [],
         "policy": {
             "explicit_on_demand": True,
-            "latest_vtk_only": True,
-            "animations": False,
+            "latest_vtk_only": False,
+            "volume_reader": "OpenFOAMReader_direct",
+            "animations": bool(args.include_animations or args.animations_only),
+            "animations_only": bool(args.animations_only),
             "all_time_volume_copy": False,
             "wall_only": bool(args.wall_only),
         },

@@ -46,17 +46,10 @@
     }
   ],
   "loaded_rib_selection": {
-    "mode": "cell_boundaries",
-    "indices": [
-      0,
-      2,
-      4,
-      5,
-      7,
-      9
-    ],
+    "mode": "all_loaded",
+    "rib_ids": [],
     "enforce_symmetric_pairs": true,
-    "description": "cell_boundaries are the loaded boundary ribs from left to right, indexed 0..num_cells. For 9 cells, [0,2,4,5,7,9] gives 6 loaded stations."
+    "description": "all_loaded selects every loaded boundary for the current canopy. explicit_rib_ids preserves a manual subset."
   },
   "anchors": {
     "surface": "lower",
@@ -121,10 +114,10 @@
     "description": "P_cascade = centroid(children) + fraction_to_target*(target-centroid). Groups are created centre-to-tip on each side to enforce mirror symmetry."
   },
   "angles": {
-    "alpha_op_deg": 4.2,
-    "gamma_deg": 17.05,
-    "mu_deg": 1.0,
-    "theta_deg": null,
+    "alpha_op_deg": 0.0,
+    "gamma_deg": 0.0,
+    "mu_deg": 0.0,
+    "theta_deg": 0.0,
     "angle_tolerance_deg": 0.25,
     "description": "If theta_deg is null, theta = alpha_op + mu - gamma. v16 deliberately does not export long rigging-measurement diagnostics; the suspension/payload system is positioned using this theta relation and the report only checks the angular closure error."
   },

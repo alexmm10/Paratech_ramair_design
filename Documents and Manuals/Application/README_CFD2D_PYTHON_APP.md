@@ -9,8 +9,8 @@ generate. The result is not offered as `main_profile` unless XFOIL produced a
 real repanelled profile, converged polar rows, valid Cp files and at least two
 accepted stagnation locations.
 
-XFLR5 is optional for manual comparison. The app controls XFOIL directly so
-that every command, convergence result and cut decision is reproducible.
+The app controls XFOIL directly so that every command, convergence result and
+cut decision is reproducible. XFLR5 is not required by the application flow.
 
 ## Flujo de uso
 
@@ -33,12 +33,13 @@ muestra inmediatamente los valores recuperados para poder modificarlos.
 
 ### Cargar, modificar y versionar un caso de trabajo
 
-1. Selecciona el caso en `Caso guardado en Results` de la barra lateral.
-2. Pulsa `Cargar caso de trabajo completo`. La opcion `Reemplazar workspace
-   temporal` evita crear copias pesadas; `Archivar workspace temporal` conserva
-   una copia explicita.
+1. Abre `Caso de trabajo` y elige un candidato. Elegir su nombre no lo carga ni
+   modifica el contexto activo.
+2. Si existe trabajo temporal, elige conservarlo o reemplazarlo y confirma la
+   operacion. Pulsa `Cargar caso de trabajo` para activar el contenedor.
 3. Geometria, caso CFD, malla y solver se restauran juntos. El solver se aplica
-   al final para que ningun paquete anterior oculte su configuracion.
+   al final para que ningun paquete anterior oculte su configuracion. Un Work
+   Case incompleto tambien puede cargarse y completarse progresivamente.
 4. La app invalida los widgets anteriores y muestra inmediatamente los valores
    recuperados. Para una malla restaurada, usa `Configuracion editable activa`; no selecciones
    el preset si quieres conservar exactamente la base cargada.
@@ -46,8 +47,7 @@ muestra inmediatamente los valores recuperados para poder modificarlos.
    conserva primero como borrador activo: no modifica el paquete guardado ni su
    aprobacion hasta que una malla real se guarda o sustituye explicitamente.
 6. Regenera sobre el mismo paquete o guarda una nueva variante para comparar.
-   Las cargas aisladas de `geometry`, `case`, `mesh`, `simulation` o
-   `postprocess` permanecen en `Carga avanzada por etapa`.
+   Cambiar geometria, caso CFD o malla no abandona el Work Case cargado.
 
 La pagina `Geometria` separa `Geometria 2D` (diseno XFOIL, catalogo/importacion
 de perfiles, TE, crossports y preview del DTO ejecutable) de `Geometria 3D`
@@ -57,10 +57,12 @@ partir de defaults, presets o una malla guardada; General, Closed y Open
 conservan los controles efectivos. La habilitacion tecnica de la salida activa
 es independiente de la aprobacion persistente de la revision guardada.
 
-La procedencia activa se muestra en la barra lateral y queda registrada en
-`CFD_2D/app_state/active_workspace.json`. Abrir Gmsh, los informes y los VTK de
-`checkMesh` usa la salida activa, por lo que una malla cargada se puede revisar
-antes de remallarla.
+La procedencia activa se muestra en la barra lateral como informacion de solo
+lectura y queda registrada en `CFD_2D/app_state/active_workspace.json`. Abrir
+Gmsh, los informes y los VTK de `checkMesh` usa la salida activa, por lo que una
+malla cargada se puede revisar antes de remallarla. Una malla incompatible no
+puede activarse como resultado; sus parametros de generacion pueden importarse
+explicitamente como base con una advertencia.
 
 ## Estrategias del inlet abierto
 

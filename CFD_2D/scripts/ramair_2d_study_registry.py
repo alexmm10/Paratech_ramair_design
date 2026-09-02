@@ -26,7 +26,7 @@ from ramair_2d_urans_contract import RUN_STATUSES as URANS_RUN_STATUSES
 
 STUDY_ID = "closed_open_M0p15_Re1p9e6_alpha8"
 RESULTS_CASE_NAME = "RamAir_closed_open_mesh_convergence_M0p15_Re1p9e6"
-STUDY_CONFIG_SCHEMA_VERSION = 11
+STUDY_CONFIG_SCHEMA_VERSION = 13
 ACTIVE_RELATIVE = Path("CFD_2D/validation_studies") / STUDY_ID
 STATE_RELATIVE = Path("CFD_2D/app_state/validation_convergence_workspace.json")
 RESULTS_STUDY_RELATIVE = Path("Convergence Studies") / STUDY_ID
@@ -296,22 +296,25 @@ def default_study_config() -> dict[str, Any]:
             "dt_target_s": None,
             "startup_factors": [0.25, 0.5, 1.0],
             "startup_duration_tc": [1.0, 1.0, 2.0],
-            "settling_tc": 20.0,
+            "settling_tc": 10.0,
             "sampling_tc": 200.0,
-            "nOuterCorrectors": 3,
+            "nOuterCorrectors": 5,
             "nCorrectors": 2,
             "nNonOrthogonalCorrectors": 1,
             "courant_controls_dt": False,
             "field_write_interval_tc": 1.0,
             "retained_snapshots": 24,
             "mpi_ranks": 8,
+            "automatic_core_selection": True,
+            "renumber_before_decompose": True,
+            "reconstruction_mode": "latest",
             "timeout_hours": 24.0,
             "steady_checkpoint_timeout_min": 120.0,
             "rans_base_states": {
                 "enabled": True,
-                "initial_iterations": 10000,
-                "minimum_simple_iterations_before_convergence_check": 10000,
-                "extension_iterations": 2500,
+                "initial_iterations": 20000,
+                "minimum_simple_iterations_before_convergence_check": 20000,
+                "extension_iterations": 20000,
                 "automatic_queue_max_iterations": 20000,
                 "maximum_iterations": 20000,
                 "allow_early_stop": False,
@@ -325,6 +328,8 @@ def default_study_config() -> dict[str, Any]:
                 "storage_profile": "steady_checkpoint_compact",
                 "timeout_min": 120.0,
                 "mpi_ranks": 8,
+                "automatic_core_selection": True,
+                "renumber_before_decompose": True,
                 "force_window_samples": 500,
                 "force_mean_tolerance_percent": 1.0,
                 "force_fluctuation_tolerance_percent": 2.0,
@@ -342,11 +347,11 @@ def default_study_config() -> dict[str, Any]:
                     "velocity_divergence": "bounded Gauss linearUpwind limited",
                     "turbulence_divergence": "bounded Gauss upwind",
                 },
-                "relaxation": {"p": 0.3, "U": 0.5, "nuTilda": 0.5},
+                "relaxation": {"p": 0.3, "U": 0.7, "nuTilda": 0.7},
                 "open_bounded_policy": "diagnostic_only_after_confirmation",
             },
             "rans_convergence": {
-                "extension_iterations": 2500,
+                "extension_iterations": 20000,
                 "pressure_residual_preferred_limit": None,
                 "pressure_residual_plateau_multiplier": 10.0,
                 "pressure_residual_absolute_ceiling": 0.01,
@@ -360,11 +365,11 @@ def default_study_config() -> dict[str, Any]:
                 "time_step_policy": "fixed",
                 "temporal_package": "reference",
                 "production_scheme": "backward",
-                "pimple_outer_correctors": 3,
+                "pimple_outer_correctors": 5,
                 "pimple_correctors": 2,
                 "pimple_non_orthogonal_correctors": 1,
                 "pimple": {
-                    "nOuterCorrectors": 3,
+                    "nOuterCorrectors": 5,
                     "nCorrectors": 2,
                     "nNonOrthogonalCorrectors": 1,
                 },
@@ -400,8 +405,14 @@ def default_study_config() -> dict[str, Any]:
                         "purpose": "transition",
                     },
                 ],
-                "settling_time_star": 20.0,
+                "settling_time_star": 10.0,
                 "sampling_time_star": 200.0,
+                "outer_corrector_residual_control": {
+                    "enabled": True,
+                    "p": {"tolerance": 1.0e-4, "relTol": 0.0},
+                    "U": {"tolerance": 1.0e-4, "relTol": 0.0},
+                    "nuTilda": {"tolerance": 1.0e-4, "relTol": 0.0}
+                },
                 "field_write_interval_s": None,
                 "purge_write": None,
                 "storage_profile": "transient_convergence_compact",
@@ -438,6 +449,16 @@ def default_study_config() -> dict[str, Any]:
             "manual": {
                 "values_s": [2.5e-4, 1.25e-4, 6.25e-5],
                 "description": "Exactly three positive, unique, descending values.",
+            },
+            "cummings_closed_low_cost": {
+                "values_dt_star": [0.01, 0.005, 0.0025],
+                "angle_order_deg": [16.0, 8.0],
+                "description": "Low-cost closed-airfoil Cummings ladder; fixed dt and common physical duration.",
+            },
+            "cummings_open_low_cost": {
+                "values_dt_star": [0.02, 0.01, 0.005],
+                "angle_order_deg": [8.0, 16.0],
+                "description": "Low-cost open-airfoil Cummings ladder; fixed dt and common physical duration.",
             },
         },
         "storage": {
@@ -582,6 +603,32 @@ def migrate_study_config(data: dict[str, Any]) -> dict[str, Any]:
     convergence["extension_iterations"] = int(
         rans.get("extension_iterations", 2500)
     )
+    if source_schema < 12:
+        rans.update({
+            "initial_iterations": 20000,
+            "minimum_simple_iterations_before_convergence_check": 20000,
+            "extension_iterations": 20000,
+            "automatic_queue_max_iterations": 20000,
+            "maximum_iterations": 20000,
+            "allow_early_stop": False,
+            "native_residual_control_enabled": False,
+            "relaxation": {"p": 0.3, "U": 0.7, "nuTilda": 0.7},
+        })
+        convergence["extension_iterations"] = 20000
+    if source_schema < 13:
+        # Cummings campaign simplification: every RANS checkpoint is one
+        # uninterrupted 20k-iteration block reviewed by the user afterwards.
+        rans.update({
+            "initial_iterations": 20000,
+            "minimum_simple_iterations_before_convergence_check": 20000,
+            "extension_iterations": 20000,
+            "automatic_queue_max_iterations": 20000,
+            "maximum_iterations": 20000,
+            "allow_early_stop": False,
+            "native_residual_control_enabled": False,
+            "relaxation": {"p": 0.3, "U": 0.7, "nuTilda": 0.7},
+        })
+        convergence["extension_iterations"] = 20000
     validation["rans_base_states"] = rans
     validation["rans_convergence"] = convergence
 
@@ -635,7 +682,7 @@ def migrate_study_config(data: dict[str, Any]) -> dict[str, Any]:
     pimple = dict(source_pimple)
     pimple.setdefault(
         "nOuterCorrectors",
-        int(urans.get("pimple_outer_correctors", 3)),
+        int(urans.get("pimple_outer_correctors", 5)),
     )
     pimple.setdefault(
         "nCorrectors",
@@ -651,9 +698,40 @@ def migrate_study_config(data: dict[str, Any]) -> dict[str, Any]:
     urans["pimple_non_orthogonal_correctors"] = int(
         pimple["nNonOrthogonalCorrectors"]
     )
+    if source_schema < 12:
+        urans["pimple"] = {
+            "nOuterCorrectors": 5,
+            "nCorrectors": 2,
+            "nNonOrthogonalCorrectors": 1,
+        }
+        urans["pimple_outer_correctors"] = 5
+        urans["settling_time_star"] = 10.0
+        urans["outer_corrector_residual_control"] = {
+            "enabled": True,
+            "p": {"tolerance": 1.0e-4, "relTol": 0.0},
+            "U": {"tolerance": 1.0e-4, "relTol": 0.0},
+            "nuTilda": {"tolerance": 1.0e-4, "relTol": 0.0},
+        }
+    if source_schema < 13:
+        validation["settling_tc"] = 10.0
+        urans["settling_time_star"] = 10.0
+        urans["pimple"] = {
+            "nOuterCorrectors": 5,
+            "nCorrectors": 2,
+            "nNonOrthogonalCorrectors": 1,
+        }
+        urans["pimple_outer_correctors"] = 5
+        urans["pimple_correctors"] = 2
+        urans["pimple_non_orthogonal_correctors"] = 1
+        urans["outer_corrector_residual_control"] = {
+            "enabled": True,
+            "p": {"tolerance": 1.0e-4, "relTol": 0.0},
+            "U": {"tolerance": 1.0e-4, "relTol": 0.0},
+            "nuTilda": {"tolerance": 1.0e-4, "relTol": 0.0},
+        }
     urans.setdefault(
         "settling_time_star",
-        float(validation.get("settling_tc", 20.0)),
+        float(validation.get("settling_tc", 10.0)),
     )
     urans.setdefault(
         "sampling_time_star",
@@ -671,6 +749,13 @@ def migrate_study_config(data: dict[str, Any]) -> dict[str, Any]:
         rans_alias.setdefault(key, rans.get(key))
     rans_alias.setdefault("per_mesh_timeout_s", None)
     rans_alias.setdefault("continue_after_timeout", True)
+    if source_schema < 13:
+        rans_alias.update({
+            "initial_iterations": 20000,
+            "minimum_simple_iterations_before_convergence_check": 20000,
+            "extension_iterations": 20000,
+            "maximum_iterations": 20000,
+        })
     rans_alias.setdefault(
         "continue_after_nonfatal_failure",
         bool(rans.get("continue_after_nonfatal_failure", True)),
@@ -902,7 +987,7 @@ def synchronize_run_matrix_solver_controls(
     validation = dict(study_config.get("validation_study") or {})
     urans = dict(validation.get("urans") or {})
     expected = {
-        "nOuterCorrectors": int(urans.get("pimple_outer_correctors", 3)),
+        "nOuterCorrectors": int(urans.get("pimple_outer_correctors", 5)),
         "nCorrectors": int(urans.get("pimple_correctors", 2)),
         "nNonOrthogonalCorrectors": int(
             urans.get("pimple_non_orthogonal_correctors", 1)
@@ -932,14 +1017,16 @@ def build_run_matrix(
     dt_values_s: Iterable[float],
     preset: str,
     previous: dict[str, Any] | None = None,
+    topology_dt_values_s: dict[str, Iterable[float]] | None = None,
+    angles_by_topology: dict[str, Iterable[float]] | None = None,
 ) -> dict[str, Any]:
     condition = operating_condition(DEFAULT_OPERATING_CONDITION)
     values = sorted({float(value) for value in dt_values_s}, reverse=True)
-    if len(values) != 3 or any(
+    if len(values) < 3 or any(
         not math.isfinite(value) or value <= 0.0 for value in values
     ):
         raise ValueError(
-            "Run-matrix presets require exactly three distinct positive deltaT values"
+            "Run-matrix presets require at least three distinct positive deltaT values"
         )
     previous_by_id = {
         str(row.get("run_id")): row
@@ -948,9 +1035,25 @@ def build_run_matrix(
     }
     runs: list[dict[str, Any]] = []
     for mesh in registry["meshes"]:
-        for dt_s in values:
+        default_alpha = 16.0 if mesh["topology"] == "closed" else 8.0
+        alpha_values = [
+            float(value) for value in (angles_by_topology or {}).get(
+                str(mesh["topology"]), [default_alpha]
+            )
+        ]
+        mesh_values = sorted(
+            {
+                float(value)
+                for value in (topology_dt_values_s or {}).get(
+                    str(mesh["topology"]), values
+                )
+            },
+            reverse=True,
+        )
+        for alpha_deg in alpha_values:
+          for dt_s in mesh_values:
             run_id = deterministic_run_id(
-                mesh["topology"], mesh["level"], dt_s, 3, "backward", 8.0
+                mesh["topology"], mesh["level"], dt_s, 5, "backward", alpha_deg
             )
             row = {
                     "run_id": run_id,
@@ -960,7 +1063,7 @@ def build_run_matrix(
                     "mesh_package": mesh["mesh_package"],
                     "mesh_hash": mesh["mesh_hash"],
                     "cell_count": mesh["cell_count"],
-                    "alpha_deg": 8.0,
+                    "alpha_deg": alpha_deg,
                     "mach": 0.15,
                     "reynolds": 1.9e6,
                     "chord_m": 1.0,
@@ -969,7 +1072,7 @@ def build_run_matrix(
                     "time_scheme": "backward",
                     "dt_s": dt_s,
                     "dt_star": dt_s / condition["tc_s"],
-                    "nOuterCorrectors": 3,
+                    "nOuterCorrectors": 5,
                     "nCorrectors": 2,
                     "nNonOrthogonalCorrectors": 1,
                     "physical_duration_s": 0.0,
@@ -996,6 +1099,10 @@ def build_run_matrix(
         "study_id": STUDY_ID,
         "preset": preset,
         "dt_values_s": values,
+        "dt_values_s_by_topology": {
+            key: sorted({float(value) for value in source}, reverse=True)
+            for key, source in (topology_dt_values_s or {}).items()
+        },
         "runs": runs,
         "updated_at": utc_stamp(),
     }
@@ -1013,6 +1120,8 @@ def set_run_matrix_preset(
         "reference": "reference",
         "frequency": "frequency",
         "manual": "manual",
+        "cummings_closed_low_cost": "cummings_closed_low_cost",
+        "cummings_open_low_cost": "cummings_open_low_cost",
     }.get(str(preset))
     if canonical_preset is None:
         raise ValueError(f"Unsupported run-matrix preset: {preset}")
@@ -1049,6 +1158,31 @@ def set_run_matrix_preset(
             "source": "user_validated",
             "formula": "strictly positive user-entered deltaT values",
         }
+    elif canonical_preset in {
+        "cummings_closed_low_cost", "cummings_open_low_cost"
+    }:
+        condition = operating_condition(DEFAULT_OPERATING_CONDITION)
+        dt_star = (
+            [0.01, 0.005, 0.0025, 0.00125, 0.000625, 0.0003125]
+            if canonical_preset == "cummings_closed_low_cost"
+            else [0.02, 0.01, 0.005, 0.0025, 0.00125, 0.000625]
+        )
+        values = [value * condition["tc_s"] for value in dt_star]
+        definition = {
+            "source": "cummings_low_cost_space_time_campaign",
+            "formula": "deltaT = deltaT_star * chord / U_inf",
+            "values_dt_star": dt_star,
+            "topology": "closed" if "closed" in canonical_preset else "open",
+        }
+    topology_values: dict[str, list[float]] | None = None
+    if canonical_preset in {
+        "cummings_closed_low_cost", "cummings_open_low_cost"
+    }:
+        condition = operating_condition(DEFAULT_OPERATING_CONDITION)
+        topology_values = {
+            "closed": [value * condition["tc_s"] for value in [0.01, 0.005, 0.0025, 0.00125, 0.000625, 0.0003125]],
+            "open": [value * condition["tc_s"] for value in [0.02, 0.01, 0.005, 0.0025, 0.00125, 0.000625]],
+        }
     active = active_workspace_root(project_root)
     registry = read_json(active / "mesh_registry.json", {}) or {}
     previous = read_json(active / "run_matrix.json", {}) or {}
@@ -1057,6 +1191,12 @@ def set_run_matrix_preset(
         dt_values_s=values,
         preset=canonical_preset,
         previous=previous,
+        topology_dt_values_s=topology_values,
+        angles_by_topology=(
+            {"closed": [8.0, 16.0], "open": [8.0, 16.0]}
+            if canonical_preset in {"cummings_closed_low_cost", "cummings_open_low_cost"}
+            else None
+        ),
     )
     matrix["preset_definition"] = definition
     write_json_atomic(active / "run_matrix.json", matrix)
@@ -1113,10 +1253,56 @@ def initialize_study(project_root: Path, *, refresh_hashes: bool = False) -> dic
     else:
         current_matrix = read_json(matrix_path, {}) or {}
         current_config = read_json(config_path, {}) or {}
-        synchronized_matrix = synchronize_run_matrix_solver_controls(
-            current_matrix,
-            current_config,
+        rows = [row for row in current_matrix.get("runs", []) if isinstance(row, dict)]
+        expected_angles = {"closed": (8.0, 16.0), "open": (8.0, 16.0)}
+
+        def stale_campaign_angle(row: dict[str, Any]) -> bool:
+            topology = str(row.get("topology"))
+            if topology not in expected_angles:
+                return False
+            try:
+                alpha = float(row.get("alpha_deg"))
+            except (TypeError, ValueError):
+                return True
+            return not any(
+                math.isclose(alpha, expected, rel_tol=0.0, abs_tol=1.0e-12)
+                for expected in expected_angles[topology]
+            )
+
+        stale_angle_rows = [
+            row for row in rows if stale_campaign_angle(row)
+        ]
+        present_keys = {
+            (str(row.get("mesh_id")), float(row.get("alpha_deg")))
+            for row in rows
+            if row.get("mesh_id") is not None and row.get("alpha_deg") is not None
+        }
+        missing_angle_rows = any(
+            (str(mesh["id"]), angle) not in present_keys
+            for mesh in registry.get("meshes", [])
+            for angle in expected_angles[str(mesh["topology"])]
         )
+        if stale_angle_rows or missing_angle_rows:
+            migration = active / "migrations/run_matrix_before_cummings_angles_v13.json"
+            if not migration.is_file():
+                write_json_atomic(migration, current_matrix)
+            synchronized_matrix = build_run_matrix(
+                registry,
+                dt_values_s=current_matrix.get("dt_values_s") or [2.5e-4, 1.25e-4, 6.25e-5],
+                preset=str(current_matrix.get("preset") or "reference"),
+                previous=current_matrix,
+                topology_dt_values_s=(current_matrix.get("dt_values_s_by_topology") or None),
+                angles_by_topology=expected_angles,
+            )
+            synchronized_matrix["migration_note"] = (
+                "Both 8 and 16 degree entries are explicit for every closed/open mesh; "
+                "the pre-migration matrix is retained under migrations/."
+            )
+        else:
+            synchronized_matrix = synchronize_run_matrix_solver_controls(
+                current_matrix,
+                current_config,
+            )
         if synchronized_matrix != current_matrix:
             write_json_atomic(matrix_path, synchronized_matrix)
     if not selection_path.is_file():
@@ -1140,7 +1326,9 @@ def initialize_study(project_root: Path, *, refresh_hashes: bool = False) -> dic
         "active_workspace": str(active),
         "results_workspace": str(result),
         "source_results_case": str(results_case_root(project_root)),
-        "angle_deg": 8.0,
+        "angle_deg": None,
+        "primary_angles_deg": {"closed": 16.0, "open": 8.0},
+        "confirmation_angles_deg": {"closed": 8.0, "open": 16.0},
         "not_a_polar": True,
         "mesh_count": len(registry["meshes"]),
         "real_meshes_loaded": all(

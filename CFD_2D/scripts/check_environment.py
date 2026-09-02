@@ -35,7 +35,6 @@ INSTALL_HINTS = {
     "venv": "Run INSTALL_AND_START_RAMAIR_CFD2D_APP.bat from the DESIGN APP root.",
     "gmsh": "Run: bash 'Documents and Manuals/Application/install_gmsh_4_15_wsl.sh'",
     "XFOIL": "Run: bash 'Documents and Manuals/Application/install_xfoil_wsl.sh' (fallback: sudo apt install xfoil)",
-    "XFLR5_optional": "Optional manual GUI: sudo apt install xflr5, when available in the configured Ubuntu repositories.",
     "OpenFOAM_environment": "Configure the current OpenFOAM Foundation repository using https://openfoam.org/download/ and rerun the installer.",
     "mpirun": "Run: sudo apt update && sudo apt install -y openmpi-bin",
     "paraview": "Run: sudo apt update && sudo apt install -y paraview",
@@ -184,7 +183,6 @@ def run_checks() -> list[Check]:
         checks.append(Check("XFOIL", xfoil.status, f"{xfoil.executable or 'not found'}; {xfoil.detail}"))
     except Exception as exc:
         checks.append(Check("XFOIL", "WARNING", f"XFOIL probe failed: {type(exc).__name__}: {exc}"))
-    checks.append(executable_check("XFLR5_optional", "xflr5", required=False))
     if foam_metadata.get("sourced"):
         checks.append(Check(
             "OpenFOAM_environment",

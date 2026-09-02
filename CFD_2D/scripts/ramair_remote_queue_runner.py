@@ -10,6 +10,8 @@ import signal
 import subprocess
 import sys
 import time
+import zipfile
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -102,10 +104,27 @@ def staged_command(entry: dict[str, Any], resume: bool) -> list[str]:
         "--cleanup-processor-directories",
         "--run",
     ]
-    if bool(entry.get("steady_initialization", True)) and not (resume and numeric_times(case)):
+    command.append(
+        "--automatic-core-selection"
+        if bool(entry.get("automatic_core_selection", True))
+        else "--no-automatic-core-selection"
+    )
+    command.append(
+        "--renumber-before-decompose"
+        if bool(entry.get("renumber_before_decompose", True))
+        else "--no-renumber-before-decompose"
+    )
+    phase_plan = entry.get("transient_phase_plan")
+    if phase_plan:
+        command += ["--transient-phase-plan", str((ROOT / str(phase_plan)).resolve())]
+    execution_mode = str(entry.get("execution_mode") or "rans_urans")
+    if execution_mode == "rans_only":
+        command += ["--steady-initialization", "--steady-only"]
+        command += ["--steady-timeout-min", str(float(entry.get("steady_timeout_min", 180.0)))]
+    elif bool(entry.get("steady_initialization", True)) and not (resume and numeric_times(case)):
         command.append("--steady-initialization")
         command += ["--steady-timeout-min", str(float(entry.get("steady_timeout_min", 120.0)))]
-    if resume and numeric_times(case):
+    if execution_mode != "rans_only" and resume and numeric_times(case):
         command.append("--resume")
         extension = entry.get("resume_additional_time_star")
         if extension is not None:
@@ -113,6 +132,36 @@ def staged_command(entry: dict[str, Any], resume: bool) -> list[str]:
     if bool(entry.get("continue_transient_after_steady_timeout", False)):
         command.append("--continue-transient-after-steady-timeout")
     return command
+
+
+def _stop_timed_out_process(process: subprocess.Popen[Any], case: Path) -> None:
+    """Request a field write first, then stop the complete orchestration group."""
+    (case / ".ramair_stop_request.json").write_text(
+        json.dumps({"mode": "writeNow", "reason": "remote_case_timeout", "requested_at": time.time()}) + "\n",
+        encoding="utf-8",
+    )
+    try:
+        update_control_dict_stop_at(case, "writeNow")
+    except Exception:
+        pass
+    try:
+        os.killpg(process.pid, signal.SIGINT)
+    except (ProcessLookupError, PermissionError):
+        process.send_signal(signal.SIGINT)
+    try:
+        process.wait(timeout=120.0)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            process.terminate()
+        try:
+            process.wait(timeout=30.0)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                process.kill()
 
 
 def run_queue(resume: bool = False) -> int:
@@ -169,7 +218,16 @@ def run_queue(resume: bool = False) -> int:
         status["cases"][case_id] = payload
         write_json(STATUS, status)
         with log_path.open("a", encoding="utf-8") as log:
-            process = subprocess.Popen(command, cwd=str(ROOT), stdout=log, stderr=subprocess.STDOUT)
+            process = subprocess.Popen(
+                command,
+                cwd=str(ROOT),
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+            case_timeout_s = 60.0 * max(1.0, float(entry.get("case_timeout_min", 360.0)))
+            deadline = time.monotonic() + case_timeout_s
+            case_timed_out = False
             transition_execution_state(
                 case,
                 ExecutionState.RUNNING,
@@ -180,6 +238,10 @@ def run_queue(resume: bool = False) -> int:
                 pid=process.pid,
             )
             while process.poll() is None:
+                if time.monotonic() >= deadline:
+                    case_timed_out = True
+                    _stop_timed_out_process(process, case)
+                    break
                 if STOP.is_file():
                     (case / ".ramair_stop_request.json").write_text(
                         json.dumps({"mode": "writeNow", "requested_at": time.time()}) + "\n",
@@ -189,7 +251,12 @@ def run_queue(resume: bool = False) -> int:
                 write_json(RUNTIME, {**payload, "orchestrator_pid": process.pid, "solver": solver, "heartbeat": time.time()})
                 time.sleep(2.0)
         stopped = STOP.is_file()
-        terminal = "PAUSED_RECOVERABLE" if stopped else "COMPLETED" if process.returncode == 0 else "FAILED"
+        terminal = (
+            "PAUSED_RECOVERABLE" if stopped
+            else "CASE_TIMEOUT_PARTIAL" if case_timed_out
+            else "COMPLETED" if process.returncode == 0
+            else "FAILED"
+        )
         transition_execution_state(
             case,
             terminal,
@@ -199,7 +266,13 @@ def run_queue(resume: bool = False) -> int:
             reason="user_stop" if stopped else "queue_case_exit",
             returncode=int(process.returncode or 0),
         )
-        finished = {**payload, "status": terminal, "returncode": int(process.returncode or 0), "finished_at": time.time()}
+        finished = {
+            **payload,
+            "status": terminal,
+            "case_timeout": bool(case_timed_out),
+            "returncode": int(process.returncode or 0),
+            "finished_at": time.time(),
+        }
         status["cases"][case_id] = finished
         write_json(STATUS, status)
         write_json(RUNTIME, finished)
@@ -234,9 +307,68 @@ def postprocess_queue() -> int:
     return rc
 
 
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def collect_results() -> int:
+    """Create a deterministic return archive that the main application can classify."""
+    queue = read_json(QUEUE, {}) or {}
+    package_id = str(queue.get("package_id") or ROOT.name)
+    return_root = ROOT / "Remote Return"
+    return_root.mkdir(parents=True, exist_ok=True)
+    output = return_root / f"RamAir_Remote_Return_{package_id}.zip"
+    selected: list[tuple[Path, Path]] = []
+    case_rows: list[dict[str, Any]] = []
+    for entry in queue.get("cases") or []:
+        relative = Path(str(entry["case"]))
+        source = (ROOT / relative).resolve()
+        if not source.is_dir():
+            continue
+        for path in source.rglob("*"):
+            if path.is_file() and "processor" not in path.parts and "__pycache__" not in path.parts:
+                selected.append((path, Path("payload") / relative / path.relative_to(source)))
+        case_rows.append({
+            "id": entry.get("id"),
+            "variant": entry.get("variant"),
+            "alpha_deg": entry.get("alpha_deg"),
+            "case": relative.as_posix(),
+            "status": (read_json(STATUS, {}).get("cases", {}).get(str(entry.get("id"))) or {}).get("status"),
+        })
+    for source in (STATUS, QUEUE, RUNTIME):
+        if source.is_file():
+            selected.append((source, Path("payload") / source.name))
+    if LOGS.is_dir():
+        for path in LOGS.rglob("*"):
+            if path.is_file():
+                selected.append((path, Path("payload/Remote Execution Logs") / path.relative_to(LOGS)))
+    files = {
+        target.as_posix(): {"sha256": _sha256(source), "bytes": source.stat().st_size}
+        for source, target in selected
+    }
+    manifest = {
+        "schema_version": 1,
+        "package_id": package_id,
+        "package_scope": queue.get("package_scope", "generic"),
+        "created_at": time.time(),
+        "cases": case_rows,
+        "files": files,
+    }
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as archive:
+        archive.writestr("RAMAir_REMOTE_RETURN/return_manifest.json", json.dumps(manifest, indent=2) + "\n")
+        for source, target in selected:
+            archive.write(source, Path("RAMAir_REMOTE_RETURN") / target)
+    print(json.dumps({"status": "COLLECTED", "archive": str(output), "cases": len(case_rows)}, indent=2))
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("run", "resume", "stop", "force-stop", "postprocess", "status"))
+    parser.add_argument("action", choices=("run", "resume", "stop", "force-stop", "postprocess", "collect", "status"))
     args = parser.parse_args()
     if args.action == "run":
         return run_queue(False)
@@ -247,6 +379,8 @@ def main() -> int:
         return 0
     if args.action == "postprocess":
         return postprocess_queue()
+    if args.action == "collect":
+        return collect_results()
     print(json.dumps(read_json(STATUS, {"status": "NOT_STARTED"}), indent=2))
     return 0
 

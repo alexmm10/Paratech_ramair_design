@@ -43,6 +43,10 @@ def test_first_cell_audit_selects_the_most_restrictive_positive_formula() -> Non
     assert all(value > 0 for value in candidates.values())
     assert audit["selected_first_cell_height_m"] == pytest.approx(min(candidates.values()))
     assert audit["selected_source"] == "project_flat_plate_skin_friction_m"
+    assert audit["finite_volume_height_multiplier"] == pytest.approx(2.0)
+    assert audit["selected_first_cell_height_m"] == pytest.approx(
+        2.0 * audit["selected_wall_centre_distance_m"]
+    )
 
 
 def test_boundary_layer_50_75_policy_stays_under_twenty_percent_growth() -> None:

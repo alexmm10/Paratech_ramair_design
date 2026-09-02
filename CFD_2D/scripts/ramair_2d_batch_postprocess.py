@@ -48,6 +48,12 @@ def command_for_alpha(args: argparse.Namespace, alpha: float) -> list[str]:
             "--automatic-paraview-products",
             "--paraview-maximum-frames", str(max(2, int(args.paraview_maximum_frames))),
         ]
+        if args.paraview_time_range_s is not None:
+            command += [
+                "--paraview-time-range-s",
+                str(float(args.paraview_time_range_s[0])),
+                str(float(args.paraview_time_range_s[1])),
+            ]
     return command
 
 
@@ -65,6 +71,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--velocity-profile-sample-points", type=int, default=40)
     parser.add_argument("--automatic-paraview-products", action="store_true")
     parser.add_argument("--paraview-maximum-frames", type=int, default=24)
+    parser.add_argument(
+        "--paraview-time-range-s",
+        type=float,
+        nargs=2,
+        metavar=("START_S", "END_S"),
+        help="Optional physical-time interval used only for URANS ParaView frames.",
+    )
     return parser.parse_args()
 
 

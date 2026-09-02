@@ -3,11 +3,15 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any, Callable
 
 import pandas as pd
 import streamlit as st
+
+from ramair_2d_mesh_numerics import automatic_non_orthogonal_controls
+from ramair_2d_parallel import recommended_core_count
 
 from validation_plotting import (
     close_figures,
@@ -32,6 +36,7 @@ from workflow_backend import (
     validation_study_command,
     validation_study_snapshot,
 )
+from ls1_validation_page import render_ls1_validation
 
 
 StartJob = Callable[..., Any]
@@ -286,13 +291,11 @@ def _postprocess_product_browser(
             for row in rows
             if product_path(row).suffix.lower()
             in {".png", ".jpg", ".jpeg"}
+            and "velocity_frames" not in product_path(row).parts
+            and "pressure_frames" not in product_path(row).parts
+            and "courant_hotspots" not in product_path(row).name.lower()
         ]
-        if image_rows and st.checkbox(
-            "Load image previews",
-            value=False,
-            key=f"postprocess-browser-preview-{key_scope}-{selected_group}",
-            help="Images are not read until this option is enabled.",
-        ):
+        if image_rows:
             columns = st.columns(2)
             for index, row in enumerate(image_rows):
                 path = product_path(row)
@@ -302,6 +305,25 @@ def _postprocess_product_browser(
                         caption=str(row.get("name") or path.name),
                         width="stretch",
                     )
+        animation_rows = [
+            row for row in rows
+            if product_path(row).suffix.lower() in {".mp4", ".webm", ".gif"}
+        ]
+        if animation_rows:
+            play = st.toggle(
+                "Reproducir animaciones",
+                value=False,
+                key=f"postprocess-browser-play-{key_scope}-{selected_group}",
+                help="Al desactivarlo, el reproductor se retira y la reproducción se detiene.",
+            )
+            if play:
+                for row in animation_rows:
+                    path = product_path(row)
+                    if path.is_file():
+                        if path.suffix.lower() == ".gif":
+                            st.image(str(path), caption=path.name, width="stretch")
+                        else:
+                            st.video(str(path), autoplay=True, loop=True)
     if inline:
         render_browser()
     else:
@@ -317,6 +339,61 @@ def _selected_checkpoint(
         (row for row in checkpoint_rows if row.get("mesh_id") == mesh_id),
         {"mesh_id": mesh_id, "status": "RANS_BASE_NOT_CREATED"},
     )
+
+
+def _checkpoint_for_angle(
+    checkpoint_rows: list[dict[str, Any]],
+    mesh_id: str,
+    alpha_deg: float,
+) -> dict[str, Any]:
+    return next(
+        (
+            row for row in checkpoint_rows
+            if str(row.get("base_mesh_id") or str(row.get("mesh_id", "")).split("__alpha_", 1)[0]) == mesh_id
+            and abs(float(row.get("alpha_deg") or 0.0) - float(alpha_deg)) < 1.0e-9
+        ),
+        {
+            "mesh_id": mesh_id,
+            "base_mesh_id": mesh_id,
+            "alpha_deg": float(alpha_deg),
+            "status": "RANS_BASE_NOT_CREATED",
+        },
+    )
+
+
+def _rans_execution_label(row: dict[str, Any]) -> str:
+    status = str(row.get("status") or "")
+    iteration = int(row.get("iterations") or row.get("absolute_simple_iteration") or 0)
+    if status in {"CHECKPOINT_READY", "MANUAL_REVIEW_CHECKPOINT_READY"}:
+        return "Checkpoint validado"
+    if iteration >= 20000 or status in {"COMPLETED", "RANS_BASE_MAX_ITERATIONS"}:
+        return "Finalizado (no revisado)"
+    if iteration > 0 or "PARTIAL" in status or "PAUSED" in status:
+        return "Parcialmente ejecutado (reanudable)"
+    return "No ejecutado"
+
+
+def _rans_case_catalog(
+    meshes: dict[str, dict[str, Any]],
+    checkpoint_rows: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    catalog: dict[str, dict[str, Any]] = {}
+    for mesh_id, mesh in meshes.items():
+        for alpha in (8.0, 16.0):
+            state = _checkpoint_for_angle(checkpoint_rows, mesh_id, alpha)
+            key = f"{mesh_id}|{alpha:g}"
+            catalog[key] = {
+                "mesh_id": mesh_id,
+                "checkpoint_id": str(state.get("mesh_id") or mesh_id),
+                "alpha_deg": alpha,
+                "label": (
+                    f"{str(mesh.get('topology')).title()} "
+                    f"{str(mesh.get('level')).title()} {alpha:g}°"
+                ),
+                "status": _rans_execution_label(state),
+                "state": state,
+            }
+    return catalog
 
 
 def _compatible_checkpoint(
@@ -372,13 +449,17 @@ def _monitor_charts(
     key_scope: str,
 ) -> None:
     st.markdown(f"**{snapshot.get('title', 'Monitor escalar')}**")
-    metrics = st.columns(5)
+    metrics = st.columns(6)
     metrics[0].metric("Estado", str(snapshot.get("status", "UNKNOWN")))
     metrics[1].metric(
         "Iteracion / tiempo",
         str(snapshot.get("iteration_or_time") or "-"),
     )
-    metrics[2].metric("Pasos observados", int(snapshot.get("steps_observed") or 0))
+    metrics[2].metric(
+        "Iteraciones totales" if str(snapshot.get("mode") or "RANS").upper() == "RANS"
+        else "Timesteps totales ejecutados",
+        int(snapshot.get("steps_total_executed") or snapshot.get("steps_observed") or 0),
+    )
     metrics[3].metric(
         "Tiempo transcurrido",
         (
@@ -394,6 +475,10 @@ def _monitor_charts(
             if snapshot.get("estimated_remaining_s") is not None
             else "-"
         ),
+    )
+    metrics[5].metric(
+        "Cores MPI",
+        str(snapshot.get("n_cores") or "-"),
     )
     if str(snapshot.get("mode") or "RANS").upper() == "URANS":
         courant_rows = list(snapshot.get("courant") or [])
@@ -433,13 +518,15 @@ def _monitor_charts(
             f"{maximum_courant:.4g}" if maximum_courant is not None else "-",
         )
     run_id = str(snapshot.get("run_id") or "active")
+    is_rans = str(snapshot.get("mode") or "RANS").upper() == "RANS"
     full_history = st.toggle(
         "Mostrar todo el historial escalar disponible",
-        value=False,
+        value=is_rans,
         key=f"validation-monitor-full-history-{key_scope}-{run_id}",
         help=(
-            "Desactivado usa la ventana reciente para evitar que los valores "
-            "iniciales oculten la evolución final."
+            "RANS usa por defecto todo el historial (la figura solo reduce píxeles, no "
+            "recorta iteraciones). En URANS puede usarse la ventana reciente para evitar "
+            "que una campaña larga oculte la evolución final."
         ),
     )
     displayed = dict(snapshot)
@@ -462,6 +549,9 @@ def _monitor_charts(
         displayed,
         mode=str(snapshot.get("mode") or "RANS"),
         separate_cd_cm=separate,
+        rans_discard_initial=(
+            500 if str(snapshot.get("mode") or "RANS").upper() == "RANS" else 0
+        ),
     )
     try:
         # st.pyplot renders a static image: there is no toolbar, pan or zoom
@@ -593,6 +683,8 @@ def _render_live_monitor(
             )
             snapshot["status"] = str(row.get("status") or snapshot.get("status"))
             snapshot["stage"] = str(row.get("stage") or snapshot.get("stage"))
+            if row.get("n_cores") is not None:
+                snapshot["n_cores"] = int(row["n_cores"])
         except Exception as exc:
             st.info(f"Monitor en espera: {exc}")
             return
@@ -742,10 +834,104 @@ def _paraview_scale_args(
     return arguments
 
 
-def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
+def _render_rans_execution_menu(
+    root: Path,
+    start_job: StartJob,
+    *,
+    meshes: dict[str, dict[str, Any]],
+    checkpoint_rows: list[dict[str, Any]],
+    continue_on_nonfatal_failure: bool,
+) -> None:
+    """Execution-only RANS menu indexed by mesh and angle."""
+    catalog = _rans_case_catalog(meshes, checkpoint_rows)
+    st.caption(
+        "Cada identidad combina una malla y un ángulo. Los parámetros SIMPLE "
+        "se guardan exclusivamente en Solver y estrategia."
+    )
+    status_rows = []
+    for mesh_id, mesh in meshes.items():
+        status_rows.append({
+            "Malla": f"{str(mesh.get('topology')).title()} {str(mesh.get('level')).title()}",
+            "8°": catalog[f"{mesh_id}|8"]["status"],
+            "16°": catalog[f"{mesh_id}|16"]["status"],
+        })
+    st.dataframe(status_rows, hide_index=True, width="stretch")
+
+    labels = {key: value["label"] for key, value in catalog.items()}
+    individual_tab, queue_tab = st.tabs(["Ejecución individual", "Ejecución secuencial"])
+    with individual_tab:
+        selection = st.selectbox(
+            "Malla y ángulo",
+            list(catalog),
+            format_func=lambda value: f"{labels[value]} · {catalog[value]['status']}",
+            key="validation-rans-case-selection",
+        )
+        selected = catalog[selection]
+        st.metric("Estado", selected["status"])
+        confirm = st.checkbox(
+            "Confirmo la ejecución o reanudación SIMPLE",
+            key="validation-rans-case-confirm",
+        )
+        if st.button(
+            "Ejecutar / continuar caso",
+            type="primary",
+            disabled=not confirm or selected["status"] in {
+                "Finalizado (no revisado)", "Checkpoint validado",
+            },
+            key="validation-rans-case-run",
+        ):
+            start_job(
+                "validation_lab_rans_run_one",
+                validation_study_command(
+                    root, "rans-base", mesh_id=selected["mesh_id"],
+                    alpha_deg=float(selected["alpha_deg"]), run=True,
+                ),
+            )
+    with queue_tab:
+        queue_selection = st.multiselect(
+            "Casos y orden de ejecución",
+            list(catalog),
+            format_func=lambda value: f"{labels[value]} · {catalog[value]['status']}",
+            key="validation-rans-selection-queue",
+        )
+        st.dataframe(
+            [
+                {"Orden": index + 1, "Caso": labels[key], "Estado": catalog[key]["status"]}
+                for index, key in enumerate(queue_selection)
+            ],
+            hide_index=True,
+            width="stretch",
+        )
+        confirm_queue = st.checkbox(
+            "Confirmo la cola secuencial",
+            key="validation-rans-selection-queue-confirm",
+        )
+        if st.button(
+            "Ejecutar / continuar cola",
+            type="primary",
+            disabled=not queue_selection or not confirm_queue,
+            key="validation-rans-selection-queue-run",
+        ):
+            start_job(
+                "validation_lab_rans_selection_queue",
+                validation_study_command(
+                    root,
+                    "rans-selection-queue",
+                    case_specs=[
+                        f"{catalog[key]['mesh_id']}:{catalog[key]['alpha_deg']}"
+                        for key in queue_selection
+                    ],
+                    continue_on_nonfatal_failure=continue_on_nonfatal_failure,
+                    run=True,
+                ),
+            )
+
+
+def render_convergence_lab(root: Path, start_job: StartJob) -> None:
     st.info(
         "Laboratorio de convergencia espacial y temporal para LS(1)-0417 cerrado "
-        "y Ram-Air abierto. Condicion comun: alpha=8 deg, M=0.15 y Re=1.9e6. "
+        "y Ram-Air abierto. Condición común: M=0.15 y Re=1.9e6; la campaña "
+        "empieza en 16° para cerrado y en 8° para abierto, invirtiendo después el orden. "
         "Este laboratorio no sustituye una validacion de polar."
     )
     snapshot = validation_study_snapshot(root)
@@ -819,17 +1005,15 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
     )
     subsection_options = {
         "Mallas y condiciones": ["Registro y condiciones"],
-        "Solver y estrategia": ["Recursos", "RANS / SIMPLE", "URANS / PIMPLE"],
+        "Solver y estrategia": ["Ajustes SIMPLE y PIMPLE"],
         "RANS": [
             "Ejecución",
-            "Verificación y decisión",
-            "Postproceso completo",
+            "Revisión y postproceso",
             "Convergencia espacial",
         ],
         "URANS": [
             "Ejecución",
-            "Revisión",
-            "Postproceso",
+            "Revisión y postproceso",
             "Sensibilidad PIMPLE 2/3/4",
         ],
         "Convergencia espacio-tiempo": [
@@ -856,16 +1040,12 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
         subsection = subsection_options[top_section][0]
     legacy_section = {
         ("Mallas y condiciones", "Registro y condiciones"): "Mallas y condiciones",
-        ("Solver y estrategia", "Recursos"): "Solver y estrategia",
-        ("Solver y estrategia", "RANS / SIMPLE"): "Solver y estrategia",
-        ("Solver y estrategia", "URANS / PIMPLE"): "Solver y estrategia",
+        ("Solver y estrategia", "Ajustes SIMPLE y PIMPLE"): "Solver y estrategia",
         ("RANS", "Ejecución"): "Solver y estrategia",
-        ("RANS", "Verificación y decisión"): "Análisis RANS",
-        ("RANS", "Postproceso completo"): "Análisis RANS",
+        ("RANS", "Revisión y postproceso"): "Análisis RANS",
         ("RANS", "Convergencia espacial"): "Convergencia RANS",
         ("URANS", "Ejecución"): "Matriz URANS",
-        ("URANS", "Revisión"): "Análisis URANS",
-        ("URANS", "Postproceso"): "Análisis URANS",
+        ("URANS", "Revisión y postproceso"): "Análisis URANS",
         ("URANS", "Sensibilidad PIMPLE 2/3/4"): "Sensibilidad PIMPLE",
         ("Convergencia espacio-tiempo", "Cerrado"): "Convergencia malla-tiempo",
         ("Convergencia espacio-tiempo", "Abierto"): "Convergencia malla-tiempo",
@@ -890,7 +1070,7 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
         else "sin ejecución activa"
     )
     st.caption(
-        "Caso M0.15 | Re1.9e6 | c1m | alpha8"
+        "Caso M0.15 | Re1.9e6 | c1m | closed 16°→8° | open 8°→16°"
         f"  ·  Bases {completed_bases}/6 completas"
         f"  ·  Job activo: {active_label}"
     )
@@ -1000,22 +1180,26 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
     postprocess_scale_settings = dict(config.get("postprocess") or {})
     if (
         top_section == "RANS"
-        and subsection == "Postproceso completo"
+        and subsection == "Revisión y postproceso"
     ) or (
         top_section == "URANS"
-        and subsection == "Postproceso"
+        and subsection == "Revisión y postproceso"
     ):
-        postprocess_scale_settings = _postprocess_scale_controls(
-            root,
-            config,
-            key_scope=top_section.lower(),
-        )
+        with st.expander(
+            "Escalas de campo avanzadas (desactivadas por defecto)",
+            expanded=False,
+        ):
+            postprocess_scale_settings = _postprocess_scale_controls(
+                root,
+                config,
+                key_scope=top_section.lower(),
+            )
 
     if section == "Mallas y condiciones":
         st.markdown(
-            "Seleccione un **conjunto coherente de simulacion**. Cada conjunto "
-            "vincula geometria, condiciones de operacion y una malla concreta "
-            "mediante hashes; cargarlo no modifica los paquetes historicos."
+            "Seleccione una **malla** para inspeccionar su geometría registrada, "
+            "calidad y checkpoints. La selección no modifica casos ni configura "
+            "el solver; todas las bases comparten la misma física."
         )
         mesh_rows = [{
             "Topologia": row["topology"],
@@ -1024,15 +1208,12 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
             "Calidad": (
                 f"{row['grade']} / {row['checkMesh_status']}"
             ),
-            "Estado RANS": (
-                reviews.get(row["id"], {}).get("automatic_gate")
-                or reviews.get(row["id"], {}).get("review_status")
-                or _selected_checkpoint(
-                    checkpoint_rows,
-                    row["id"],
-                ).get("status")
+            "Checkpoint 8°": _rans_execution_label(
+                _checkpoint_for_angle(checkpoint_rows, row["id"], 8.0)
             ),
-            "Accion": "Cargar / revisar",
+            "Checkpoint 16°": _rans_execution_label(
+                _checkpoint_for_angle(checkpoint_rows, row["id"], 16.0)
+            ),
         } for row in meshes.values()]
         st.dataframe(mesh_rows, width="stretch", hide_index=True)
         current_mesh = str(
@@ -1040,7 +1221,7 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
             or mesh_ids[0]
         )
         selected_mesh = st.selectbox(
-            "Conjunto coherente de simulacion",
+            "Malla",
             mesh_ids,
             index=mesh_ids.index(current_mesh) if current_mesh in mesh_ids else 0,
             key="validation-lab-mesh",
@@ -1049,21 +1230,9 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
                 "impiden reutilizar un checkpoint incompatible."
             ),
         )
-        st.caption("Geometria + condiciones de operacion + malla")
-        actions = st.columns(4)
+        st.caption("La malla elegida solo controla la inspección mostrada en esta subsección.")
+        actions = st.columns(3)
         if actions[0].button(
-            "Cargar conjunto seleccionado en el laboratorio",
-            key="validation-lab-restore-mesh",
-        ):
-            start_job(
-                "validation_lab_select_mesh",
-                validation_study_command(
-                    root,
-                    "select-mesh",
-                    mesh_id=selected_mesh,
-                ),
-            )
-        if actions[1].button(
             "Abrir malla seleccionada en Gmsh",
             key="validation-lab-open-gmsh",
             help=(
@@ -1083,11 +1252,11 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
                 )
             except Exception as exc:
                 st.error(str(exc))
-        show_quality = actions[2].button(
+        show_quality = actions[1].button(
             "Ver calidad",
             key="validation-lab-show-quality",
         )
-        if actions[3].button(
+        if actions[2].button(
             "Ir a base RANS",
             key="validation-lab-go-rans",
         ):
@@ -1132,7 +1301,7 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
         cols[0].metric("Mach", f"{float(condition['mach']):.4g}")
         cols[1].metric("Reynolds", f"{float(condition['reynolds']):.4g}")
         cols[2].metric("Cuerda", f"{float(condition['chord_m']):.4g} m")
-        cols[3].metric("Angulo", "8 deg")
+        cols[3].metric("Ángulos RANS base", "closed 16° | open 8°")
         st.dataframe(
             [{"propiedad": key, "valor": value} for key, value in condition.items()],
             hide_index=True,
@@ -1144,59 +1313,100 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
             "interpreta automaticamente como ISA a nivel del mar."
         )
 
+    if top_section == "RANS" and subsection == "Ejecución":
+        _render_rans_execution_menu(
+            root,
+            start_job,
+            meshes=meshes,
+            checkpoint_rows=checkpoint_rows,
+            continue_on_nonfatal_failure=bool(
+                rans_config.get("continue_on_nonfatal_failure", True)
+            ),
+        )
+        return
+
     if section == "Solver y estrategia":
+        active_mesh_id = str(
+            snapshot.get("active_selection", {}).get("mesh_id")
+            or mesh_ids[0]
+        )
+        active_mesh_quality = meshes.get(active_mesh_id, meshes[mesh_ids[0]])
+        automatic_mesh_numerics = automatic_non_orthogonal_controls(
+            float(active_mesh_quality.get("max_non_orthogonality_deg") or 0.0)
+        )
+        automatic_correctors = int(
+            automatic_mesh_numerics["n_non_orthogonal_correctors"]
+        )
+        automatic_laplacian = str(
+            automatic_mesh_numerics["laplacian_scheme"]
+        )
         st.markdown("### Estado base RANS / SIMPLE")
         st.caption(
             "La cola muestra las seis bases canónicas y omite sin ocultar las ya aceptadas. "
-            "SIMPLE usa por defecto nNonOrthogonalCorrectors=0; la cola guarda "
+            "Los correctores y el laplaciano se derivan del checkMesh real; la cola guarda "
             "U, p, nuTilda y phi cuando OpenFOAM lo escribe."
         )
+        st.info(
+            f"Malla activa `{active_mesh_id}`: no ortogonalidad máxima "
+            f"{automatic_mesh_numerics['maximum_non_orthogonality_deg']:.3f}°. "
+            f"SIMPLE/PIMPLE usarán {automatic_correctors} corrector(es) y "
+            f"`{automatic_laplacian}`."
+        )
+        rans_config["simple_non_orthogonal_correctors"] = automatic_correctors
+        urans_config["pimple_non_orthogonal_correctors"] = automatic_correctors
+        rans_config["laplacian_scheme"] = automatic_laplacian
+        urans_config["laplacian_scheme"] = automatic_laplacian
         rans_config[
             "minimum_simple_iterations_before_convergence_check"
-        ] = 10000
+        ] = 20000
+        rans_config["initial_iterations"] = 20000
+        rans_config["extension_iterations"] = 20000
+        rans_config["automatic_queue_max_iterations"] = 20000
+        rans_config["maximum_iterations"] = 20000
+        rans_config["allow_early_stop"] = False
         rans_config["native_residual_control_enabled"] = False
+        rans_config["relaxation"] = {"p": 0.3, "U": 0.7, "nuTilda": 0.7}
         contract_cols = st.columns(2)
         contract_cols[0].metric(
             "Primera evaluacion de convergencia",
-            "SIMPLE 10 000",
+            "SIMPLE 20 000",
         )
         contract_cols[1].metric(
             "Parada residual nativa de OpenFOAM",
             "Desactivada",
         )
         st.caption(
-            "Antes de 10 000 solo pueden detener la base una solicitud explicita, "
-            "un timeout, divergencia o un fallo de ejecucion. El gate estadistico "
-            "externo se evalua unicamente en objetivos absolutos."
+            "Cada base ejecuta un único bloque de 20 000 iteraciones. Los "
+            "diagnósticos se calculan al terminar, pero la aceptación es manual."
         )
         iteration_cols = st.columns(3)
         rans_config["initial_iterations"] = iteration_cols[0].number_input(
             "Iteraciones iniciales",
-            value=10000,
+            value=20000,
             disabled=True,
             help="Objetivo absoluto inicial congelado para este batch.",
         )
         rans_config["extension_iterations"] = iteration_cols[1].number_input(
-            "Iteraciones por extension",
-            value=2500,
+            "Bloque fijo",
+            value=20000,
             disabled=True,
-            help="Extensiones absolutas: 12500, 15000, 17500 y 20000.",
+            help="No se realizan ampliaciones automáticas por etapas.",
         )
         rans_config["maximum_iterations"] = iteration_cols[2].number_input(
             "Limite total de iteraciones",
             value=20000,
             disabled=True,
-            help="En 20000 se detiene para revision si el gate no acepta.",
+            help="Al llegar a 20000 se conserva el estado y se solicita revisión manual.",
         )
         simple_cols = st.columns(4)
         rans_config["simple_non_orthogonal_correctors"] = simple_cols[0].number_input(
             "Correctores no ortogonales SIMPLE",
             min_value=0,
             max_value=4,
-            value=int(rans_config["simple_non_orthogonal_correctors"]),
+            value=automatic_correctors,
+            disabled=True,
             help=(
-                "Para estas mallas checkMesh-OK se usa 0 como base RANS. "
-                "Es independiente del valor PIMPLE."
+                "Automático desde checkMesh: <50° → 0; 50–<70° → 1; >=70° → 2."
             ),
         )
         rans_config["mpi_ranks"] = simple_cols[1].number_input(
@@ -1204,6 +1414,7 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
             min_value=1,
             max_value=8,
             value=int(rans_config["mpi_ranks"]),
+            help="Máximo disponible. Con selección automática el runner usa menos si la malla no escala eficientemente.",
         )
         rans_config["timeout_min"] = simple_cols[2].number_input(
             "Limite RANS por bloque [min]",
@@ -1214,15 +1425,19 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
             "Inicializar con potentialFoam",
             value=bool(rans_config["potentialFoam"]),
         )
-        policy_cols = st.columns(3)
-        rans_config["allow_early_stop"] = policy_cols[0].toggle(
-            "Permitir parada temprana",
-            value=bool(rans_config["allow_early_stop"]),
-            help=(
-                "Desactivado por defecto: se completan los bloques configurados "
-                "aunque el criterio se satisfaga antes."
-            ),
+        parallel_cols = st.columns(2)
+        rans_config["automatic_core_selection"] = parallel_cols[0].toggle(
+            "Seleccionar procesos automáticamente",
+            value=bool(rans_config.get("automatic_core_selection", True)),
+            help="Objetivo 50k-200k celdas por proceso, limitado por MPI y por el máximo seleccionado.",
         )
+        rans_config["renumber_before_decompose"] = parallel_cols[1].toggle(
+            "Renumerar antes de descomponer",
+            value=bool(rans_config.get("renumber_before_decompose", True)),
+            help="Ejecuta renumberMesh -overwrite solo al iniciar un caso paralelo limpio.",
+        )
+        policy_cols = st.columns(3)
+        policy_cols[0].metric("Parada automática", "No")
         rans_config["continue_queue_after_nonconvergence"] = policy_cols[1].toggle(
             "Continuar tras no convergencia",
             value=bool(rans_config["continue_queue_after_nonconvergence"]),
@@ -1231,23 +1446,28 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
             "Continuar tras fallo no fatal",
             value=bool(rans_config["continue_on_nonfatal_failure"]),
         )
-        force_cols = st.columns(3)
-        rans_config["force_window_samples"] = force_cols[0].number_input(
-            "Muestras para estabilidad de fuerzas",
-            min_value=50,
-            value=int(rans_config["force_window_samples"]),
-            step=50,
-        )
-        rans_config["force_mean_tolerance_percent"] = force_cols[1].number_input(
-            "Tolerancia de media [%]",
-            min_value=0.01,
-            value=float(rans_config["force_mean_tolerance_percent"]),
-        )
-        rans_config["force_fluctuation_tolerance_percent"] = force_cols[2].number_input(
-            "Tolerancia de fluctuacion [%]",
-            min_value=0.01,
-            value=float(rans_config["force_fluctuation_tolerance_percent"]),
-        )
+        with st.expander("Ajustes de parada automática", expanded=False):
+            st.caption(
+                "Se conservan como diagnóstico de estabilidad; el contrato actual "
+                "no detiene antes de las 20 000 iteraciones."
+            )
+            force_cols = st.columns(3)
+            rans_config["force_window_samples"] = force_cols[0].number_input(
+                "Muestras para estabilidad de fuerzas",
+                min_value=50,
+                value=int(rans_config["force_window_samples"]),
+                step=50,
+            )
+            rans_config["force_mean_tolerance_percent"] = force_cols[1].number_input(
+                "Tolerancia de media [%]",
+                min_value=0.01,
+                value=float(rans_config["force_mean_tolerance_percent"]),
+            )
+            rans_config["force_fluctuation_tolerance_percent"] = force_cols[2].number_input(
+                "Tolerancia de fluctuacion [%]",
+                min_value=0.01,
+                value=float(rans_config["force_fluctuation_tolerance_percent"]),
+            )
         with st.expander("Solvers lineales, esquemas iniciales y relajacion RANS"):
             st.json({
                 "solvers_lineales": rans_config["linear_solvers"],
@@ -1268,6 +1488,7 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
             min_value=1,
             max_value=8,
             value=int(urans_config["pimple_outer_correctors"]),
+            help="Máximo de bucles externos; residualControl puede terminar antes.",
         )
         urans_config["pimple_correctors"] = pimple_cols[1].number_input(
             "Correctores de presion PIMPLE",
@@ -1279,8 +1500,9 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
             "Correctores no ortogonales PIMPLE",
             min_value=0,
             max_value=4,
-            value=int(urans_config["pimple_non_orthogonal_correctors"]),
-            help="Valor URANS independiente del corrector SIMPLE.",
+            value=automatic_correctors,
+            disabled=True,
+            help="Misma política automática de la malla real que en SIMPLE.",
         )
         temporal_cols = st.columns(4)
         urans_config["settling_time_star"] = temporal_cols[0].number_input(
@@ -1317,10 +1539,25 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
         validation["sampling_tc"] = float(
             urans_config["sampling_time_star"]
         )
-        st.markdown("#### Etapas iniciales URANS")
-        startup_frame = pd.DataFrame(
-            urans_config.get("startup_stages") or []
-        )
+        st.markdown("#### Etapas URANS")
+        stage_rows = list(urans_config.get("startup_stages") or [])
+        stage_rows.extend([
+            {
+                "name": "D", "enabled": True,
+                "scheme": str(validation.get("production_scheme") or "backward"),
+                "dt_factor": 1.0, "duration_mode": "t_star",
+                "duration": float(urans_config["settling_time_star"]),
+                "steps": 1, "purpose": "settling (excluded from statistics)",
+            },
+            {
+                "name": "E", "enabled": True,
+                "scheme": str(validation.get("production_scheme") or "backward"),
+                "dt_factor": 1.0, "duration_mode": "t_star",
+                "duration": float(urans_config["sampling_time_star"]),
+                "steps": 1, "purpose": "production statistics",
+            },
+        ])
+        startup_frame = pd.DataFrame(stage_rows)
         startup_editor = st.data_editor(
             startup_frame,
             hide_index=True,
@@ -1368,15 +1605,24 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
                 ),
             },
         )
-        urans_config["startup_stages"] = startup_editor.to_dict(
-            orient="records"
-        )
+        edited_stages = startup_editor.to_dict(orient="records")
+        urans_config["startup_stages"] = [
+            row for row in edited_stages if str(row.get("name")) in {"A", "B", "C"}
+        ]
+        for row in edited_stages:
+            if str(row.get("name")) == "D":
+                urans_config["settling_time_star"] = float(row["duration"])
+                validation["settling_tc"] = float(row["duration"])
+            elif str(row.get("name")) == "E":
+                urans_config["sampling_time_star"] = float(row["duration"])
+                validation["sampling_tc"] = float(row["duration"])
         runtime_cols = st.columns(3)
         validation["mpi_ranks"] = runtime_cols[0].number_input(
             "Procesos MPI URANS",
             min_value=1,
             max_value=8,
             value=int(validation["mpi_ranks"]),
+            help="Máximo MPI; en modo automático se reduce según las celdas de la malla activa.",
         )
         validation["timeout_hours"] = runtime_cols[1].number_input(
             "Limite URANS [h]",
@@ -1389,6 +1635,29 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
             index=[15, 30, 60].index(
                 int(urans_config["monitor_refresh_seconds"])
             ),
+        )
+        urans_config["automatic_core_selection"] = st.toggle(
+            "Selección automática de procesos URANS",
+            value=bool(urans_config.get("automatic_core_selection", True)),
+            help="Usa el recuento exacto de la malla y deja --n-cores como límite superior.",
+        )
+        urans_config["renumber_before_decompose"] = st.toggle(
+            "Renumerar malla antes de la primera descomposición URANS",
+            value=bool(urans_config.get("renumber_before_decompose", True)),
+            help="No se repite al continuar fases o reanudar resultados existentes.",
+        )
+        active_cells = int(active_mesh_quality.get("cell_count") or 0)
+        rank_plan = recommended_core_count(
+            active_cells or None,
+            available_slots=8,
+            requested_maximum=int(validation["mpi_ranks"]),
+        )
+        st.caption(
+            f"Malla activa: {active_cells or 'recuento no disponible'} celdas; "
+            f"recomendación {rank_plan['recommended_ranks']} procesos "
+            f"({rank_plan['cells_per_rank']:.0f} celdas/proceso)."
+            if rank_plan["cells_per_rank"] is not None
+            else f"Recomendación provisional: {rank_plan['recommended_ranks']} procesos."
         )
         validation["rans_base_states"] = rans_config
         validation["urans"] = urans_config
@@ -1451,6 +1720,12 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
                 "Open efectivo": urans_config["pimple_non_orthogonal_correctors"],
             },
             {
+                "Parametro": "Laplacian scheme automático",
+                "Seleccionado": automatic_laplacian,
+                "Closed efectivo": automatic_laplacian,
+                "Open efectivo": automatic_laplacian,
+            },
+            {
                 "Parametro": "Time scheme",
                 "Seleccionado": validation["production_scheme"],
                 "Closed efectivo": validation["production_scheme"],
@@ -1484,45 +1759,52 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
             width="stretch",
         )
         frozen_batch = _read_json(active / "resolved_batch_config.json")
+        st.markdown("### Configuración final que alcanzará OpenFOAM")
+        final_rans_tab, final_urans_tab = st.tabs(["RANS / SIMPLE", "URANS / PIMPLE"])
+        with final_rans_tab:
+            st.json({
+                "solver": "foamRun -solver incompressibleFluid",
+                "simulation_type": "RANS",
+                "turbulence_model": "SpalartAllmaras",
+                "iterations": int(rans_config["maximum_iterations"]),
+                "native_residual_stop": False,
+                "nNonOrthogonalCorrectors": int(automatic_correctors),
+                "laplacian_scheme": automatic_laplacian,
+                "relaxation": dict(rans_config["relaxation"]),
+                "linear_solvers": rans_config["linear_solvers"],
+                "residual_tolerances": rans_config["residual_tolerances"],
+                "initialization_schemes": rans_config["initialization_schemes"],
+                "field_write": rans_config["storage_profile"],
+                "mpi_ranks": int(rans_config["mpi_ranks"]),
+                "timeout_min": float(rans_config["timeout_min"]),
+            })
+        with final_urans_tab:
+            st.json({
+                "solver": "foamRun -solver incompressibleFluid",
+                "simulation_type": "URANS",
+                "turbulence_model": "SpalartAllmaras",
+                "time_step_mode": "fixed",
+                "selected_dt_seconds": "selected per convergence run",
+                "ddt_scheme": validation["production_scheme"],
+                "nOuterCorrectors": int(urans_config["pimple_outer_correctors"]),
+                "nCorrectors": int(urans_config["pimple_correctors"]),
+                "nNonOrthogonalCorrectors": int(automatic_correctors),
+                "laplacian_scheme": automatic_laplacian,
+                "outer_residual_control": urans_config.get("outer_corrector_residual_control"),
+                "startup_and_production_stages": edited_stages,
+                "settling_time_star": float(urans_config["settling_time_star"]),
+                "sampling_time_star": float(urans_config["sampling_time_star"]),
+                "writeControl": "timeStep",
+                "requested_field_interval_time_star": float(validation["field_write_interval_tc"]),
+                "retained_snapshots": int(urans_config["retained_snapshots"]),
+                "mpi_ranks": int(validation["mpi_ranks"]),
+                "timeout_hours": float(validation["timeout_hours"]),
+            })
         if frozen_batch.get("config_hash"):
-            st.info(
-                "Existe una configuracion de batch congelada. Las reanudaciones "
-                "usan esa configuracion original; los widgets actuales no la "
-                "sobrescriben. Guarde una nueva revision solo para futuras bases."
+            st.caption(
+                "Una cola ya iniciada conserva internamente su revisión para ser reproducible. "
+                "Esta vista muestra la configuración vigente para ejecuciones nuevas."
             )
-            with st.expander("Configuracion efectiva congelada"):
-                st.dataframe([
-                    {
-                        "Topologia": "closed",
-                        "Iteraciones iniciales": frozen_batch.get(
-                            "closed_effective", {}
-                        ).get("initial_iterations"),
-                        "Extension": frozen_batch.get(
-                            "closed_effective", {}
-                        ).get("extension_iterations"),
-                        "Maximo": frozen_batch.get(
-                            "closed_effective", {}
-                        ).get("maximum_iterations"),
-                        "MPI": frozen_batch.get("closed_effective", {}).get(
-                            "mpi_ranks"
-                        ),
-                    },
-                    {
-                        "Topologia": "open",
-                        "Iteraciones iniciales": frozen_batch.get(
-                            "open_effective", {}
-                        ).get("initial_iterations"),
-                        "Extension": frozen_batch.get(
-                            "open_effective", {}
-                        ).get("extension_iterations"),
-                        "Maximo": frozen_batch.get(
-                            "open_effective", {}
-                        ).get("maximum_iterations"),
-                        "MPI": frozen_batch.get("open_effective", {}).get(
-                            "mpi_ranks"
-                        ),
-                    },
-                ], hide_index=True, width="stretch")
         if st.button(
             (
                 "Crear nueva revision de configuracion"
@@ -1533,6 +1815,9 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
         ):
             config["ui_revision"] = int(config.get("ui_revision") or 0) + 1
             _save_strategy(root, config)
+
+        if top_section == "Solver y estrategia":
+            return
 
         st.divider()
         st.markdown("### Cola autónoma de seis estados base RANS")
@@ -1555,7 +1840,7 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
                     or 0
                 ),
                 "Objetivo": int(
-                    state.get("block_target_iteration") or 10000
+                    state.get("block_target_iteration") or 20000
                 ),
                 "Gate": (
                     state.get("automatic_gate_status")
@@ -1580,8 +1865,9 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
         )
         st.caption(f"Batch {completed_queue}/6")
         st.caption(
-            "Se continúa desde la primera base incompleta. El gate solo se "
-            "evalúa en 10000, 12500, 15000, 17500 o 20000 iteraciones."
+            "Se continúa desde la primera base incompleta. Cada base ejecuta "
+            "20 000 iteraciones fijas; los diagnósticos se muestran después y "
+            "la decisión científica queda en manos del usuario."
         )
         selected_checkpoint_mesh = st.selectbox(
             "Malla para una accion individual",
@@ -1699,9 +1985,21 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
         active_package = str(temporal_packages.get("active") or "reference")
         package = st.segmented_control(
             "Paquete temporal",
-            ["reference", "frequency", "manual"],
-            default=active_package if active_package in {"reference", "frequency", "manual"} else "reference",
+            [
+                "cummings_closed_low_cost", "cummings_open_low_cost",
+                "reference", "frequency", "manual",
+            ],
+            default=(
+                active_package
+                if active_package in {
+                    "cummings_closed_low_cost", "cummings_open_low_cost",
+                    "reference", "frequency", "manual",
+                }
+                else "cummings_closed_low_cost"
+            ),
             format_func=lambda value: {
+                "cummings_closed_low_cost": "Cummings cerrado",
+                "cummings_open_low_cost": "Cummings abierto",
                 "reference": "Reference",
                 "frequency": "Frequency",
                 "manual": "Manual",
@@ -1709,6 +2007,12 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
             key="canonical-urans-temporal-package",
         )
         package_help = {
+            "cummings_closed_low_cost": (
+                "Cerrado: Δt* = 0.01, 0.005 y 0.0025; orden angular 16° y 8°."
+            ),
+            "cummings_open_low_cost": (
+                "Abierto: Δt* = 0.02, 0.01 y 0.005; orden angular 8° y 16°."
+            ),
             "reference": (
                 "Reference: 2.5e-4, 1.25e-4 y 6.25e-5 s. "
                 "Son valores de comparación; el mayor no implica estabilidad."
@@ -1720,6 +2024,66 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
             "manual": "Manual: exactamente tres valores positivos, distintos y descendentes.",
         }
         st.caption(package_help[str(package or "reference")])
+        if str(package).startswith("cummings_"):
+            package_topology = "open" if "open" in str(package) else "closed"
+            campaign = dict((config.get("campaign_engine") or {}).get(package_topology) or {})
+            if package_topology == "closed":
+                effect_rows = [
+                    {"Efecto esperado": "Desprendimiento global/estela", "Intervalo St": "0.08-0.30", "Uso": "Duración y promedio"},
+                    {"Efecto esperado": "Capa límite y armónicos de estela", "Intervalo St": "0.30-2", "Uso": "Resolución temporal"},
+                    {"Efecto esperado": "Contenido de alta frecuencia", "Intervalo St": "2-20", "Uso": "Control espectral; confirmar con PSD"},
+                ]
+                dt_ladder = [0.01, 0.005, 0.0025, 0.00125, 0.000625, 0.0003125]
+                production_star = float(campaign.get("final_time_star", 100.0))
+            else:
+                effect_rows = [
+                    {"Efecto esperado": "Respiración de cavidad", "Intervalo St": "0.02-0.10", "Uso": "Duración y promedio"},
+                    {"Efecto esperado": "Capa de cortadura del inlet", "Intervalo St": "0.10-1", "Uso": "Resolución temporal"},
+                    {"Efecto esperado": "Estela y armónicos", "Intervalo St": "1-10", "Uso": "Control espectral; confirmar con PSD"},
+                ]
+                dt_ladder = [0.02, 0.01, 0.005, 0.0025, 0.00125, 0.000625]
+                production_star = float(campaign.get("low_frequency_extension_time_star", 200.0))
+            st.dataframe(effect_rows, hide_index=True, width="stretch")
+            minimum_cycles = int((config.get("frequency_analysis") or {}).get("minimum_cycles", 10))
+            st.dataframe(
+                [
+                    {
+                        "Magnitud": "Frecuencia mínima de planificación",
+                        "Valor": f"St={minimum_cycles / production_star:.4g}",
+                        "Criterio": f"{minimum_cycles} ciclos en t*={production_star:g}",
+                    },
+                    {
+                        "Magnitud": "Producción nominal",
+                        "Valor": f"t*={production_star:g}",
+                        "Criterio": "Misma duración física para comparar mallas y Δt",
+                    },
+                    {
+                        "Magnitud": "Frecuencia máxima de auditoría",
+                        "Valor": "St=20" if package_topology == "closed" else "St=10",
+                        "Criterio": "Límite de planificación; la PSD real decide el intervalo útil",
+                    },
+                ],
+                hide_index=True,
+                width="stretch",
+            )
+            st.dataframe(
+                [
+                    {
+                        "Δt*": value,
+                        "Procedencia": (
+                            "dt_Cummings_recommend" if index == 0
+                            else f"dt_Cummings_recommend/{2 ** index}"
+                        ),
+                        "Puntos/ciclo a St=1": round(1.0 / value, 1),
+                        "Puntos/ciclo a St máximo": round(
+                            1.0 / ((20.0 if package_topology == "closed" else 10.0) * value), 2
+                        ),
+                    }
+                    for index, value in enumerate(dt_ladder)
+                ],
+                hide_index=True,
+                width="stretch",
+            )
         manual_values: list[float] | None = None
         if package == "manual":
             manual_defaults = list(
@@ -1753,21 +2117,33 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
                 "Seleccione topología, malla y deltaT. La aplicación calcula si "
                 "debe iniciar desde RANS, reanudar, revisar o solicitar un reinicio."
             )
-            selector_columns = st.columns(3)
+            selector_columns = st.columns(4)
+            preferred_topology = "open" if package == "cummings_open_low_cost" else "closed"
             topology = selector_columns[0].selectbox(
-                "Topología", ["closed", "open"], key="canonical-urans-topology"
+                "Topología", ["closed", "open"],
+                index=1 if preferred_topology == "open" else 0,
+                key=f"canonical-urans-topology-{package}",
+            )
+            selected_alpha = selector_columns[1].selectbox(
+                "Ángulo [°]",
+                [16.0, 8.0] if topology == "closed" else [8.0, 16.0],
+                key=f"canonical-urans-alpha-{package}-{topology}",
             )
             topology_meshes = [
                 mesh_id for mesh_id in mesh_ids if mesh_id.startswith(f"{topology}_")
             ]
-            mesh_id = selector_columns[1].selectbox(
+            mesh_id = selector_columns[2].selectbox(
                 "Malla", topology_meshes, key="canonical-urans-mesh"
             )
-            available_rows = [row for row in runs if str(row.get("mesh_id")) == mesh_id]
+            available_rows = [
+                row for row in runs
+                if str(row.get("mesh_id")) == mesh_id
+                and abs(float(row.get("alpha_deg") or 0.0) - float(selected_alpha)) < 1.0e-9
+            ]
             dt_values = sorted(
                 {float(row.get("dt_s")) for row in available_rows}, reverse=True
             )
-            selected_dt = selector_columns[2].selectbox(
+            selected_dt = selector_columns[3].selectbox(
                 "deltaT [s]",
                 dt_values,
                 format_func=lambda value: f"{float(value):.6g} s",
@@ -1895,20 +2271,52 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
                 "Construya una cola de hasta 18 identidades. Cada malla admite "
                 "exactamente tres deltaT ordenados de mayor a menor."
             )
+            queue_filter = st.columns(2)
+            queue_preferred_topology = "open" if package == "cummings_open_low_cost" else "closed"
+            queue_topology = queue_filter[0].selectbox(
+                "Topología de la cola", ["closed", "open"],
+                index=1 if queue_preferred_topology == "open" else 0,
+                key=f"canonical-urans-queue-topology-{package}",
+            )
+            queue_alpha = queue_filter[1].selectbox(
+                "Ángulo de la cola [°]",
+                [16.0, 8.0] if queue_topology == "closed" else [8.0, 16.0],
+                key=f"canonical-urans-queue-alpha-{package}-{queue_topology}",
+            )
+            queue_rows_available = [
+                row for row in runs
+                if str(row.get("topology")) == queue_topology
+                and abs(float(row.get("alpha_deg") or 0.0) - float(queue_alpha)) < 1.0e-9
+            ]
             queue_labels = {
                 str(row["run_id"]): (
-                    f"{row['topology']} | {row['mesh_level']} | "
+                    f"{row['topology']} | {row['mesh_level']} | α={float(row.get('alpha_deg') or 0):g}° | "
                     f"deltaT={float(row['dt_s']):.6g} s"
                 )
-                for row in runs
+                for row in queue_rows_available
             }
+            level_order = {"coarse": 0, "medium": 1, "fine": 2}
+            default_queue: list[str] = []
+            if str(package).startswith("cummings_"):
+                ordered_rows = sorted(
+                    queue_rows_available,
+                    key=lambda row: (
+                        level_order.get(str(row.get("mesh_level")), 99),
+                        -float(row.get("dt_star") or 0.0),
+                    ),
+                )
+                for level in ("coarse", "medium", "fine"):
+                    level_rows = [
+                        row for row in ordered_rows if str(row.get("mesh_level")) == level
+                    ]
+                    default_queue.extend(str(row["run_id"]) for row in level_rows[:2])
             queue_selection = st.multiselect(
                 "Casos de la cola",
                 list(queue_labels),
-                default=[],
+                default=[value for value in default_queue if value in queue_labels],
                 format_func=lambda value: queue_labels[value],
                 max_selections=18,
-                key="canonical-urans-queue-selection",
+                key=f"canonical-urans-queue-selection-{package}-{queue_topology}-{queue_alpha:g}",
             )
             queue_mode = st.segmented_control(
                 "Inicio de los casos nuevos",
@@ -1968,14 +2376,22 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
             "Revision unificada de una base RANS real. El gate automatico, "
             "la decision humana y el estado de ejecucion permanecen separados."
         )
-        batch_acceptance_path = (
-            active / "reports/rans_six_base_batch_acceptance_20260804.json"
-        )
         with st.expander("Aprobación administrativa de las seis bases", expanded=False):
             st.warning(
                 "Esta acción no altera el gate automático. Verifica campos reales, "
                 "identidad y hashes antes de habilitar cada base para convergencia "
                 "espacial e inicialización URANS."
+            )
+            batch_alpha = st.selectbox(
+                "Ángulo de las seis bases",
+                [8.0, 16.0],
+                format_func=lambda value: f"{value:g}°",
+                key="validation-rans-six-batch-alpha",
+            )
+            batch_acceptance_path = (
+                active
+                / "reports"
+                / f"rans_six_base_batch_acceptance_alpha_{batch_alpha:g}.json"
             )
             batch_confirm = st.checkbox(
                 "Confirmo la aceptación explícita de las seis bases RANS actuales",
@@ -1993,6 +2409,7 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
                         root,
                         "rans-review",
                         review_action="accept-six-current",
+                        alpha_deg=float(batch_alpha),
                         confirm=True,
                     ),
                 )
@@ -2007,12 +2424,19 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
                 if exceptions:
                     st.error("Existen bases no aceptadas por evidencia insuficiente.")
                     st.dataframe(exceptions, hide_index=True, width="stretch")
-        rans_mesh = st.selectbox(
-            "Ejecucion RANS a revisar",
-            mesh_ids,
+        review_catalog = _rans_case_catalog(meshes, checkpoint_rows)
+        review_key = st.selectbox(
+            "Ejecución RANS a revisar (malla y ángulo)",
+            list(review_catalog),
+            format_func=lambda value: (
+                f"{review_catalog[value]['label']} · {review_catalog[value]['status']}"
+            ),
             key="validation-rans-review-execution",
         )
-        selected_state = _selected_checkpoint(checkpoint_rows, rans_mesh)
+        selected_case = review_catalog[review_key]
+        rans_base_mesh = str(selected_case["mesh_id"])
+        rans_mesh = str(selected_case["checkpoint_id"])
+        selected_state = selected_case["state"]
         selected_review = reviews.get(rans_mesh, {})
         checkpoint_root = active / "checkpoints" / rans_mesh
         checkpoint_case = checkpoint_root / "case"
@@ -2186,43 +2610,11 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
                             ),
                         ),
                     )
-            current_iteration = int(
-                selected_state.get("absolute_simple_iteration")
-                or selected_state.get("iterations")
-                or 0
+            st.caption(
+                "Contrato de campaña: un único bloque SIMPLE de 20 000 "
+                "iteraciones. La revisión clasifica la evidencia, pero no "
+                "amplía ni altera el checkpoint calculado."
             )
-            new_target = current_iteration + 2500
-            rate = selected_state.get("median_solver_seconds_per_iteration")
-            extension_cols = st.columns(4)
-            extension_cols[0].metric("Iteracion actual", current_iteration)
-            extension_cols[1].metric("Nuevo objetivo", new_target)
-            extension_cols[2].metric(
-                "Coste medido estimado",
-                (
-                    f"{float(rate) * 2500.0 / 60.0:.1f} min"
-                    if rate is not None
-                    else "No disponible"
-                ),
-            )
-            extend_confirm = extension_cols[3].checkbox(
-                "Confirmar +2500",
-                key=f"validation-rans-extend-confirm-{rans_mesh}",
-            )
-            if st.button(
-                "Extender 2 500 iteraciones",
-                disabled=not extend_confirm,
-                key=f"validation-rans-extend-{rans_mesh}",
-            ):
-                start_job(
-                    "validation_rans_extend_review",
-                    validation_study_command(
-                        root,
-                        "rans-base",
-                        mesh_id=rans_mesh,
-                        run=True,
-                        manual_extension_iterations=2500,
-                    ),
-                )
             secondary = st.columns(2)
             if secondary[0].button(
                 "Crear checkpoint versionado",
@@ -2281,41 +2673,32 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
             rans_full_post = checkpoint_root / "rans_postprocess"
             product_actions = st.columns(3)
             if product_actions[0].button(
-                "Generar campos RANS finales",
+                "Postproceso RANS rápido",
                 key=f"validation-rans-final-visuals-{rans_mesh}",
+                help="Genera escalares, diagnósticos y vistas finales sin recorrer iteraciones para animarlas.",
             ):
                 start_job(
-                    "validation_rans_final_paraview_products",
+                    "validation_rans_full_postprocess",
                     [
                         sys.executable,
                         str(
                             root
-                            / "CFD_2D/scripts/ramair_2d_rans_paraview_final.py"
+                            / "CFD_2D/scripts/ramair_2d_rans_full_postprocess.py"
                         ),
-                        "--case",
-                        str(checkpoint_case),
-                        "--output",
-                        str(rans_products),
-                        *_paraview_scale_args(
-                            postprocess_scale_settings, animation=False
-                        ),
+                        "--project-root", str(root),
+                        "--case", str(checkpoint_case),
+                        "--output", str(rans_full_post),
+                        "--variant", rans_base_mesh,
+                        "--no-include-animations",
                     ],
                 )
             if product_actions[1].button(
-                "Abrir estado final en ParaView",
-                key=f"validation-rans-open-paraview-{rans_mesh}",
-            ):
-                try:
-                    opened = open_paraview_case(root, checkpoint_case)
-                    st.success(f"ParaView solicitado: {opened.get('status')}.")
-                except Exception as exc:
-                    st.error(str(exc))
-            if product_actions[2].button(
-                "Generar postproceso completo",
-                key=f"validation-rans-full-post-{rans_mesh}",
+                "Generar animaciones RANS",
+                key=f"validation-rans-animations-{rans_mesh}",
+                help="Recorre únicamente las iteraciones guardadas y codifica U, Cp y contornos.",
             ):
                 start_job(
-                    "validation_rans_full_postprocess",
+                    "validation_rans_animations",
                     [
                         sys.executable,
                         str(
@@ -2329,9 +2712,20 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
                         "--output",
                         str(rans_full_post),
                         "--variant",
-                        rans_mesh,
+                        rans_base_mesh,
+                        "--include-animations",
+                        "--animations-only",
                     ],
                 )
+            if product_actions[2].button(
+                "Abrir estado final en ParaView",
+                key=f"validation-rans-open-paraview-{rans_mesh}",
+            ):
+                try:
+                    opened = open_paraview_case(root, checkpoint_case)
+                    st.success(f"ParaView solicitado: {opened.get('status')}.")
+                except Exception as exc:
+                    st.error(str(exc))
             wall_actions = st.columns(2)
             if wall_actions[0].button(
                 "Generar solo productos de pared",
@@ -2345,7 +2739,7 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
                         "--project-root", str(root),
                         "--case", str(checkpoint_case),
                         "--output", str(rans_full_post),
-                        "--variant", rans_mesh,
+                        "--variant", rans_base_mesh,
                         "--wall-only",
                     ],
                 )
@@ -2371,8 +2765,8 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
                 inline=True,
             )
             st.caption(
-                "Courant: NOT_APPLICABLE_TO_RANS. No se crean animaciones "
-                "automaticas para una base SIMPLE estacionaria."
+                "Courant: NOT_APPLICABLE_TO_RANS. Las animaciones RANS usan el numero de "
+                "iteracion como eje temporal y se generan solo bajo demanda."
             )
 
     if section == "Análisis URANS":
@@ -2431,7 +2825,27 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
             except Exception as exc:
                 st.info(f"Resumen estático no disponible: {exc}")
 
-            actions = st.columns(3)
+            interval_enabled = st.toggle(
+                "Limitar las visualizaciones URANS a un intervalo físico",
+                value=False,
+                help="Reduce lectura y renderizado a la ventana de interés; no cambia la simulación ni la media de producción.",
+                key=f"validation-urans-post-range-enabled-{case_id}",
+            )
+            interval_cols = st.columns(2)
+            interval_start_s = interval_cols[0].number_input(
+                "Inicio [s]", min_value=0.0, value=0.0, format="%.8g",
+                disabled=not interval_enabled,
+                key=f"validation-urans-post-range-start-{case_id}",
+            )
+            interval_end_default = float(
+                row.get("end_time_s") or row.get("total_time_s") or 1.0
+            )
+            interval_end_s = interval_cols[1].number_input(
+                "Final [s]", min_value=0.0, value=max(interval_end_default, 0.0), format="%.8g",
+                disabled=not interval_enabled,
+                key=f"validation-urans-post-range-end-{case_id}",
+            )
+            actions = st.columns(4)
             if actions[0].button(
                 "Analizar resultado URANS",
                 key=f"validation-analyze-urans-{case_id}",
@@ -2454,8 +2868,9 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
                     validation_study_command(root, "report"),
                 )
             if actions[2].button(
-                "Postproceso URANS completo",
+                "Postproceso URANS rápido",
                 key=f"validation-postprocess-urans-{case_id}",
+                help="Genera escalares, diagnósticos y vistas finales; difiere las animaciones.",
             ):
                 start_job(
                     "validation_lab_postprocess_urans",
@@ -2467,7 +2882,44 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
                         "--output-dir", str(run_root / "postprocess"),
                         "--variant", mesh_id,
                         "--alpha", str(config.get("study_angle_deg", 8.0)),
+                        "--simulation-mode", "URANS",
+                        "--run-openfoam-postprocess",
                         "--automatic-paraview-products",
+                        "--no-include-paraview-animations",
+                        *(
+                            ["--paraview-time-range-s", str(float(interval_start_s)), str(float(interval_end_s))]
+                            if interval_enabled and float(interval_start_s) <= float(interval_end_s)
+                            else []
+                        ),
+                        *_paraview_scale_args(
+                            postprocess_scale_settings,
+                            animation=True,
+                        ),
+                    ],
+                )
+            if actions[3].button(
+                "Generar animaciones",
+                key=f"validation-animations-urans-{case_id}",
+                help="Lee los tiempos guardados y genera solo las secuencias animadas.",
+            ):
+                start_job(
+                    "validation_lab_animations_urans",
+                    [
+                        sys.executable,
+                        str(root / "CFD_2D/scripts/ramair_2d_postprocess.py"),
+                        "--case-root", str(root),
+                        "--case-dir", str(case_path),
+                        "--output-dir", str(run_root / "postprocess"),
+                        "--variant", mesh_id,
+                        "--alpha", str(config.get("study_angle_deg", 8.0)),
+                        "--simulation-mode", "URANS",
+                        "--automatic-paraview-products",
+                        "--paraview-animations-only",
+                        *(
+                            ["--paraview-time-range-s", str(float(interval_start_s)), str(float(interval_end_s))]
+                            if interval_enabled and float(interval_start_s) <= float(interval_end_s)
+                            else []
+                        ),
                         *_paraview_scale_args(
                             postprocess_scale_settings,
                             animation=True,
@@ -2483,6 +2935,24 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
                 )
                 _json_panel(run_root / "review.json", "Revisión", inline=True)
                 _plot_inventory(run_root / "plots")
+                case_summary = _read_json(run_root / "case_summary.json")
+                if case_summary.get("status") == "COMPLETED":
+                    metrics_summary = dict(case_summary.get("metrics") or {})
+                    modes_summary = dict(case_summary.get("dominant_modes") or {})
+                    summary_rows = []
+                    for metric_name in ("CL", "CD", "CM", "L_over_D"):
+                        metric = dict(metrics_summary.get(metric_name) or {})
+                        mode = dict(modes_summary.get(metric_name) or {})
+                        summary_rows.append({
+                            "Variable": metric_name.replace("L_over_D", "CL/CD"),
+                            "Media producción": metric.get("mean"),
+                            "RMS": metric.get("rms"),
+                            "Desv. estándar": metric.get("std"),
+                            "f dominante [Hz]": mode.get("frequency_hz"),
+                            "St dominante": mode.get("strouhal"),
+                            "W=1/St": mode.get("wave_number"),
+                        })
+                    st.dataframe(summary_rows, hide_index=True, width="stretch")
             _postprocess_product_browser(
                 run_root / "postprocess/postprocess_manifest.json",
                 start_job=start_job,
@@ -2539,14 +3009,27 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
             ]
             with tab:
                 if selected_rows:
-                    st.dataframe(
-                        selected_rows,
-                        hide_index=True,
-                        width="stretch",
-                    )
-                    _plot_inventory(
-                        active / "postprocess/spatial_rans" / topology
-                    )
+                    for hidden in (
+                        "registry_cell_count", "effective_h_2d",
+                        "seconds_per_iteration", "automatic_gate", "review_status",
+                    ):
+                        for row in selected_rows:
+                            row.pop(hidden, None)
+                    angle_8, angle_16 = st.tabs(["8°", "16°"])
+                    for alpha_deg, angle_tab in ((8.0, angle_8), (16.0, angle_16)):
+                        with angle_tab:
+                            angle_rows = [
+                                row for row in selected_rows
+                                if float(row.get("alpha_deg", -999.0)) == alpha_deg
+                            ]
+                            if angle_rows:
+                                st.dataframe(angle_rows, hide_index=True, width="stretch")
+                                _plot_inventory(
+                                    active / "postprocess/spatial_rans" / topology
+                                    / f"alpha_{int(alpha_deg)}"
+                                )
+                            else:
+                                st.info(f"Aún no hay tres resultados elegibles a {alpha_deg:g}°.")
                 else:
                     st.info(
                         f"No hay tres resultados RANS {topology} elegibles."
@@ -2577,7 +3060,7 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
         strategy_options = (
             ["optimized", "cummings", "full_capacity"]
             if selected_topology == "closed"
-            else ["progressive_medium_first", "full_capacity"]
+            else ["progressive_medium_first", "cummings", "full_capacity"]
         )
         campaign_columns = st.columns(2)
         strategy = campaign_columns[0].selectbox(
@@ -2893,3 +3376,85 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
             "Los CSV solo se crean cuando existen registros reales. Ningun "
             "fixture o dato sintetico se publica como validacion."
         )
+
+
+def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
+    validation_tab, convergence_tab = st.tabs(["Validación", "Convergencia"])
+    with validation_tab:
+        render_ls1_validation(root, start_job)
+    with convergence_tab:
+        render_convergence_lab(root, start_job)
+        with st.expander("Paquete portátil de casos de convergencia", expanded=False):
+            candidates = sorted(
+                path.parent
+                for path in (root / "CFD_2D/validation_studies").rglob("system/controlDict")
+                if not any(part.startswith("processor") for part in path.parts)
+            )
+            labels = {str(path.relative_to(root)): path for path in candidates}
+            selected_labels = st.multiselect(
+                "Casos preparados",
+                list(labels),
+                key="convergence-remote-cases",
+                help="Se empaquetan los diccionarios, la malla y los checkpoints exactamente como están preparados.",
+            )
+            mode = st.selectbox(
+                "Secuencia remota",
+                ["rans_only", "transient_only", "rans_urans"],
+                format_func=lambda value: {
+                    "rans_only": "Solo RANS (conservar checkpoint)",
+                    "transient_only": "Solo URANS desde checkpoint",
+                    "rans_urans": "RANS seguido de URANS",
+                }[value],
+                key="convergence-remote-mode",
+            )
+            remote_cores = st.number_input(
+                "Procesos solicitados",
+                min_value=1,
+                max_value=128,
+                value=8,
+                key="convergence-remote-cores",
+                help="El optimizador puede sustituir este valor al reconocer por primera vez la malla.",
+            )
+            if st.button(
+                "Generar paquete de convergencia",
+                disabled=not selected_labels,
+                key="convergence-remote-create",
+            ):
+                command = [
+                    sys.executable,
+                    str(root / "Application Support/Tools/package_ramair_remote_execution.py"),
+                    "--project-root", str(root),
+                    "--package-scope", "convergence",
+                    "--execution-mode", mode,
+                    "--n-cores", str(int(remote_cores)),
+                    "--case-timeout-min", "360",
+                    "--automatic-core-selection",
+                    "--renumber-before-decompose",
+                ]
+                for label in selected_labels:
+                    command += ["--case", str(labels[label])]
+                start_job("convergence_remote_package", command)
+            uploaded_return = st.file_uploader(
+                "Cargar retorno de convergencia",
+                type=["zip"],
+                key="convergence-remote-return",
+            )
+            if st.button(
+                "Verificar e importar retorno",
+                disabled=uploaded_return is None,
+                key="convergence-remote-import",
+            ):
+                upload_root = root / "CFD_2D/app_state/remote_uploads"
+                upload_root.mkdir(parents=True, exist_ok=True)
+                upload_path = upload_root / f"{int(time.time())}_{Path(uploaded_return.name).name}"
+                upload_path.write_bytes(uploaded_return.getvalue())
+                start_job(
+                    "convergence_remote_import",
+                    [
+                        sys.executable,
+                        str(root / "Application Support/Tools/import_ramair_remote_results.py"),
+                        "--project-root", str(root),
+                        "--archive", str(upload_path),
+                        "--existing-action", "archive",
+                    ],
+                )

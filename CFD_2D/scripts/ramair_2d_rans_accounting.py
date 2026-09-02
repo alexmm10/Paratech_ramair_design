@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-MINIMUM_CONVERGENCE_ITERATION = 10000
-TARGETS = (10000, 12500, 15000, 17500, 20000)
+MINIMUM_CONVERGENCE_ITERATION = 20000
+TARGETS = (20000,)
 
 SIMPLE_EXIT_REASONS = {
     "TARGET_REACHED",
@@ -114,8 +114,8 @@ def authoritative_simple_iteration(case: Path) -> dict[str, Any]:
 def target_for_iteration(
     iteration: int,
     *,
-    initial: int = 10000,
-    extension: int = 2500,
+    initial: int = 20000,
+    extension: int = 20000,
     maximum: int = 20000,
 ) -> int:
     if iteration < initial:
@@ -130,8 +130,8 @@ def block_accounting(
     iteration: int,
     *,
     block_start: int | None = None,
-    initial: int = 10000,
-    extension: int = 2500,
+    initial: int = 20000,
+    extension: int = 20000,
     maximum: int = 20000,
 ) -> dict[str, int]:
     target = target_for_iteration(

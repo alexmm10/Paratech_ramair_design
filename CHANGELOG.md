@@ -2,6 +2,433 @@
 
 ## [Unreleased]
 
+### Fast/final postprocessing, deferred animations and repository handoff
+
+- Split Validation and Convergence ParaView work into a fast scalar/final-state
+  postprocess and an independent animation action. The fast path reads the latest
+  OpenFOAM state directly and no longer exports a redundant full VTK database.
+- Added freshness checks for derived volume fields, wall-patch VTK exports and
+  wall-normal velocity samples. A repeated real alpha=12 final postprocess fell
+  from about 143 s to 66 s while preserving stage-specific RANS/URANS products.
+- Animation-only processing now skips coefficient analysis, reconstruction and
+  wall diagnostics. It was exercised on the alpha=12 case and generated four
+  bounded URANS animations from the retained physical-time states.
+- Recovered the useful alpha=8 and alpha=16 validation cases from their archived
+  workspaces without discarding partial histories. Alpha=8 remains a RANS
+  continuation from iteration 5475; the other recovered physical-time cases are
+  available for URANS continuation and postprocessing.
+- Added a GitHub maintenance guide and audited the tracked payload. Source code,
+  presets, tests, reference data and manuals are versioned; CFD results, meshes,
+  VTK/ParaView data, remote ZIP packages and execution state remain excluded.
+
+### OpenFOAM base audit, physical stage semantics and nodal ParaView fields
+
+- Added a machine-readable audit for closed/open OpenFOAM bases covering the
+  validation flow state, R50c domain, SA turbulence, farfield/wall/empty patches,
+  open-inlet continuity, fixed-geometry AoA, force normalization, final numerics,
+  RANS-to-URANS transfer, `checkMesh` and measured y+.
+- Corrected generated low-Re SA conditions from `nuTilda=3nu` to `4nu` and from
+  a wall-function `nut` boundary to `fixedValue 0`; regenerated the canonical
+  validation cases. Added a visible warning whenever measured `y+max > 1`.
+- Prevented incomplete SIMPLE histories from appearing as URANS physical time.
+  A staged case is complete only after full production or an explicit statistical
+  convergence decision; stopped and interrupted histories remain partial.
+- Reworked automatic streamline input through `CleanToGrid` and point-data
+  conversion, with volume rather than surface integration and additional near-wall
+  seeds. Added velocity, pressure and vorticity near-airfoil contours for RANS and
+  URANS. A real offscreen render produced 460 lines and more than 87k points.
+- Selected efficient closed/open experimental candidates after several isolated
+  trials. They save 19.6/30.1 percent of cells and improve interpolation weight
+  and volume ratio, but their minimum determinant is substantially lower; the
+  established medium meshes therefore remain the validation defaults.
+- Generated a clean schema-2 remote package for sequential 4/8/16 degree RANS to
+  URANS execution and verified extraction, startup monitoring and file inventory
+  outside the project tree.
+- Changed validation postprocessing from an implicit URANS mode to evidence-based
+  automatic stage detection. The recovered alpha 8 history is RANS-only; alpha 10
+  retains its verified but incomplete physical-time continuation. Stale URANS
+  products are hidden when the stage summary has no physical-time evidence.
+- Added separate RANS-archive and URANS ParaView open actions. Both paths were
+  exercised through the native OpenFOAM reader and emitted READY evidence without
+  the previous copy-mode dialog.
+- Replaced filled nearfield maps with coloured isolines on a mid-plane slice of
+  the one-cell-thick domain. The background is white, the profile has a stronger
+  black outline, the window spans about -0.5c to 2c, and near-wall streamline
+  seeding was reduced from 180 to 90 points.
+- Remote imports now inventory the exact raw logs, force histories, state files,
+  reconstructed times and stationary archives used to rebuild app monitors.
+
+### Optional Bump + Split Progression and validation-queue recovery
+
+- Added the optional `Bump + Split Progression` tangential law to the closed and
+  open experimental meshers without changing the accepted `4 Bumps` default.
+  LE/inlet and TE retain Bump laws; each body is split near `x/c=0.5` into two
+  oppositely oriented Gmsh Progression curves. The shared solver uses the exact
+  geometric-series length, searches integer splits without silently changing
+  total divisions, and reports midpoint mismatch, actual hmax, GR and validity.
+- Added equivalent automatic/manual controls to both mesh editors. Switching
+  from automatic to manual preserves the last Bumps, integer split and four
+  Progression coefficients. Infeasible limits report the estimated division
+  count instead of mutating the requested discretization.
+- Compared real closed and open meshes at hmax 0.5, 0.25 and 0.1 percent chord.
+  Split Progression reduced some interface-size jumps, but its best candidates
+  had lower minimum determinant and volume ratio than the accepted four-Bump
+  meshes. It therefore remains an opt-in experiment; 0.25 percent chord is the
+  useful diagnostic default and 0.1 percent is rejected at current divisions.
+- Recovered and postprocessed the interrupted validation queue at 4, 8 and 16
+  degrees. The old queue stopped its RANS cases because it carried a hidden
+  30-minute steady timeout and explicitly disabled URANS handoff after timeout;
+  no URANS phase had run. Partial RANS fields, residuals and force histories are
+  retained and usable as incomplete evidence.
+- Generated and exercised a schema-2 portable validation package for 4, 8 and
+  16 degrees outside the project tree. Collection uses only system Python,
+  preserves zero-byte `.foam` markers, verifies checksums, and imports the three
+  canonical cases into an isolated application root.
+
+### Standardized RANS/URANS postprocessing and verified execution evidence
+
+- Standardized automatic ParaView products around selective OpenFOAM arrays and
+  written times. RANS uses its initial/final states; URANS supports a user-selected
+  physical-time interval and a bounded number of frames. Products include Cp,
+  velocity with freestream-perpendicular streamlines, aft boundary-layer velocity
+  with mesh edges, high-vorticity regions, positive-Q vortex cores, y+, Courant
+  hotspots and shared visualization scales when the source arrays exist.
+- Removed automatic ParaView `SaveState` and the redundant vector-U contour from
+  the batch path after a real 215k-cell case showed both could stall WSL rendering.
+  Interactive `.foam` markers remain the authoritative ParaView entry point.
+- Added a production-window `fieldAverage` function object for U, p and nuTilda;
+  second moments are stored for U and p and survive restart. OpenFOAM 14
+  `foamDictionary` successfully parsed the generated dictionary.
+- Recorded the complete initial-condition contract in each case manifest: uniform
+  freestream U, gauge kinematic p, low-Re SA initialization, no-slip walls and the
+  mandatory SIMPLE-to-URANS field handoff.
+- Added automatic MPI preflight/tuning with bounded 4/6/8-rank pilots, load-balance
+  evidence, rank-profile cache and manual override. The real alpha=12 case selected
+  six ranks because its 2.50 s/step performance was within 5% of eight ranks.
+- Added complete closed/open mesh-quality distributions and corrected the closed
+  topology count to include all 60,031 external triangles. The accepted closed and
+  open studies both pass OpenFOAM 14 `checkMesh`.
+- Added `GITHUB_BACKUP_WORKFLOW.md` and exclusions for generated mesh studies,
+  scratch data, parallel profiles and ParaView states.
+- Verification: Python compilation and the complete `CFD_2D/tests` suite pass
+  306 tests; bounded RANS/URANS ParaView rendering completes in 6.6/23.0 s.
+
+### Optional Gmsh Extend controls and reproducible mesh-quality experiments
+
+- Added independent, opt-in Gmsh `Extend` sizing for the external domain and
+  the open-airfoil cavity. The implementation uses the official Gmsh 4.15
+  controls (`DistMax`, `SizeMax`, `Power`) and restricts each field to its own
+  surface, so enabling the cavity law cannot refine the farfield. Both controls
+  remain off by default and the previous size fields are unchanged when off.
+- Added an optional log-smooth `SizesList` transition for the non-physical inlet
+  part of the open-airfoil boundary layer. It changes only the local normal
+  height; it does not create a wall or alter physical groups.
+- Added selectable Delaunay (5)/Frontal-Delaunay (6), `Mesh.Smoothing=0..10`,
+  `AnalyseMeshQuality`, numerical minDetJac/minSIGE/minSICN summaries and
+  pre-extrusion Laplace2D/Relocate2D experiments. Candidate meshes are generated
+  as separate revisions and ranked with an OpenFOAM-dominated Q score; activation
+  still requires explicit approval.
+- Open meshing now supports three explicit tangential modes: legacy manual,
+  automatic four-segment matching and manual four-segment Bump. Manual mode can
+  inherit the last automatic coefficients and the report records the exact mode,
+  divisions and coefficients sent to Gmsh.
+- Added a short optional straight-approach extension to the closed TE Bump
+  segment. A zero length preserves the accepted topology. Fixed the closed mesh
+  viewer to use the supported Windows Gmsh Python viewer.
+- Added a controlled study runner. On the bounded open case, algorithm 6 was
+  faster and had substantially better minSIGE than algorithm 5. Smoothing 1 was
+  a useful low-cost default; smoothing 5 improved minSIGE further at roughly
+  twice the generation cost. Combined Laplace2D/Relocate2D gave the best Q, but
+  did not repair the BL-controlled determinant and therefore remains optional.
+- Fixed validation residual downsampling to preserve the complete RANS iteration
+  span independently for every equation, rather than allowing one densely logged
+  field to truncate the others.
+- Simplified both experimental BL editors around one authoritative
+  `Discretización tangencial de pared` section. Tangential min/max, global wall
+  nodes, legacy body Bump, LE-node and separate TE-cap-node widgets were removed
+  from the UI while their JSON/backend compatibility remains intact. Disabling
+  automatic matching now exposes and applies the four manual segment Bump laws
+  directly. The open lip-fan control now sits beside the BL-layer control.
+- Generated immutable-reference Extend trials. The smooth closed external
+  candidate passes `checkMesh` but has lower advisory Q than
+  `closed_validation_quality`. The open external-only candidate also passes;
+  every tested internal-Extend candidate crossed the interpolation-weight fail
+  threshold, so the accepted open baseline remains unchanged and cavity Extend
+  stays opt-in diagnostic evidence.
+
+### Validation monitors, reference errors and continuous Bump matching
+
+- Validation monitors now retain the complete RANS history (up to 120,000
+  records), report total SIMPLE iterations or URANS time steps, and no longer
+  expose a PID as a scientific metric. SIMPLE can hand off to URANS only after
+  the residual/force-stability gate is satisfied or the configured maximum
+  iteration count is actually reached; wall-clock timeout alone is not a gate.
+- Added the accepted-point `Cl/Cd(alpha)` validation plot and one signed
+  relative-difference plot per variable/reference. Relative percentages whose
+  reference is numerically close to zero are explicitly omitted and labelled,
+  avoiding arbitrary regularization and misleading infinite errors.
+- Added a reusable four-segment Gmsh Bump matcher. It solves one common physical
+  junction spacing for TE cap, upper wall, LE segment and lower wall without
+  changing the requested divisions, then reports interface ratios, local growth
+  and maximum tangential size. Closed experimental meshing uses it by default;
+  open meshing retains its accepted legacy default and exposes the method as an
+  opt-in experiment.
+- Closed LE segmentation is now curvature based instead of a fixed point count,
+  and both experimental editors expose geometry selection, matching diagnostics,
+  quality review, approval and named ParaView problem sets.
+- Tested optional `Laplace2D` post-optimization on a 61,810-element closed mesh.
+  It left the limiting quality metrics unchanged (`minSICN=0.00446585`,
+  `minSJ=0.975582`, `gamma_min=0.395103`), so it remains disabled by default.
+- Verification: Python compilation succeeded and the complete test suite passes
+  291 tests.
+
+### Validation/Convergence closure and robust open-inlet guide
+
+- Completed the exact-base inlet experiment without overwriting the accepted
+  mesh. The geometry audit proved that a literal uncut leading-edge segment is
+  incompatible with the current cut-lip locations: it introduces two curvature
+  reversals. The mesher now rejects that condition deterministically and falls
+  back to a bounded convex C1 closure while recording both diagnostics.
+- Compared 180-node/bump-0.9 and 160-node/uniform inlet trials. Both exposed
+  low interpolation-weight faces and remain unapproved. The verified
+  `beta75_convex_fallback_inlet140_uniform` candidate passes OpenFOAM 14
+  `checkMesh` with 200,116 cells, 75 measured layers, 45.9815 degree maximum
+  non-orthogonality, 1.01734 maximum skewness, 0.06322 minimum interpolation
+  weight and 0.08998 minimum volume ratio.
+- Regenerated `reference_uncut_validation_1m` from its canonical preset instead
+  of approving a stale `te_half` manifest. The new 215,316-cell mesh is correctly
+  identified, passes `checkMesh` and is approved only after verification.
+- The independent validation solver file is now the sole closed-topology
+  contract. Its RANS gate combines residuals with long-window force statistics,
+  its editable A-E table determines all durations, and PIMPLE uses 0.3/0.9/0.7
+  intermediate relaxation with unrelaxed final solves.
+- Validation monitoring now combines app state, RANS/URANS phase, OpenFOAM
+  residuals, aerodynamic coefficients and an expandable raw console. Sequential
+  runs offer resumable/skip-complete operation or clean per-angle regeneration
+  from the approved mesh and study solver configuration.
+- Validation post-processing preserves complete RANS and URANS histories,
+  shades only the selected averaging interval and derives RANS means from the
+  editable final-sample count. URANS volume fields use physical
+  `adjustableRunTime`; convergence studies retain fixed `timeStep` writes.
+- Added the OpenFOAM Q criterion alongside vorticity to field inventories,
+  post-processing and automatic ParaView wake screenshots.
+- Replaced the obsolete convergence-lab frozen-effective-config panel with
+  explicit final RANS/SIMPLE and URANS/PIMPLE configuration views. Existing
+  queues still retain their internal immutable revision for reproducibility.
+- Verification: the complete `CFD_2D/tests` suite passes 281 tests.
+
+- Reorganized the convergence laboratory around mesh-and-angle identities for
+  both 8 and 16 degrees. RANS execution now supports individual and ordered
+  queues, fixed 20,000-iteration bases, four explicit lifecycle states and
+  review/postprocess selection by the exact mesh-angle checkpoint.
+- Added the low-cost Cummings packages for closed and open geometries. Each
+  selected angle exposes six canonical URANS runs (two time steps per mesh
+  level), all initialized from its matching reviewed RANS checkpoint.
+- Split spatial RANS reporting by topology and angle. Open-airfoil wall
+  statistics use the external branch only; obsolete separation-bubble plots
+  are not generated, and the displayed comparison table hides registry-only
+  implementation columns.
+- The independent LS(1)-0417 validation page now shows the active job, reports
+  and opens the actual mesh, and prepares any chosen angle directly from the
+  OpenFOAM-case section. The former redundant additional-angle control was
+  removed.
+- Hardened command and manifest serialization so `Path` objects are converted
+  consistently before JSON persistence, eliminating the experimental-mesher
+  and validation-case `PosixPath is not JSON serializable` failures.
+- Replaced the experimental open-inlet BoundaryLayer guide with one Gmsh
+  spline containing the exact compatible base-profile samples plus bounded
+  local C1 Hermite connectors to the physical lips. Splitting the guide into
+  several Gmsh curves and forcing the literal full uncut leading edge were
+  rejected after real trials because both introduce BoundaryLayer corners or
+  self-intersection for the current open geometry and layer thickness.
+- Generated the isolated `beta75_c1_base_safe_v30` revision without replacing
+  any prior user mesh. OpenFOAM 14 `checkMesh` passes with 206,744 cells,
+  75 measured layers, max non-orthogonality 51.4598 degrees, max skewness
+  1.01734, min determinant 0.00503807, min interpolation weight 0.057461 and
+  min volume ratio 0.081286.
+- Removed a dead RANS image reference: aerodynamic efficiency is already the
+  second panel of the generated `rans_forces.png` product.
+- Removed the obsolete `+2500` RANS extension action so the UI enforces the
+  fixed 20,000-iteration campaign contract. URANS review now publishes the
+  production-window means, RMS, standard deviation, dominant frequency,
+  Strouhal number and the configured `W=1/St` wave number in one table.
+
+## [2026-08-26]
+
+- Context snapshot for backend API 26, Validation Lab schema 13 and the
+  `beta75_c1_base_safe_v30` experimental open-mesh candidate.
+
+### Bounded open-inlet bridge and experimental mesh v25
+
+- The uncut base guide used to continue the external boundary layer now uses
+  bounded local Hermite handles and endpoint-biased sampling. This prevents
+  the high-discretization bridge from overshooting or turning inward at the
+  upper/lower lips while retaining the base-profile geometry between the two
+  local joins.
+- Polyline cleaning now rejects non-finite coordinates and removes coincident
+  points even when they are not consecutive, using the physical geometry
+  tolerance. This prevents duplicate-point and near-zero-edge failures from
+  reaching Gmsh.
+- Automatic external interface sizing now ignores a stale fixed draft value
+  and uses the measured wall/inlet tangential spacing; the report records the
+  selection source explicitly. Fixed sizing remains available as an explicit
+  alternative.
+- Generated the independent `beta75_base_inlet_bounded_v25_unique_points`
+  revision without overwriting earlier revisions. It passed Gmsh conversion
+  and OpenFOAM 14 `checkMesh`: 206,898 cells, 75 measured BL layers, 101,476
+  hexahedra, 105,422 prisms, maximum non-orthogonality 74.884 deg (one severe
+  face), maximum skewness 0.6984, minimum determinant 0.00504, minimum face
+  interpolation weight 0.0521 and minimum face volume ratio 0.0412.
+- The Streamlit application was resynchronized and verified at HTTP 200;
+  the targeted regression suite now passes 93 tests.
+
+### Physically closed Gmsh boundary-layer stack
+
+- Replaced the editable experimental `Beta` value with an internally solved
+  Gmsh Beta-law coefficient. The user now supplies target `y+`, layer count
+  and turbulent-thickness safety factor; `Size`, `Beta`, `NbLayers` and the
+  resulting `Thickness` are mutually consistent and measured after meshing.
+- The shared wall-distance calculator now uses the CFD-Online/Schlichting
+  correlation and applies the OpenFOAM cell-centred finite-volume convention
+  exactly once: Gmsh first-cell height is `2*y_wall`.
+- Geometric progression mode now derives the smallest integer layer count
+  whose stack covers `1.2*delta99` (or the selected safety factor). Only its
+  growth ratio remains editable.
+- Added direct quad-column auditing of real first height, wall-to-centre
+  distance, layer count, total BL thickness and local normal growth. An exact
+  requested layer count is confirmed only when every measured wall column
+  agrees.
+- Added LaTeX-style physical/topological summary tables and VTK point sets for
+  low interpolation weight, low volume ratio, low determinant and abrupt
+  local growth. The full study remains a manual action after `checkMesh=OK`.
+- Retained the user's
+  `beta75_continuous_v14_v12_geometry_smooth_farfield_try_refining` revision
+  unchanged. Four isolated successor trials established the balanced
+  `beta75_calculated_v20_balanced` candidate: 200,001 cells, max
+  non-orthogonality 42.737 deg, max skewness 0.5286, min determinant 0.005038,
+  min interpolation weight 0.07668 and min volume ratio 0.11073.
+
+### Mesh-quality diagnostics, automatic numerics and open-mesh experiment
+
+- Corrected the physical `y+` contract for OpenFOAM finite volumes: the
+  computed wall distance is a cell-centre distance and the geometric first
+  cell height is twice that value. Reports retain both quantities and the
+  multiplier, avoiding an implicit factor-of-two error in Gmsh.
+- Confirmed and documented that every aerodynamic coefficient and moment uses
+  the complete rigid-wall patch set and therefore includes both pressure-normal
+  and viscous-shear contributions. The fictitious open-airfoil inlet guide is
+  never integrated as a wall.
+- Added an opt-in full mesh-quality study. It reconstructs cell distributions
+  for skewness, non-orthogonality, interpolation weight, volume ratio,
+  determinant, smoothness and aspect ratio, splits boundary-layer hexes from
+  unstructured prisms, and renders PNG tables. Normal mesh generation no
+  longer pays this full-analysis cost.
+- Added direct ParaView opening of the exact VTK sets written by `checkMesh`.
+  Experimental sets are supported both beside `log.checkMesh` and in the
+  conventional problem-set subfolder.
+- SIMPLE and PIMPLE now derive non-orthogonal correctors and the Laplacian
+  scheme from the selected mesh report: `<50 deg` gives 0/corrected,
+  `50-<70 deg` gives 1/corrected, and `>=70 deg` gives 2/limited 0.5. The
+  effective automatic values and their source are recorded in every case.
+- Experimental revisions without a successful `checkMesh` can no longer be
+  marked ready or approved. Unchecked, unavailable-check and quality-review
+  states remain explicit.
+- Superseded the older
+  `beta75_continuous_v14_v12_geometry_smooth_farfield` diagnostic with the
+  later user-refined baseline and the isolated Beta-law trials documented
+  above; no previous revision was overwritten.
+- Rejected the smaller automatic-interface trial `v16`: matching the first
+  triangle to 1.75 times the inlet tangential spacing reduced its minimum
+  interpolation weight to 0.01982. This establishes that the transition must
+  account for the following radial row as well as wall tangential spacing.
+
+### Polar-error metrics and enforced validation solver
+
+- Added the paper-defined normalized RMS polar error `err` and signed peak
+  error `err2` for `CL`, `CD` and `CL/CD` against Experimental, CFD Cobalt and
+  CFD Kestrel data. CSV/PNG products are regenerated exclusively from the
+  points currently published in the independent LS(1)-0417 validation study.
+- Added an editable but bounded validation-solver contract: mandatory
+  SIMPLE/RANS initialization (15 000 iterations, `1e-6` residual targets,
+  `U=0.7`, `nuTilda=0.7`) followed by A-B-C-D-E PIMPLE/URANS with default
+  `dt*=0.0025`, `maxCo=50`, at most five outer correctors, `D=10 t*` and the
+  sole production/averaging window `E=50 t*`.
+- Added an independent open-airfoil Gmsh experiment and Mesh-page UI with
+  chord-relative Boundary Layer, external-volume and internal-volume groups,
+  revision loading, real mesh previews, OpenFOAM quality reports and explicit
+  approval state.
+- Replaced the earlier `beta75_interface400` diagnostic baseline with the
+  smoother continuous-size revisions described above.
+- Experimental-mesh reports now declare the requested 75-layer contract before
+  every generation or recheck, allowing the shared quality parser to confirm
+  the actual quad/hex boundary-layer cells without claiming an exact layer
+  count from `checkMesh` alone.
+- The Streamlit shell now registers its own application directory explicitly,
+  so the new validation and experimental-mesh pages import consistently from
+  the launcher, isolated UI tests and portable installations.
+- Runtime synchronization now includes the experimental Docker definition,
+  Compose file and ignore rules. Regression tests distinguish immutable
+  scientific contracts from user-owned solver, mesh, inlet and CATIA settings.
+
+## [2026-08-25]
+
+### Standalone LS(1)-0417 validation and UI bug fixes
+
+- Split `Validation & Convergence Lab` into independent `Validación` and
+  `Convergencia` pages. The LS(1)-0417 polar study now owns solver snapshots,
+  accepted points, literature overlays, OpenFOAM case controls, execution and
+  postprocess without depending on the active Work Case.
+- Migrated the existing LS(1)-0417 validation evidence without copying the
+  canonical OpenFOAM fields. The former Work Case is archived under
+  `Previous Versions/Retired Work Cases` and no longer appears in the active
+  Results library.
+- Complete Work Case restoration now recovers its explicitly saved active
+  package set even after dependency-revision drift, while preserving
+  `REVIEW_REQUIRED` warnings. Isolated stale-package loading remains blocked.
+- Removed mesh-refinement clones from the physical profile selector, exposed
+  the 1 m open validation profile distinctly, and allowed the case-package
+  builder to consume any safe exported geometry identifier.
+- Repaired PIMPLE sensitivity analysis: force means and dominant frequency are
+  read from the current nested analysis schema, and absent optional metrics no
+  longer raise a `None` conversion error.
+- Airfoil previews now follow the canonical upper LE-to-TE and lower TE-to-LE
+  contour, use an x/c domain starting at -0.1, and attach stabilizer endpoints
+  to the actual lower profile surface. A visible `Crear nuevo espacio de
+  trabajo` action is available on the Work Case page.
+
+### Work Case, geometry, suspension and mesh UI corrections
+
+- Made Work Case selection candidate-only until the user presses the explicit
+  load action. Creation and replacement controls now live on the Work Case
+  page, while the sidebar is a read-only summary of the loaded Work Case,
+  geometry, mesh and CFD execution context. Incomplete Work Cases can be
+  reactivated without fabricating missing packages.
+- Kept geometry and CFD-case changes inside the loaded Work Case. A geometry
+  switch no longer rewrites the active Work Case identity or silently restores
+  a mesh snapshot.
+- Added normalized geometry identity metadata to newly saved geometry, CFD
+  case and mesh packages. Saved meshes are classified by real profile digest,
+  chord, open/closed state, inlet definition and contract version in addition
+  to exact revision dependencies. Incompatible results remain blocked, while
+  their generator settings can be imported explicitly as a warned seed.
+- Simplified the Geometry/CATIA pages: primary preprocessing/CATIA actions are
+  at the top, previews are filtered to representative 2-D/3-D products,
+  exports are grouped under `CATIA & CFD exports`, and low-level CATIA defaults
+  remain available only as advanced controls. CFD physical values used by the
+  preprocessor now come from the active CFD Case.
+- Simplified suspension editing around one enable switch, `all_loaded` versus
+  `explicit_rib_ids`, R/b versus explicit-angle rigging and one visible
+  bifurcation constraint. Fabric remains surface geometry and suspension lines
+  remain line geometry; explicit fabric offsets and suspension tubes are
+  disabled while their material metadata is retained. Added the lateral
+  stabilizer preview and dedicated stabilizer/tip-bulge controls.
+- Removed the short mesh-parameter optimizer from the normal application,
+  filtered crossports from the CFD mesh preview and retained the effective
+  Gmsh execution, limit and safeguard controls. Coarse/Medium/Fine packages
+  remain separate mesh revisions associated with one geometry.
+- Removed XFLR5 from the required user workflow. XFOIL is the reproducible
+  aerodynamic preprocessing dependency.
+
 ### T17 final integration
 
 - Consolidated Gates A-E as implemented and bounded-test verified. Gate F is
@@ -1485,3 +1912,64 @@ and in `CFD_2D/reports/OPENFOAM14_SOLVER_POSTPROCESS_PORTABILITY_AUDIT_20260723.
 - Prevented stale active mesh reuse and empty `polyMesh` creation.
 - Kept the solver dry-run by default and preserved partial results after clean
   timeout handling.
+## [2026-08-27]
+
+### Added
+
+- Added a separate closed-airfoil experimental mesher beside the open-airfoil
+  laboratory. It builds one connected exterior wall, an explicit LE, a
+  tangent-continuous rounded TE cap, a 75-layer configurable boundary layer
+  and a circular graded farfield without creating an internal fluid region.
+- Added revision loading, generation, Gmsh opening, approval and optional full
+  quality-distribution controls for closed experimental meshes.
+- Added an optional strict phase-D validation gate that compares the final
+  steady coefficient mean with the phase-D window and can use phase D as the
+  reported production sample when the configured equivalence test passes.
+- Added focused regression tests for validation phase resume, validation case
+  parsing, saved-mesh quality lookup and closed experimental wall continuity.
+
+### Changed
+
+- Rebuilt the open experimental inlet continuation from the exact shared
+  uncut-profile samples. The retained open wall now agrees with its uncut base
+  to below `6e-10 m`; the inlet contains no artificial connector and its two
+  lip joins are tangent-continuous to approximately `0.1 deg`.
+- Reduced the default open inlet interior sizing factor from `0.50` to `0.45`
+  after a controlled mesh comparison. This moved the minimum interpolation
+  weight from a failing `0.04879` to a passing `0.05228`.
+- Validation phase resume now reads the latest physical time and skips A-E
+  phases already completed, so a clean interruption continues the unfinished
+  phase instead of replaying initialization.
+- Migrated historical closed RANS checkpoints at 8 degrees to explicit
+  `__alpha_p8` identities. New closed 16-degree and open 16-degree campaign
+  entries remain distinct and uncreated until deliberately run.
+- SIMPLE/PIMPLE non-orthogonal controls now read the selected saved mesh
+  package, including the `Mesh Data` Results layout. Current medium closed and
+  open meshes resolve automatically to zero non-orthogonal correctors and
+  `Gauss linear corrected` from maxima near 41.5 degrees.
+- Validation live monitoring now distinguishes RANS from URANS unambiguously,
+  parses names such as `alpha_p12p000` correctly and reports the active A-E
+  phase from physical time.
+
+### Fixed
+
+- Fixed experimental-mesher actions serializing `pathlib.Path` objects into
+  job JSON.
+- Fixed clean validation stop handling so stopping the parent job cannot leave
+  an OpenFOAM/MPI child running. Partial fields remain restartable.
+- Fixed closed experimental quality-study invocation to use the current
+  quality-distribution API.
+
+### Verified
+
+- `closed_validation_beta75_experimental_v1`: 116,836 cells, exactly 75 BL
+  layers, `checkMesh` pass, max non-orthogonality 42.599 degrees, max skewness
+  0.6098, min determinant 0.004714, min interpolation weight 0.1208 and min
+  volume ratio 0.1374.
+- `beta75_exact_shared_source_inlet_v33_interface045`: 166,342 cells, exactly
+  75 BL layers, `checkMesh` pass, max non-orthogonality 41.936 degrees, max
+  skewness 0.61255, min determinant 0.004288, min interpolation weight 0.052277
+  and min volume ratio 0.073566. The preceding v32 failure remains preserved.
+- Full software suite: 284 tests passed. Final focused synchronization check:
+  4 tests passed; Python compilation and the complete WSL/OpenFOAM/Gmsh
+  environment audit passed.

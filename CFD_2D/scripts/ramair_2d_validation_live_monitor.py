@@ -162,17 +162,20 @@ def resolve_live_execution(
             / "runtime/active_execution.json",
             {},
         ) or {}
-        if runtime.get("case_path"):
+        if runtime.get("case_path") and str(runtime.get("status") or "").upper() in {
+            "PREPARING", "RUNNING", "STOP_REQUESTED"
+        }:
             key = dict(runtime.get("scientific_key") or {})
             return {
                 "run_id": runtime.get("case_id"),
                 "case_id": runtime.get("case_id"),
                 "case_path": runtime.get("case_path"),
-                "mode": "URANS",
+                "mode": str(runtime.get("mode") or "URANS").upper(),
                 "run_kind": "CANONICAL",
                 "topology": key.get("topology"),
                 "mesh_id": runtime.get("mesh_id"),
                 "mesh_level": key.get("mesh_level"),
+                "alpha_deg": key.get("alpha_deg") or runtime.get("alpha_deg"),
                 "stage": runtime.get("phase"),
                 "status": runtime.get("status"),
                 "deltaT": runtime.get("deltaT"),
@@ -180,6 +183,11 @@ def resolve_live_execution(
                 "phase_deltaT": runtime.get("phase_deltaT") or runtime.get("deltaT"),
                 "queue_position": runtime.get("queue_position"),
                 "queue_total": runtime.get("queue_total"),
+                "n_cores": (
+                    runtime.get("n_cores")
+                    or runtime.get("effective_ranks")
+                    or runtime.get("mpi_ranks")
+                ),
             }
     registry = load_registry(Path(project_root))
     target_id = (
@@ -221,6 +229,10 @@ def build_monitor_snapshot(
     mode = mode.upper()
     if mode not in {"RANS", "URANS"}:
         raise ValueError("mode must be RANS or URANS")
+    # RANS histories are finite (<= 20k SIMPLE iterations in the laboratory)
+    # and must retain the complete abscissa.  URANS remains bounded because a
+    # long physical campaign can contain millions of time steps.
+    max_points = max(int(max_points), 120_000 if mode == "RANS" else 1_200)
     cache_path = _cache_path(case, mode)
     cache = read_json(cache_path, {}) or {}
     log = _candidate_log(case)
@@ -264,7 +276,7 @@ def build_monitor_snapshot(
         if recent.get("execution")
         else None
     )
-    steps_done = len(recent.get("iterations") or [])
+    steps_done = int(recent.get("steps_total") or len(recent.get("iterations") or []))
     remaining = None
     performance = _performance(list(recent.get("execution") or []))
     if (
@@ -276,6 +288,12 @@ def build_monitor_snapshot(
             performance["median_s_per_step"]
         )
     physical_time = float(current or 0.0) if mode == "URANS" else None
+    parallel_plan = read_json(case / "parallel_execution_plan.json", {}) or {}
+    effective_ranks = (
+        parallel_plan.get("effective_ranks")
+        or parallel_plan.get("recommended_ranks")
+        or parallel_plan.get("requested_ranks")
+    )
     snapshot = {
         "schema_version": 1,
         "status": (
@@ -289,6 +307,7 @@ def build_monitor_snapshot(
         "topology": topology,
         "mesh_level": mesh_level,
         "cell_count": int(cell_count),
+        "n_cores": int(effective_ranks) if effective_ranks is not None else None,
         "stage": stage,
         "startup_mode": case_manifest.get("startup_mode"),
         "iteration_or_time": current,
@@ -304,6 +323,7 @@ def build_monitor_snapshot(
             else None
         ),
         "steps_observed": steps_done,
+        "steps_total_executed": steps_done,
         "steps_planned": steps_planned,
         "elapsed_s": elapsed,
         "estimated_remaining_s": remaining,
@@ -321,7 +341,7 @@ def build_monitor_snapshot(
         "force_sources": force_sources,
         "monitor_policy": {
             "incremental_log_offset": True,
-            "recent_window_only": True,
+            "recent_window_only": mode == "URANS",
             "visual_downsampling_only": True,
             "raw_histories_preserved": True,
             "reads_volume_fields": False,
@@ -367,6 +387,22 @@ def build_monitor_snapshot(
     )
     output = case / f"validation_live_monitor_{mode.lower()}.json"
     write_json_atomic(output, snapshot)
+    scientific_key = dict(case_manifest.get("scientific_key") or {})
+    alpha_value = scientific_key.get("alpha_deg", case_manifest.get("alpha_deg"))
+    dt_value = scientific_key.get("dt_s", case_manifest.get("dt_s"))
+    identity_parts = [
+        str(scientific_key.get("mesh_id") or case_manifest.get("mesh_id") or mesh_level),
+        f"alpha_{float(alpha_value):g}" if alpha_value is not None else "alpha_unknown",
+    ]
+    if mode == "URANS":
+        identity_parts.append(
+            f"dt_{float(dt_value):.8g}" if dt_value is not None else "dt_unknown"
+        )
+    safe_identity = "_".join(identity_parts).replace("/", "_").replace(" ", "_")
+    write_json_atomic(
+        case / f"validation_live_monitor_{mode.lower()}_{safe_identity}.json",
+        snapshot,
+    )
     if performance.get("status") == "MEASURED":
         write_json_atomic(case / "measured_step_performance.json", performance)
     return snapshot

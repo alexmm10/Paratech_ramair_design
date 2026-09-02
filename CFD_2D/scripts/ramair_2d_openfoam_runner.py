@@ -26,6 +26,18 @@ from typing import Any
 from openfoam_environment import activate_openfoam_environment
 from openfoam_history import read_force_coefficient_history
 from ramair_execution_control import publish_solver_process
+from ramair_2d_parallel import (
+    case_cell_count,
+    configure_decompose_dictionary,
+    decompose_load_balance,
+    linux_parallel_preflight,
+    load_parallel_profile,
+    parallel_profile_key,
+    practical_rank_candidates,
+    processor_directory_audit,
+    recommended_core_count,
+    reconstruction_command,
+)
 from ramair_2d_urans_contract import (
     CONTINUE_STAGE,
     FRESH_FROM_CHECKPOINT,
@@ -474,16 +486,9 @@ def cleanup_reconstructed_processor_directories(cdir: Path) -> dict[str, Any]:
 
 def configure_decompose_subdomains(cdir: Path, n_cores: int) -> None:
     """Keep decomposeParDict consistent with the MPI process count."""
-    path = cdir / "system" / "decomposeParDict"
-    if not path.is_file():
-        raise FileNotFoundError(f"Missing decomposition dictionary: {path}")
-    text = path.read_text(encoding="utf-8", errors="ignore")
-    replacement = f"numberOfSubdomains {max(1, int(n_cores))};"
-    if re.search(r"\bnumberOfSubdomains\s+\d+\s*;", text):
-        text = re.sub(r"\bnumberOfSubdomains\s+\d+\s*;", replacement, text, count=1)
-    else:
-        text += "\n" + replacement + "\n"
-    path.write_text(text, encoding="utf-8")
+    configure_decompose_dictionary(
+        cdir / "system" / "decomposeParDict", n_cores, method="scotch"
+    )
 
 
 def update_control_dict_stop_at(cdir: Path, mode: str = "writeNow") -> Path:
@@ -767,6 +772,10 @@ def write_run_script(
     decompose_times: list[float] | None = None,
     decompose_latest: bool = False,
     reconstruct_times: list[float] | None = None,
+    reconstruction_mode: str = "latest",
+    reconstruction_time_range: str | None = None,
+    reconstruction_fields: list[str] | None = None,
+    renumber_before_decompose: bool = False,
 ) -> dict[str, Any]:
     lines = [
         "#!/usr/bin/env bash",
@@ -782,7 +791,11 @@ def write_run_script(
             f"reconstructPar -time {shlex.quote(reconstruct_spec)}"
         )
     else:
-        reconstruct_command = "reconstructPar -latestTime"
+        reconstruct_command = reconstruction_command(
+            reconstruction_mode,
+            time_range=reconstruction_time_range,
+            fields=reconstruction_fields,
+        )
     if potential:
         lines += [
             "set +e",
@@ -800,6 +813,21 @@ def write_run_script(
             decompose_command = "decomposePar -force -latestTime"
         else:
             decompose_command = "decomposePar -force"
+        if renumber_before_decompose:
+            lines += [
+                "set +e",
+                "renumberMesh -overwrite > log.renumberMesh 2>&1",
+                "renumber_rc=$?",
+                "set -e",
+                "echo renumberMesh=${renumber_rc} >> .ramair_run_stage_status",
+                "if [ ${renumber_rc} -ne 0 ]; then exit ${renumber_rc}; fi",
+                "set +e",
+                "checkMesh -allTopology -allGeometry > log.checkMesh.postRenumber 2>&1",
+                "post_renumber_check_rc=$?",
+                "set -e",
+                "echo checkMeshPostRenumber=${post_renumber_check_rc} >> .ramair_run_stage_status",
+                "if [ ${post_renumber_check_rc} -ne 0 ]; then exit ${post_renumber_check_rc}; fi",
+            ]
         lines += [
             "set +e",
             f"{decompose_command} > log.decomposePar 2>&1",
@@ -807,9 +835,11 @@ def write_run_script(
             "set -e",
             "echo decomposePar=${decompose_rc} >> .ramair_run_stage_status",
             "if [ ${decompose_rc} -ne 0 ]; then exit ${decompose_rc}; fi",
+            "processor_count=$(find . -maxdepth 1 -type d -name 'processor[0-9]*' | wc -l)",
+            f"if [ \"${{processor_count}}\" -ne {n_cores} ]; then echo processorCountMismatch=86 >> .ramair_run_stage_status; exit 86; fi",
             "cut -d' ' -f1 /proc/uptime > .ramair_solver_started_monotonic",
             "set +e",
-            f"nice -n {nice} mpirun -np {n_cores} {solver_command(solver, solver_module, parallel=True)} > log.{solver} 2>&1",
+            f"nice -n {nice} mpirun --map-by core --bind-to core --report-bindings -np {n_cores} {solver_command(solver, solver_module, parallel=True)} > log.{solver} 2>&1",
             "solver_rc=$?",
             "set -e",
             "echo solver=${solver_rc} >> .ramair_run_stage_status",
@@ -1075,13 +1105,80 @@ def run_case(
     expected_start_time: float | None = None,
     decompose_times: list[float] | None = None,
     reconstruct_times: list[float] | None = None,
+    automatic_core_selection: bool = True,
+    renumber_before_decompose: bool = True,
+    reconstruction_mode: str = "latest",
+    reconstruction_time_range: str | None = None,
+    reconstruction_fields: list[str] | None = None,
 ) -> None:
     cdir = validate_openfoam_case_path(cdir)
     cdir = cdir.resolve()
     solver = resolve_solver(solver)
     case_cfg = read_json(cdir / "case_config.json", {}) or {}
     solver_module = str(case_cfg.get("solver_module", "incompressibleFluid"))
-    mpi_slots = available_openmpi_slots()
+    requested_n_cores = max(1, int(n_cores))
+    preflight = linux_parallel_preflight(cdir)
+    mpi_slots = int(preflight.get("physical_cores") or available_openmpi_slots() or requested_n_cores)
+    cell_count, cell_count_source = case_cell_count(cdir)
+    parallel_plan = recommended_core_count(
+        cell_count,
+        available_slots=mpi_slots,
+        requested_maximum=requested_n_cores,
+    )
+    numerical_signature = hashlib.sha256(
+        json.dumps(case_cfg.get("solver_configuration", case_cfg), sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+    profile_key = parallel_profile_key(
+        cdir, solver=solver, stage=str(case_cfg.get("stage") or "OPENFOAM"),
+        numerical_signature=numerical_signature,
+    )
+    project_root = next(
+        (parent for parent in (cdir, *cdir.parents) if (parent / "CFD_2D").is_dir()),
+        cdir,
+    )
+    cache_path = project_root / "CFD_2D/app_state/parallel_execution_profiles.json"
+    cached_profile = load_parallel_profile(cache_path, profile_key)
+    candidates = practical_rank_candidates(
+        int(cell_count or 1), physical_cores=min(mpi_slots, requested_n_cores),
+    )
+    if automatic_core_selection and cached_profile:
+        cached_ranks = int(cached_profile.get("ranks") or 0)
+        if cached_ranks in candidates and cached_ranks <= requested_n_cores:
+            n_cores = cached_ranks
+            parallel_plan.update(
+                selection_mode="automatic_cached_benchmark",
+                recommended_ranks=n_cores,
+                cells_per_rank=(float(cell_count) / n_cores if cell_count else None),
+                reason="compatible_parallel_execution_profile",
+            )
+        else:
+            cached_profile = None
+            n_cores = int(parallel_plan["recommended_ranks"])
+    elif automatic_core_selection:
+        n_cores = int(parallel_plan["recommended_ranks"])
+    else:
+        n_cores = requested_n_cores
+        parallel_plan.update(
+            selection_mode="manual",
+            recommended_ranks=n_cores,
+            cells_per_rank=(float(cell_count) / n_cores if cell_count else None),
+            reason="manual_rank_count",
+        )
+    parallel_plan["cell_count_source"] = cell_count_source
+    parallel_plan["preflight"] = preflight
+    parallel_plan["candidate_ranks"] = candidates
+    parallel_plan["parallel_profile_key"] = profile_key
+    parallel_plan["parallel_profile_cache"] = str(cache_path)
+    parallel_plan["cached_profile"] = cached_profile
+    parallel_plan["renumber_before_decompose_requested"] = bool(renumber_before_decompose)
+    parallel_plan["reconstruction_mode"] = reconstruction_mode
+    write_json_atomic(cdir / "parallel_execution_plan.json", parallel_plan)
+    if not dry_run and preflight.get("native_linux_filesystem") is False:
+        raise RuntimeError(
+            "Heavy OpenFOAM execution is blocked on /mnt/* because DrvFS I/O is substantially "
+            "slower and less robust for decomposed fields. Copy the case to the native Linux "
+            "DESIGN_APP runtime before running; dry-run remains available."
+        )
     if n_cores > 1 and mpi_slots is not None and n_cores > mpi_slots:
         raise RuntimeError(
             f"Requested {n_cores} MPI processes, but Open MPI exposes {mpi_slots} physical slots. "
@@ -1122,6 +1219,14 @@ def run_case(
                 and effective_start_mode in {CONTINUE_STAGE, RESUME_EXISTING}
             ),
             reconstruct_times=reconstruct_times,
+            reconstruction_mode=reconstruction_mode,
+            reconstruction_time_range=reconstruction_time_range,
+            reconstruction_fields=reconstruction_fields,
+            renumber_before_decompose=(
+                bool(renumber_before_decompose)
+                and effective_start_mode == FRESH_FROM_CHECKPOINT
+                and not any(float(name) > 0.0 for name in numeric_time_dirs(cdir))
+            ),
         )
     print(
         f"Run script {'written' if script_state['changed'] else 'unchanged'}: "
@@ -1291,6 +1396,10 @@ def run_case(
         run_outcome = "stopped_partial"
     (cdir / "log.runner").write_text(runner_stdout or "", encoding="utf-8", errors="ignore")
     stage_evidence = run_stage_evidence(cdir, solver)
+    parallel_plan["processor_directory_audit"] = processor_directory_audit(cdir, n_cores)
+    parallel_plan["decomposition_load_balance"] = decompose_load_balance(cdir / "log.decomposePar")
+    parallel_plan["effective_ranks"] = n_cores
+    write_json_atomic(cdir / "parallel_execution_plan.json", parallel_plan)
     log_path = active_solver_log(cdir, solver, execution_backend)
     if completed_returncode != 0 and stage_evidence.get("failed_log"):
         log_path = Path(str(stage_evidence["failed_log"]))
@@ -1427,6 +1536,31 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--solver", default="auto", help="auto, foamRun or pimpleFoam. auto prefers foamRun for OpenFOAM 13/14, then pimpleFoam.")
     p.add_argument("--execution-backend", choices=["native", "pyfoam"], default="native", help="native uses the existing shell runner; pyfoam executes the solver through PyFoam.BasicRunner.")
     p.add_argument("--n-cores", type=int, default=4)
+    p.add_argument(
+        "--automatic-core-selection",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Use --n-cores as a maximum and select ranks from the exact cell count, "
+            "targeting 50k-200k cells per rank. Disable for a controlled scaling study."
+        ),
+    )
+    p.add_argument(
+        "--renumber-before-decompose",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Run renumberMesh -overwrite once for a fresh parallel case before decomposePar.",
+    )
+    p.add_argument(
+        "--reconstruction-mode",
+        choices=["latest", "all", "time_range", "fields"],
+        default="latest",
+    )
+    p.add_argument("--reconstruction-time-range", default=None)
+    p.add_argument(
+        "--reconstruction-field", action="append", default=None,
+        help="Field to reconstruct when --reconstruction-mode fields; repeat as needed.",
+    )
     p.add_argument("--timeout-min", type=float, default=120)
     p.add_argument("--dry-run", action="store_true", default=True)
     p.add_argument("--run", action="store_true")
@@ -1550,6 +1684,11 @@ def main() -> None:
         args.expected_start_time,
         args.decompose_time,
         args.reconstruct_time,
+        args.automatic_core_selection,
+        args.renumber_before_decompose,
+        args.reconstruction_mode,
+        args.reconstruction_time_range,
+        args.reconstruction_field,
     )
 
 

@@ -1,0 +1,57 @@
+{
+  "schema_version": 2,
+  "name": "beta75_calculated_v20_balanced",
+  "geometry": {
+    "open_variant": "open_ramair_validation_1m",
+    "base_variant": "reference_uncut_validation_1m",
+    "reynolds": 1900000.0,
+    "rho_kg_m3": 1.225,
+    "mu_pa_s": 0.0000329,
+    "velocity_m_s": 51.0441,
+    "chord_m": 1.0,
+    "spanwise_thickness_chord": 0.01
+  },
+  "boundary_layer": {
+    "layers": 75,
+    "growth_rate": 1.1,
+    "distribution_mode": "beta_law",
+    "thickness_safety_factor": 1.2,
+    "target_y_plus": 0.6666666666666666,
+    "wall_nodes_target": 1200,
+    "minimum_tangential_size_chord": 0.0003,
+    "maximum_tangential_size_chord": 0.005,
+    "wall_bump_coefficient": 0.45,
+    "te_cap_nodes": 35,
+    "inlet_nodes": 140,
+    "inlet_bump_coefficient": 1.0,
+    "lip_fan_elements": 0,
+    "minimum_profile_point_spacing_chord": 0.000001,
+    "continue_over_base_inlet": true,
+    "unstructured_lip_length_chord": 0.01,
+    "base_inlet_blend_length_chord": 0.035,
+    "base_inlet_tangent_scale": 1.0
+  },
+  "external_volume": {
+    "domain_radius_chord": 50.0,
+    "interface_size_mode": "fixed",
+    "interface_size_chord": 0.000035,
+    "interface_tangential_factor": 0.4,
+    "farfield_size_chord": 5.0,
+    "radial_growth_rate": 0.13,
+    "mesh_algorithm": 6
+  },
+  "internal_volume": {
+    "inlet_size_factor": 0.3,
+    "core_size_chord": 0.01,
+    "inlet_fine_distance_chord": 0.001,
+    "transition_distance_chord": 0.06,
+    "inner_wall_size_chord": 0.0015,
+    "inner_wall_transition_distance_chord": 0.05,
+    "te_internal_size_chord": 0.0004,
+    "te_internal_transition_distance_chord": 0.005
+  },
+  "execution": {
+    "gmsh_threads": 12,
+    "openfoam_timeout_s": 900
+  }
+}

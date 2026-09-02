@@ -232,7 +232,11 @@ def write_json_atomic(path: Path, payload: dict[str, Any]) -> Path:
         f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
     )
     with _JSON_WRITE_LOCK:
-        temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        # Workflow payloads can contain Path/numpy scalar values because the
+        # UI builds them from filesystem selections and numerical widgets.
+        # Keep the atomic writer the single serialization boundary so every
+        # caller gets the same portable JSON representation.
+        temporary.write_text(json.dumps(payload, indent=2, default=_json_default) + "\n", encoding="utf-8")
         for attempt in range(20):
             try:
                 temporary.replace(path)
@@ -245,6 +249,19 @@ def write_json_atomic(path: Path, payload: dict[str, Any]) -> Path:
                 # temporary file and retry; never expose a partial JSON file.
                 time.sleep(0.01 * (attempt + 1))
     return path
+
+
+def _json_default(value: Any) -> Any:
+    """Serialize filesystem and numeric scalar values used by workflow state."""
+    if isinstance(value, Path):
+        return str(value)
+    item = getattr(value, "item", None)
+    if callable(item):
+        try:
+            return item()
+        except (TypeError, ValueError):
+            pass
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
 def read_json(path: Path, default: Any = None) -> Any:

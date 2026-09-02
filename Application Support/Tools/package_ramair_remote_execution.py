@@ -52,11 +52,23 @@ def copy_case(source: Path, destination: Path) -> None:
         source,
         destination,
         dirs_exist_ok=True,
-        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache"),
+        ignore=shutil.ignore_patterns(
+            "__pycache__",
+            "*.pyc",
+            ".pytest_cache",
+            ".validation_monitor_*",
+            "validation_live_monitor_*.json",
+        ),
     )
 
 
 def launcher_text(action: str) -> str:
+    if action in {"stop", "force-stop", "status", "collect"}:
+        return f'''#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+exec python3 "$ROOT/CFD_2D/scripts/ramair_remote_queue_runner.py" {action}
+'''
     return f'''#!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -84,8 +96,19 @@ def main() -> int:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--n-cores", type=int, default=8)
     parser.add_argument("--timeout-min", type=float, default=120.0)
-    parser.add_argument("--steady-timeout-min", type=float, default=120.0)
+    parser.add_argument("--steady-timeout-min", type=float, default=180.0)
+    parser.add_argument("--case-timeout-min", type=float, default=360.0)
     parser.add_argument("--steady-initialization", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--continue-transient-after-steady-timeout", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--automatic-core-selection", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--renumber-before-decompose", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--transient-phase-plan", type=Path)
+    parser.add_argument("--package-scope", choices=("generic", "validation", "convergence"), default="generic")
+    parser.add_argument(
+        "--execution-mode",
+        choices=("rans_urans", "rans_only", "transient_only"),
+        default="rans_urans",
+    )
     parser.add_argument("--resume-additional-time-star", type=float, default=20.0)
     parser.add_argument("--continue-after-error", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--wheelhouse-dir", type=Path)
@@ -94,6 +117,7 @@ def main() -> int:
     project = args.project_root.resolve()
     output = (args.output or project / "Application Support/Packages" / f"RamAir_Remote_OpenFOAM_{time.strftime('%Y%m%d_%H%M%S')}.zip").resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
+    package_id = f"ramair_remote_{time.strftime('%Y%m%d_%H%M%S')}"
     with tempfile.TemporaryDirectory(prefix="ramair_remote_") as temporary:
         stage = Path(temporary) / "DESIGN_APP_REMOTE"
         (stage / "CFD_2D/scripts").mkdir(parents=True)
@@ -102,6 +126,14 @@ def main() -> int:
         config_source = project / "CFD_2D/CFD_2D_inputs/config"
         if config_source.is_dir():
             shutil.copytree(config_source, stage / "CFD_2D/CFD_2D_inputs/config")
+        packaged_phase_plan = None
+        if args.transient_phase_plan:
+            phase_source = args.transient_phase_plan.resolve()
+            if not phase_source.is_file():
+                raise FileNotFoundError(f"Transient phase plan not found: {phase_source}")
+            packaged_phase_plan = Path("Remote Configuration") / phase_source.name
+            (stage / packaged_phase_plan).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(phase_source, stage / packaged_phase_plan)
         entries = []
         for index, raw_case in enumerate(args.case):
             case = raw_case.resolve()
@@ -120,13 +152,26 @@ def main() -> int:
                 "variant": variant,
                 "alpha_deg": alpha,
                 "solver": "auto",
+                "execution_mode": args.execution_mode,
                 "n_cores": max(1, int(args.n_cores)),
                 "timeout_min": max(1.0, float(args.timeout_min)),
                 "steady_initialization": bool(args.steady_initialization),
                 "steady_timeout_min": max(1.0, float(args.steady_timeout_min)),
+                "case_timeout_min": max(1.0, float(args.case_timeout_min)),
+                "continue_transient_after_steady_timeout": bool(args.continue_transient_after_steady_timeout),
+                "automatic_core_selection": bool(args.automatic_core_selection),
+                "renumber_before_decompose": bool(args.renumber_before_decompose),
+                "transient_phase_plan": packaged_phase_plan.as_posix() if packaged_phase_plan else None,
                 "resume_additional_time_star": max(0.0, float(args.resume_additional_time_star)),
             })
-        queue = {"schema_version": 1, "created_at": time.time(), "continue_after_error": bool(args.continue_after_error), "cases": entries}
+        queue = {
+            "schema_version": 2,
+            "package_id": package_id,
+            "package_scope": args.package_scope,
+            "created_at": time.time(),
+            "continue_after_error": bool(args.continue_after_error),
+            "cases": entries,
+        }
         (stage / "remote_queue.json").write_text(json.dumps(queue, indent=2) + "\n", encoding="utf-8")
         (stage / "requirements-remote.txt").write_text("\n".join(REMOTE_REQUIREMENTS) + "\n", encoding="utf-8")
         wheelhouse = stage / "wheelhouse"
@@ -135,19 +180,19 @@ def main() -> int:
         elif args.download_wheelhouse:
             wheelhouse.mkdir()
             subprocess.run([sys.executable, "-m", "pip", "download", "--dest", str(wheelhouse), *REMOTE_REQUIREMENTS], check=True)
-        for name, action in (("run_remote.sh", "run"), ("resume_remote.sh", "resume"), ("stop_remote.sh", "stop"), ("force_stop_remote.sh", "force-stop"), ("monitor_remote.sh", "status"), ("postprocess_remote.sh", "postprocess")):
+        for name, action in (("run_remote.sh", "run"), ("resume_remote.sh", "resume"), ("stop_remote.sh", "stop"), ("force_stop_remote.sh", "force-stop"), ("monitor_remote.sh", "status"), ("postprocess_remote.sh", "postprocess"), ("collect_results.sh", "collect")):
             path = stage / name
             path.write_text(launcher_text(action), encoding="utf-8", newline="\n")
             path.chmod(0o755)
-        for name in ("run", "resume", "stop", "force_stop", "monitor", "postprocess"):
+        for name in ("run", "resume", "stop", "force_stop", "monitor", "postprocess", "collect_results"):
             (stage / f"{name}_remote.bat").write_text(
                 f'@echo off\r\nwsl.exe bash -lc "cd \'$(wslpath \'%~dp0\')\' && bash {name}_remote.sh"\r\n',
                 encoding="ascii",
             )
-        readme = """# RamAir remote OpenFOAM execution\n\n1. Extract on the Linux filesystem (for example `~/ramair_remote`).\n2. Install OpenFOAM Foundation 14 and MPI on the server. ParaView/pvbatch is optional for rendered products.\n3. Run `bash run_remote.sh`. Use `bash monitor_remote.sh` from another terminal.\n4. `bash stop_remote.sh` requests `stopAt writeNow`; `force_stop_remote.sh` is only the escalation fallback.\n5. Continue retained fields with `bash resume_remote.sh`; post-process all cases with `bash postprocess_remote.sh`.\n\nThe package uses native OpenFOAM. Python wheels are installed offline when the wheelhouse is included. Solver fields and logs remain inside this extracted package.\n"""
+        readme = """# RamAir remote OpenFOAM execution\n\n1. Extract on the Linux filesystem (for example `~/ramair_remote`).\n2. Install OpenFOAM Foundation 14, MPI and Python 3. ParaView is optional because final post-processing can run on the main workstation.\n3. Run `bash run_remote.sh`. Use `bash monitor_remote.sh` from another terminal.\n4. `bash stop_remote.sh` requests `stopAt writeNow`; `force_stop_remote.sh` is only the escalation fallback.\n5. Continue retained fields with `bash resume_remote.sh`. The frozen queue runs RANS and then its packaged URANS phase plan.\n6. Run `bash collect_results.sh` after completion or a recoverable stop. Transfer the resulting `RamAir_Remote_Return_*.zip` to the main application and import it there.\n\nThe package uses native OpenFOAM and stores fields, logs, lifecycle metadata and the core-selection profile beside each case. Python wheels are installed offline when the wheelhouse is included. Status, stop and result collection use system Python only and do not create the scientific virtual environment.\n"""
         (stage / "README_REMOTE_EXECUTION.md").write_text(readme, encoding="utf-8")
         files = sorted(path for path in stage.rglob("*") if path.is_file())
-        manifest = {"schema_version": 1, "created_at": time.time(), "openfoam_required": "Foundation 14", "files": {path.relative_to(stage).as_posix(): {"sha256": sha256(path), "bytes": path.stat().st_size} for path in files}}
+        manifest = {"schema_version": 2, "package_id": package_id, "package_scope": args.package_scope, "created_at": time.time(), "openfoam_required": "Foundation 14", "files": {path.relative_to(stage).as_posix(): {"sha256": sha256(path), "bytes": path.stat().st_size} for path in files}}
         (stage / "REMOTE_PACKAGE_MANIFEST.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
         with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
             for path in sorted(stage.rglob("*")):

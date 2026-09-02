@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import importlib.util
+import math
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -28,6 +30,7 @@ from ramair_case_library import (  # noqa: E402
     save_stage,
 )
 from workflow_backend import (  # noqa: E402
+    available_variants,
     case_library_command,
     load_config,
     save_config,
@@ -41,6 +44,22 @@ from workflow_backend import (  # noqa: E402
 def write(path: Path, text: str = "fixture") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+
+
+def test_geometry_catalog_excludes_mesh_refinement_clones(project: Path) -> None:
+    geometry = project / "CFD_2D/CFD_2D_inputs/geometry"
+    for name in (
+        "open_ramair_validation_1m",
+        "open_ramair_validation_1m_coarse",
+        "open_ramair_validation_1m_fine",
+        "open_ramair_validation_1m_light_f1p30",
+    ):
+        write(geometry / name / "profile_manifest.json", "{}")
+    variants = available_variants(project)
+    assert "open_ramair_validation_1m" in variants
+    assert "open_ramair_validation_1m_coarse" not in variants
+    assert "open_ramair_validation_1m_fine" not in variants
+    assert "open_ramair_validation_1m_light_f1p30" not in variants
 
 
 @pytest.fixture()
@@ -304,6 +323,51 @@ def test_saved_mesh_catalog_loads_exact_config_and_persistent_approval(project: 
     assert saved_mesh_configuration(project, "mesh_catalog_case", "baseline")["marker"] == "saved"
 
 
+def test_mesh_compatibility_uses_geometry_signature_across_work_cases(project: Path) -> None:
+    write(
+        project / "CFD_2D/CFD_2D_inputs/geometry/reference_uncut/profile_manifest.json",
+        json.dumps({"chord_m": 1.0, "has_ram_air_opening_feature": False}),
+    )
+    for stage in ("geometry", "case", "mesh"):
+        save_stage(project, stage, "source_case", "reference_uncut", 4.0, "source", "archive", "fine")
+    save_stage(project, "geometry", "target_case", "reference_uncut", 4.0, "target", "archive", "geometry")
+    write(
+        project / "CFD_2D/CFD_2D_inputs/config/cfd2d_workflow_config.json",
+        json.dumps({"geometry": {"variant": "reference_uncut"}, "case_conditions": {"reynolds": 4e6, "mach": 0.1}}),
+    )
+
+    catalog = saved_mesh_catalog(project, "target_case")
+    source_mesh = next(row for row in catalog if row["case_name"] == "source_case")
+
+    assert source_mesh["compatible"] is True
+    assert source_mesh["compatibility_reason"] == "matching_geometry_signature"
+    assert source_mesh["result_load_allowed"] is False
+    assert source_mesh["configuration_reusable_as_seed"] is True
+
+
+def test_incompatible_mesh_result_is_rejected_but_configuration_is_reusable(project: Path) -> None:
+    write(
+        project / "CFD_2D/CFD_2D_inputs/geometry/reference_uncut/profile_manifest.json",
+        json.dumps({"chord_m": 1.0, "has_ram_air_opening_feature": False}),
+    )
+    write(project / "CFD_2D/CFD_2D_inputs/config/cfd2d_mesh_config.json", json.dumps({"marker": "seed"}))
+    for stage in ("geometry", "case", "mesh"):
+        save_stage(project, stage, "old_geometry", "reference_uncut", 4.0, "old", "archive", "medium")
+    write(project / "Airfoil Profiles/reference.dat", "changed profile")
+    save_stage(project, "geometry", "new_geometry", "reference_uncut", 4.0, "new", "archive", "geometry")
+    write(
+        project / "CFD_2D/CFD_2D_inputs/config/cfd2d_workflow_config.json",
+        json.dumps({"geometry": {"variant": "reference_uncut"}}),
+    )
+
+    row = next(item for item in saved_mesh_catalog(project, "new_geometry") if item["case_name"] == "old_geometry")
+
+    assert row["compatible"] is False
+    assert row["hard_incompatibility"] is True
+    assert row["result_load_allowed"] is False
+    assert saved_mesh_configuration(project, "old_geometry", "medium")["marker"] == "seed"
+
+
 def test_mesh_draft_save_does_not_mutate_saved_revision(project: Path) -> None:
     write(
         project / "CFD_2D/CFD_2D_inputs/config/cfd2d_mesh_config.json",
@@ -376,7 +440,16 @@ def test_upstream_revision_change_marks_dependents_stale_and_blocks_restore(
         "warnings"
     ]
     with pytest.raises(ValueError, match="stale case package"):
-        restore_workspace(project, "dependency_case", "archive")
+        restore_stage(
+            project, "case", "dependency_case", "reference_uncut", 4.0,
+            "archive", "baseline",
+        )
+    restored = restore_workspace(project, "dependency_case", "archive")
+    assert restored["status"] == "WORKSPACE_RESTORED"
+    assert any(
+        "dependency_revision_changed:geometry" in warning
+        for warning in restored["warnings"]
+    )
 
 
 def test_complete_workspace_restore_loads_geometry_case_mesh_and_solver(project: Path) -> None:
@@ -426,6 +499,21 @@ def test_complete_workspace_restore_loads_geometry_case_mesh_and_solver(project:
         ).read_text(encoding="utf-8")
     )
     assert restored_workflow["geometry"]["variant"] == "reference_uncut"
+
+
+def test_incomplete_workcase_can_be_explicitly_reactivated(project: Path) -> None:
+    create_case(project, "geometry_draft", "reference_uncut", 4.0, "draft")
+    (project / "CFD_2D/app_state/active_workspace.json").unlink()
+
+    result = restore_workspace(project, "geometry_draft", "archive")
+
+    assert result["status"] == "WORKSPACE_RESTORED"
+    assert result["packages"] == {"solver": "topology_solver_v11"}
+    assert "work_case_has_no_geometry_package" in result["warnings"]
+    active = json.loads(
+        (project / "CFD_2D/app_state/active_workspace.json").read_text(encoding="utf-8")
+    )
+    assert active["case"] == "geometry_draft"
 
 
 def test_workspace_configuration_switches_geometry_case_and_mesh_atomically(
@@ -500,10 +588,12 @@ def test_working_case_supports_multiple_named_mesh_packages(project: Path) -> No
     save_stage(project, "mesh", "design_study", "reference_uncut", 4.0, "Coarse", "archive", "coarse_debug")
     write(mesh_cfg, json.dumps({"closed_boundary_layer_layers": 50, "domain_type": "circular_50c"}))
     save_stage(project, "mesh", "design_study", "reference_uncut", 4.0, "Fine", "archive", "fine_50c")
+    write(mesh_cfg, json.dumps({"closed_boundary_layer_layers": 40, "mesh_level_origin": "medium"}))
+    save_stage(project, "mesh", "design_study", "reference_uncut", 4.0, "Medium", "archive", "medium_50c")
 
     manifest = json.loads((project / "Results/design_study/case_manifest.json").read_text(encoding="utf-8"))
     packages = manifest["stages"]["mesh"]["packages"]
-    assert set(packages) == {"coarse_debug", "fine_50c"}
+    assert set(packages) == {"coarse_debug", "medium_50c", "fine_50c"}
     assert (project / "Results/design_study/Meshes/coarse_debug/Mesh Data/mesh_final.msh").is_file()
     assert (project / "Results/design_study/Meshes/fine_50c/Mesh Data/mesh_final.msh").is_file()
 
@@ -805,6 +895,95 @@ def test_mesh_page_owns_one_unique_case_library_form() -> None:
     assert '"Malla": "mesh"' not in mapping
     assert app_text.count('case_library_panel(\n        "mesh",') == 1
     assert '@st.fragment(run_every="30s")\ndef solver_live_monitor_panel' in app_text
+
+
+def test_workcase_loading_is_explicit_and_sidebar_is_read_only() -> None:
+    app_text = (ROOT / "CFD_2D/app/ramair_cfd2d_app.py").read_text(encoding="utf-8")
+    assert 'key="workcase-load-candidate"' in app_text
+    assert 'key="workcase-explicit-load"' in app_text
+    assert "Confirmo el cambio de caso de trabajo" in app_text
+    assert 'st.sidebar.caption(f"Work Case:' in app_text
+    assert 'with st.sidebar.expander("Crear caso de trabajo"' not in app_text
+    assert "Versiones y carga por etapa del caso seleccionado" not in app_text
+
+
+def test_mesh_preview_filters_crossports_and_short_optimizer_is_removed() -> None:
+    app_text = (ROOT / "CFD_2D/app/ramair_cfd2d_app.py").read_text(encoding="utf-8")
+    assert 'if "crossport" in str(series_name).lower()' in app_text
+    assert "Optimizacion corta de parametros" not in app_text
+    assert "Importar solo ajustes como base" in app_text
+
+
+def test_suspension_defaults_and_legacy_modes_are_supported() -> None:
+    root_preprocessor = (ROOT / "preprocess_ramair_main.py").read_text(encoding="utf-8")
+    system = json.loads(
+        (ROOT / "Application Support/Configurations/ramair_catia_system_config.json").read_text(encoding="utf-8")
+    )
+    assert system["loaded_rib_selection"]["mode"] in {
+        "all_loaded", "cell_boundaries", "rib_ids", "explicit_rib_ids"
+    }
+    if system["loaded_rib_selection"]["mode"] in {"rib_ids", "explicit_rib_ids"}:
+        assert isinstance(system["loaded_rib_selection"].get("rib_ids"), list)
+    assert all(
+        math.isfinite(float(system["angles"][key]))
+        for key in ("alpha_op_deg", "gamma_deg", "mu_deg")
+    )
+    theta = system["angles"].get("theta_deg")
+    assert theta is None or math.isfinite(float(theta))
+    assert 'mode in {"rib_ids", "explicit_rib_ids"}' in root_preprocessor
+    assert 'mode = str(sel.get("mode", "all_loaded"))' in root_preprocessor
+    assert 'values["enable_fabric_thickness"] = False' in root_preprocessor
+    assert 'values["enable_suspension_tube_geometry"] = False' in root_preprocessor
+
+
+def test_suspension_all_loaded_and_explicit_rib_ids_select_real_rows() -> None:
+    module_name = "ramair_preprocessor_selection_test"
+    spec = importlib.util.spec_from_file_location(module_name, ROOT / "preprocess_ramair_main.py")
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    ribs = __import__("pandas").DataFrame(
+        {
+            "rib_id": list(range(10)),
+            "station_index": list(range(10)),
+            "Y_flat_mm": [float(value) for value in range(-5, 5)],
+        }
+    )
+
+    class Canopy:
+        def __init__(self, frame):
+            self.ribs = frame
+
+        def boundary_rib_rows(self):
+            return self.ribs.copy()
+
+    generator = module.AnchorGenerator.__new__(module.AnchorGenerator)
+    generator.canopy = Canopy(ribs)
+    generator.warnings = []
+    generator.cfg = {"loaded_rib_selection": {"mode": "all_loaded"}}
+    assert list(generator.selected_ribs()["rib_id"]) == list(range(10))
+
+    generator.cfg = {
+        "loaded_rib_selection": {"mode": "explicit_rib_ids", "rib_ids": [1, 4, 8]}
+    }
+    assert list(generator.selected_ribs()["rib_id"]) == [1, 4, 8]
+
+
+def test_geometry_ui_uses_cfd_case_as_physical_source_and_clean_summaries() -> None:
+    app_text = (ROOT / "CFD_2D/app/ramair_cfd2d_app.py").read_text(encoding="utf-8")
+    preprocessor = (ROOT / "preprocess_ramair_main.py").read_text(encoding="utf-8")
+    assert "CATIA & CFD exports" in app_text
+    assert '("CFD 2D y plots", ["cfd_2d_exports", "cfd_2d", "debug_plots"])' not in app_text
+    assert "geometry_actions_panel()" in app_text
+    assert "ramair_chord_distribution.png" in app_text
+    assert "ramair_suspension_network_preview.png" in app_text
+    assert "active_conditions = workflow_data.get(\"case_conditions\")" in preprocessor
+    assert "XFLR5" not in app_text
+    environment_check = (ROOT / "CFD_2D/scripts/check_environment.py").read_text(
+        encoding="utf-8"
+    )
+    assert "XFLR5_optional" not in environment_check
 
 
 def test_live_monitor_uses_round_axes_and_throttled_snapshots() -> None:
