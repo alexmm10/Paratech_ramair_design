@@ -1731,3 +1731,60 @@ def test_sweep_runner_dry_run_builds_one_safe_angle_command(tmp_path: Path) -> N
     assert report["status"] == "DRY_RUN"
     assert report["rows"][0]["status"] == "DRY_RUN"
     assert "--run" not in report["rows"][0]["command"]
+
+
+def test_sweep_resumes_pending_steady_before_starting_transient(tmp_path: Path) -> None:
+    case_dir = tmp_path / "CFD_2D" / "openfoam_cases" / "reference_uncut" / "alpha_p8p000"
+    (case_dir / "system").mkdir(parents=True)
+    (case_dir / "system" / "controlDict").write_text(
+        "application foamRun;\n", encoding="utf-8"
+    )
+    (case_dir / "5475").mkdir()
+    pending = case_dir / "steadyInitialization" / "pending_stage.json"
+    pending.parent.mkdir(parents=True)
+    pending.write_text(
+        json.dumps({
+            "status": "AWAITING_USER_DECISION",
+            "transition": {
+                "latest_iteration": 5475,
+                "maximum_iterations": 15000,
+            },
+        }),
+        encoding="utf-8",
+    )
+    script = SCRIPTS / "ramair_2d_openfoam_sweep.py"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--case-root", str(tmp_path),
+            "--variant", "reference_uncut",
+            "--alphas", "8",
+            "--steady-initialization",
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stdout
+    report = json.loads(
+        (case_dir.parent / "alpha_sweep_status.json").read_text(encoding="utf-8")
+    )
+    row = report["rows"][0]
+    assert row["continuation_kind"] == "steady_pending_then_transient"
+    assert "--steady-decision" in row["command"]
+    assert row["command"][row["command"].index("--steady-decision") + 1] == "extend"
+    assert row["command"][row["command"].index("--steady-additional-iterations") + 1] == "9525"
+    assert "--resume" not in row["command"]
+
+
+def test_pending_steady_extension_honours_unattended_transient_override() -> None:
+    source = (SCRIPTS / "ramair_2d_openfoam_staged_runner.py").read_text(
+        encoding="utf-8"
+    )
+    extension_block = source.split('if args.steady_decision == "extend":', 1)[1].split(
+        'elif args.steady_decision == "start-transient":', 1
+    )[0]
+    assert "and not args.continue_transient_after_steady_timeout" in extension_block
+    assert 'force_transient = bool(transition.get("status") != "READY_FOR_TRANSIENT")' in extension_block

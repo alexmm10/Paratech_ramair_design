@@ -1564,7 +1564,10 @@ def main() -> int:
             transition = evaluate_steady_transition(args.case, args)
             report["steady_transition"] = transition
             (archive / "steady_transition_report.json").write_text(json.dumps(transition, indent=2), encoding="utf-8")
-            if transition.get("status") != "READY_FOR_TRANSIENT":
+            if (
+                transition.get("status") != "READY_FOR_TRANSIENT"
+                and not args.continue_transient_after_steady_timeout
+            ):
                 active_positive = [(value, path) for value, path in numeric_time_dirs(args.case) if value > 0.0]
                 report["steady_paraview_preview"] = create_steady_paraview_case(
                     args.case,
@@ -1588,6 +1591,7 @@ def main() -> int:
                 (args.case / "staged_run_status.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
                 print("Steady extension finished without satisfying all transition criteria. User decision required.")
                 return 0
+            force_transient = bool(transition.get("status") != "READY_FOR_TRANSIENT")
         elif args.steady_decision == "start-transient":
             transition = pending.get("transition") if isinstance(pending.get("transition"), dict) else None
             force_transient = True

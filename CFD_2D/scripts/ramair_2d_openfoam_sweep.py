@@ -62,7 +62,12 @@ def positive_times(case_dir: Path) -> list[float]:
     return sorted(values)
 
 
-def staged_command(args: argparse.Namespace, case_dir: Path, resume: bool) -> list[str]:
+def staged_command(
+    args: argparse.Namespace,
+    case_dir: Path,
+    resume: bool,
+    pending_steady: dict[str, Any] | None = None,
+) -> list[str]:
     script = Path(__file__).with_name("ramair_2d_openfoam_staged_runner.py")
     command = [
         sys.executable,
@@ -108,7 +113,22 @@ def staged_command(args: argparse.Namespace, case_dir: Path, resume: bool) -> li
         command.append("--no-stop-if-checkMesh-fails")
     if not args.cleanup_processor_directories:
         command.append("--no-cleanup-processor-directories")
-    if resume:
+    if pending_steady is not None:
+        transition = dict(pending_steady.get("transition") or {})
+        latest_iteration = float(
+            transition.get("latest_iteration")
+            or pending_steady.get("latest_iteration")
+            or max(positive_times(case_dir), default=0.0)
+        )
+        maximum_iterations = float(
+            transition.get("maximum_iterations") or max(latest_iteration + 500.0, 15000.0)
+        )
+        command += [
+            "--steady-decision", "extend",
+            "--steady-additional-iterations",
+            str(max(1, int(round(maximum_iterations - latest_iteration)))),
+        ]
+    elif resume:
         command.append("--resume")
         if args.resume_additional_time_star is not None:
             command += ["--resume-additional-time-star", str(float(args.resume_additional_time_star))]
@@ -329,10 +349,23 @@ def main() -> int:
             report.update(rows=rows, active_alpha_deg=None, active_case=None, active_phase="skipped_complete", updated_at=time.strftime("%Y-%m-%d %H:%M:%S"))
             write_json_atomic(status_path, report)
             continue
-        resume = bool(args.resume_existing and positive_times(case_dir))
-        command = staged_command(args, case_dir, resume)
+        pending_path = case_dir / "steadyInitialization" / "pending_stage.json"
+        pending_steady = (
+            read_json(pending_path, {})
+            if args.resume_existing and pending_path.is_file()
+            else None
+        )
+        resume = bool(
+            args.resume_existing and positive_times(case_dir) and pending_steady is None
+        )
+        command = staged_command(args, case_dir, resume, pending_steady)
         row: dict[str, Any] = {
             "alpha_deg": alpha, "case_dir": str(case_dir), "resume": resume,
+            "continuation_kind": (
+                "steady_pending_then_transient"
+                if pending_steady is not None
+                else "transient_resume" if resume else "fresh"
+            ),
             "restart_existing": bool(args.restart_existing), "case_regeneration": fresh_case,
             "command": command,
         }
@@ -347,7 +380,13 @@ def main() -> int:
         report.update(
             active_alpha_deg=float(alpha),
             active_case=str(case_dir.resolve()),
-            active_phase="steady_then_transient" if args.steady_initialization and not resume else "transient_resume" if resume else "transient",
+            active_phase=(
+                "steady_resume_then_transient"
+                if pending_steady is not None
+                else "steady_then_transient"
+                if args.steady_initialization and not resume
+                else "transient_resume" if resume else "transient"
+            ),
             updated_at=started,
         )
         write_json_atomic(status_path, report)

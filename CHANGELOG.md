@@ -17,6 +17,10 @@
   workspaces without discarding partial histories. Alpha=8 remains a RANS
   continuation from iteration 5475; the other recovered physical-time cases are
   available for URANS continuation and postprocessing.
+- Fixed unattended queue classification of numeric SIMPLE iteration folders.
+  A pending alpha=8 case now resumes RANS from iteration 5475 to its configured
+  15000-iteration limit (or stability), then transfers every restart field and
+  starts the A-B-C-D-E transient plan instead of mistaking 5475 for physical time.
 - Added a GitHub maintenance guide and audited the tracked payload. Source code,
   presets, tests, reference data and manuals are versioned; CFD results, meshes,
   VTK/ParaView data, remote ZIP packages and execution state remain excluded.
