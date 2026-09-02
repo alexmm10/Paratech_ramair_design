@@ -437,9 +437,28 @@ def _render_validation_postprocess_results(
     case: Path,
     alpha: float,
 ) -> None:
-    """Refresh completed RANS/URANS products without reloading the whole app."""
-    @st.fragment(run_every=10)
+    """Refresh only while a postprocess job is active, then perform one final reload."""
+    manager = JobManager(root)
+    postprocess_prefixes = (
+        "ls1_validation_postprocess", "ls1_validation_animations"
+    )
+    jobs = [
+        manager.poll(job) for job in manager.list_jobs(limit=30)
+        if str(job.stage).startswith(postprocess_prefixes)
+    ]
+    active_on_render = any(job.status == "RUNNING" for job in jobs)
+
+    @st.fragment(run_every=2 if active_on_render else None)
     def render() -> None:
+        current_jobs = [manager.poll(job) for job in jobs]
+        still_running = any(job.status == "RUNNING" for job in current_jobs)
+        if active_on_render:
+            st.caption(
+                "Postproceso en curso: los productos escalares aparecen al quedar escritos; "
+                "la vista completa se recargará al finalizar ParaView."
+            )
+            if not still_running:
+                st.rerun()
         rans_products, urans_products = st.tabs([
             "RANS / iteraciones", "URANS / tiempo físico",
         ])

@@ -706,7 +706,9 @@ def color_courant():
         return None
     ColorBy(display, (association, "Co"))
     lut = GetColorTransferFunction("Co")
-    lut.RescaleTransferFunction(0.0, max(1.2 * maximum_courant, 1.0e-6))
+    # A fixed 0..10 display range makes Co >= 10 visibly saturated red while
+    # preserving the true instantaneous maximum as a separate annotation.
+    lut.RescaleTransferFunction(0.0, 10.0)
     display.SetScalarBarVisibility(view, True)
     style_scalar_bar(lut, "Co [-]")
     return "Co"
@@ -1083,9 +1085,7 @@ if selected_times:
 
     products["velocity_contours"] = {{"status": "UNAVAILABLE"}}
     velocity_contours = None
-    velocity_contour_name = (
-        "UMean" if not is_iteration_stage and available_array("UMean") else "U"
-    )
+    velocity_contour_name = "U"
     if available_array(velocity_contour_name):
         try:
             velocity_magnitude = Calculator(
@@ -1109,8 +1109,8 @@ if selected_times:
                 velocity_range = (0.0, max(1.15 * velocity_m_s, 1.0e-6))
             velocity_contours.Isosurfaces = [
                 velocity_range[0]
-                + (velocity_range[1] - velocity_range[0]) * i / 21.0
-                for i in range(1, 21)
+                + (velocity_range[1] - velocity_range[0]) * i / 41.0
+                for i in range(1, 41)
             ]
             velocity_contours.UpdatePipeline(time=latest)
             velocity_contour_front = Transform(
@@ -1125,7 +1125,7 @@ if selected_times:
             ColorBy(contour_display, ("POINTS", "UMagnitude"))
             velocity_contour_lut = GetColorTransferFunction("UMagnitude")
             velocity_contour_lut.RescaleTransferFunction(*velocity_range)
-            contour_display.LineWidth = 1.3
+            contour_display.LineWidth = 1.5
             contour_display.Opacity = 0.95
             contour_display.SetScalarBarVisibility(view, True)
             style_scalar_bar(velocity_contour_lut, "|U| [m/s]")
@@ -1158,9 +1158,7 @@ if selected_times:
             products["velocity_contours"] = {{"status": "UNAVAILABLE", "reason": str(exc)}}
 
     pressure_name = (
-        "CpMean" if not is_iteration_stage and available_array("CpMean")
-        else "pMean" if not is_iteration_stage and available_array("pMean")
-        else "Cp" if available_array("Cp")
+        "Cp" if available_array("Cp")
         else "p" if available_array("p")
         else None
     )
@@ -1180,8 +1178,8 @@ if selected_times:
                 )
                 pressure_contours.ContourBy = ["POINTS", pressure_name]
                 pressure_contours.Isosurfaces = [
-                    pressure_range[0] + (pressure_range[1] - pressure_range[0]) * i / 21.0
-                    for i in range(1, 21)
+                    pressure_range[0] + (pressure_range[1] - pressure_range[0]) * i / 41.0
+                    for i in range(1, 41)
                 ]
                 pressure_contours.UpdatePipeline(time=latest)
                 pressure_contour_front = Transform(
@@ -1196,7 +1194,7 @@ if selected_times:
                 ColorBy(pressure_display, ("POINTS", pressure_name))
                 pressure_lut = GetColorTransferFunction(pressure_name)
                 pressure_lut.RescaleTransferFunction(*pressure_range)
-                pressure_display.LineWidth = 1.3
+                pressure_display.LineWidth = 1.5
                 pressure_display.SetScalarBarVisibility(view, True)
                 style_scalar_bar(pressure_lut, "%s contours" % pressure_name)
                 show_airfoil_overlay(latest)
@@ -1222,11 +1220,7 @@ if selected_times:
     vorticity_contours = None
     vorticity_contour_front = None
     vorticity_contour_display = None
-    vorticity_name = (
-        "vorticityMean"
-        if not is_iteration_stage and available_array("vorticityMean")
-        else "vorticity"
-    )
+    vorticity_name = "vorticity"
     vorticity_field = color_scalar_field(vorticity_name, vector_magnitude=True)
     if vorticity_field:
         set_streamline_visibility(False)
@@ -1271,7 +1265,7 @@ if selected_times:
                     )
                     vorticity_contours.ContourBy = ["POINTS", "vorticityMagnitude"]
                     vorticity_contours.Isosurfaces = [
-                        display_upper * (i + 1) / 20.0 for i in range(20)
+                        display_upper * (i + 1) / 40.0 for i in range(40)
                     ]
                     vorticity_contours.UpdatePipeline(time=latest)
                     vorticity_contour_front = Transform(
@@ -1297,7 +1291,7 @@ if selected_times:
                     vorticity_contour_lut.RescaleTransferFunction(
                         0.0, display_upper
                     )
-                    vorticity_contour_display.LineWidth = 1.3
+                    vorticity_contour_display.LineWidth = 1.5
                     vorticity_contour_display.SetScalarBarVisibility(view, True)
                     style_scalar_bar(
                         vorticity_contour_lut, "|vorticity| [1/s]"
@@ -1479,6 +1473,20 @@ if selected_times:
     if not is_iteration_stage:
         products["courant_field"] = color_courant()
         if products["courant_field"]:
+            actual_courant_max = None
+            try:
+                scene.AnimationTime = latest
+                visual_source.UpdatePipeline(time=latest)
+                courant_association = available_array("Co")
+                courant_information = (
+                    visual_source.GetCellDataInformation()
+                    if courant_association == "CELLS"
+                    else visual_source.GetPointDataInformation()
+                )
+                courant_array = courant_information.GetArray("Co")
+                actual_courant_max = float(courant_array.GetComponentRange(0)[1])
+            except Exception:
+                actual_courant_max = None
             try:
                 display.Representation = "Surface With Edges"
                 display.EdgeColor = [0.15, 0.15, 0.15]
@@ -1488,11 +1496,16 @@ if selected_times:
             set_camera("airfoil")
             scene.AnimationTime = latest
             source.UpdatePipeline(time=latest)
-            set_title("cell Courant number Co", latest)
+            courant_title = "cell Courant number Co"
+            if actual_courant_max is not None and math.isfinite(actual_courant_max):
+                courant_title += " | max Co = %.1f" % actual_courant_max
+            set_title(courant_title, latest)
             Render(view)
             courant_final = output_dir / ("Courant_%s_final.png" % stage_slug)
             SaveScreenshot(str(courant_final), view, ImageResolution=[1600, 1000])
             products["courant_final_png"] = str(courant_final.relative_to(output_dir))
+            products["courant_colour_range"] = [0.0, 10.0]
+            products["courant_instantaneous_max"] = actual_courant_max
             products["courant_hotspots_png"] = None
             products["courant_hotspots_policy"] = "not_generated; final Courant field only"
             try:

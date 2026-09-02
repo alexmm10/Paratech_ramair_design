@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import math
 import re
@@ -313,6 +314,22 @@ def execute_checkpoint(
     } else 2
 
 
+def _plan_config_for_topology(
+    study_config: dict[str, Any], topology: str
+) -> tuple[dict[str, Any], str]:
+    plan_config = copy.deepcopy(study_config)
+    active_package = str(
+        (study_config.get("temporal_packages") or {}).get("active") or "reference"
+    )
+    if active_package.startswith("cummings_"):
+        validation = plan_config["validation_study"]
+        urans = dict(validation.get("urans") or {})
+        urans["sampling_time_star"] = 100.0 if topology == "closed" else 200.0
+        urans["temporal_package"] = active_package
+        validation["urans"] = urans
+    return plan_config, active_package
+
+
 def _stage_plan(
     *,
     dt_s: float,
@@ -533,7 +550,9 @@ def _same_applied_value(actual: Any, expected: Any) -> bool:
         return math.isclose(
             float(actual),
             float(expected),
-            rel_tol=1.0e-10,
+            # OpenFOAM dictionaries are emitted with 12 significant digits.
+            # The half-unit formatting error can approach 5e-10 relatively.
+            rel_tol=5.0e-10,
             abs_tol=1.0e-14,
         )
     except (TypeError, ValueError):
@@ -671,10 +690,19 @@ def prepare_run(
 
     study_config = study["study_config"]
     condition = operating_condition(study_config["operating_condition"])
-    validation = study_config["validation_study"]
+    topology = str(row["topology"])
+    plan_config, active_temporal_package = _plan_config_for_topology(
+        study_config, topology
+    )
+    validation = plan_config["validation_study"]
     urans = dict(validation.get("urans") or {})
     dt_s = float(row["dt_s"])
-    plan = _stage_plan(dt_s=dt_s, condition=condition, config=study_config)
+    plan = _stage_plan(dt_s=dt_s, condition=condition, config=plan_config)
+    plan["production_duration_source"] = (
+        f"{active_temporal_package}:{topology}"
+        if active_temporal_package.startswith("cummings_")
+        else "user_or_study_configuration"
+    )
     checkpoint_case_config = read_json(checkpoint_case / "case_config.json", {}) or {}
     mesh_config = read_json(
         Path(mesh["mesh_package"]) / "Configurations/cfd2d_mesh_config.json", {}
@@ -685,7 +713,6 @@ def prepare_run(
             mesh_config.get("spanwise_thickness_chord", 0.01),
         )
     )
-    topology = str(row["topology"])
     mesh_quality_controls = quality_controls_for_mesh(Path(mesh["mesh_package"]))
     if mesh_quality_controls is None:
         mesh_quality_controls = quality_controls_from_paths([
@@ -807,7 +834,9 @@ def prepare_run(
     resolved_config = {
         "schema_version": 1,
         "study_config_schema_version": study_config.get("schema_version"),
-        "study_config": study_config,
+        "study_config": plan_config,
+        "source_study_config": study_config,
+        "active_temporal_package": active_temporal_package,
         "run_matrix_row": row,
         "operating_condition": condition,
         "stage_plan": plan,

@@ -246,6 +246,7 @@ def welch_spectrum(
     *,
     chord_m: float,
     velocity_m_s: float,
+    reference_length_m: float | None = None,
     nperseg: int | None = None,
 ) -> dict[str, Any]:
     try:
@@ -286,12 +287,25 @@ def welch_spectrum(
     positive_frequency = frequency[positive]
     positive_density = density[positive]
     peak_frequency = float(positive_frequency[peak_index])
+    length = float(reference_length_m if reference_length_m is not None else chord_m)
+    if not math.isfinite(length) or length <= 0.0:
+        raise ValueError("The Strouhal reference length must be finite and positive")
+    strouhal = frequency * length / velocity_m_s
+    wave_number = np.divide(
+        1.0,
+        strouhal,
+        out=np.full_like(strouhal, np.nan, dtype=float),
+        where=strouhal > 0.0,
+    )
+    dominant_strouhal = peak_frequency * length / velocity_m_s
     return {
         "frequency_hz": frequency.tolist(),
         "psd": density.tolist(),
-        "strouhal": (frequency * chord_m / velocity_m_s).tolist(),
+        "strouhal": strouhal.tolist(),
+        "wave_number_1_over_st": wave_number.tolist(),
         "dominant_frequency_hz": peak_frequency,
-        "dominant_strouhal": peak_frequency * chord_m / velocity_m_s,
+        "dominant_strouhal": dominant_strouhal,
+        "dominant_wave_number": 1.0 / dominant_strouhal,
         "peak_amplitude": float(positive_density[peak_index]),
         "nperseg": segment,
         "noverlap": overlap,
@@ -299,6 +313,11 @@ def welch_spectrum(
         "frequency_resolution_hz": 1.0 / float(time[-1] - time[0]),
         "nyquist_hz": 0.5 / median_dt,
         "normalization": "density",
+        "window": "hann",
+        "detrend": "constant",
+        "reference_length_m": length,
+        "strouhal_definition": "St=f*L/U_inf",
+        "wave_number_definition": "W=1/St",
         "segments_approx": max(1, (time.size - overlap) // max(1, segment - overlap)),
     }
 

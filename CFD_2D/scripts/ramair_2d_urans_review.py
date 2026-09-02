@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 from typing import Any
 
@@ -69,11 +70,13 @@ def review_urans_signals(
     sampling_end_s: float | None = None,
     chord_m: float,
     velocity_m_s: float,
+    reference_length_m: float | None = None,
+    sampling_stage: str = "E",
     minimum_cycles: int = 10,
     preferred_cycles: int = 20,
     thresholds: dict[str, float] | None = None,
 ) -> dict[str, Any]:
-    """Evaluate only the accepted stage-E window."""
+    """Evaluate a uniform-dt stage, preferring production stage E."""
     limits = {
         "stationarity_mean_percent": 1.0,
         "stationarity_rms_percent": 5.0,
@@ -109,6 +112,7 @@ def review_urans_signals(
                 values[finite],
                 chord_m=chord_m,
                 velocity_m_s=velocity_m_s,
+                reference_length_m=reference_length_m,
             )
         except (RuntimeError, ValueError) as exc:
             spectrum = {"status": "NOT_AVAILABLE", "reason": str(exc)}
@@ -150,22 +154,167 @@ def review_urans_signals(
         "status": status,
         "recommendation": recommendation,
         "sampling_window": {
-            "stage": "E",
+            "stage": sampling_stage,
             "start_s": float(sampling_start_s),
             "end_s": float(time_s[-1]),
             "samples": int(len(sampled)),
         },
         "signals": signals,
         "hard_failures": hard_failures,
-        "startup_and_settling_excluded": True,
+        "startup_and_settling_excluded": sampling_stage == "E",
         "automatic_assessment": recommendation,
         "review_status": "NOT_REVIEWED",
         "allowed_uses": {
             "space_time_convergence": False,
-            "frequency_analysis": False,
+            "frequency_analysis": bool(signals) and not hard_failures,
         },
         "generated_at": utc_stamp(),
     }
+
+
+def _stage_window(
+    frame: pd.DataFrame,
+    plan: dict[str, Any],
+    stage_name: str,
+) -> tuple[pd.DataFrame, float, float] | None:
+    stage = next(
+        (row for row in plan.get("stages", []) if str(row.get("stage")) == stage_name),
+        None,
+    )
+    if not stage:
+        return None
+    start = float(stage.get("start_s", 0.0))
+    end = float(stage.get("end_s", math.inf))
+    try:
+        selected = _sampling_frame(frame, start, end)
+    except ValueError:
+        return None
+    time_column = _column(selected, "time_s", "time", "Time")
+    return selected, start, min(end, float(selected[time_column].max()))
+
+
+def _select_analysis_window(
+    frame: pd.DataFrame,
+    plan: dict[str, Any],
+    metadata: dict[str, Any],
+) -> tuple[str, float, float | None, int]:
+    """Use E only when it contains enough data; otherwise use uniform stage D."""
+    for stage_name in ("E", "D"):
+        selected = _stage_window(frame, plan, stage_name)
+        if selected is not None and len(selected[0]) >= 16:
+            return stage_name, selected[1], selected[2], int(len(selected[0]))
+    fallback_start = float(
+        metadata.get("sampling_start_s") or plan.get("sampling_start_s") or 0.0
+    )
+    selected = _sampling_frame(frame, fallback_start, None)
+    return "E", fallback_start, None, int(len(selected))
+
+
+def _profile_thickness_m(metadata: dict[str, Any], chord_m: float) -> tuple[float, str]:
+    for container in (metadata, metadata.get("operating_condition") or {}):
+        for key in ("airfoil_thickness_m", "maximum_thickness_m", "profile_thickness_m"):
+            value = container.get(key)
+            if value is not None and float(value) > 0.0:
+                return float(value), f"metadata:{key}"
+        for key in ("airfoil_thickness_ratio", "maximum_thickness_ratio", "thickness_ratio"):
+            value = container.get(key)
+            if value is not None and float(value) > 0.0:
+                return float(value) * chord_m, f"metadata:{key}"
+    package = Path(str(metadata.get("mesh_package") or ""))
+    points = package / "Mesh Data/profile_preprocessed_points.csv"
+    if points.is_file():
+        try:
+            table = pd.read_csv(points)
+            numeric = table.select_dtypes(include=[np.number])
+            vertical_name = next(
+                (name for name in ("z_m", "y_m", "z", "y") if name in table.columns),
+                None,
+            )
+            if vertical_name is not None or numeric.shape[1] >= 2:
+                vertical = pd.to_numeric(
+                    table[vertical_name] if vertical_name is not None else numeric.iloc[:, -1],
+                    errors="coerce",
+                ).dropna()
+                if not vertical.empty and float(vertical.max() - vertical.min()) > 0.0:
+                    return float(vertical.max() - vertical.min()), str(points)
+        except (OSError, ValueError, pd.errors.ParserError):
+            pass
+    # LS(1)-0417 is the fixed Validation Lab profile; 17% is its nominal t/c.
+    return 0.17 * chord_m, "LS(1)-0417 nominal t/c=0.17 fallback"
+
+
+def _write_review_plots(
+    run_root: Path,
+    sampled: pd.DataFrame,
+    report: dict[str, Any],
+) -> list[str]:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    output = run_root / "plots/urans_review"
+    output.mkdir(parents=True, exist_ok=True)
+    products: list[str] = []
+    cl_spectrum = (report.get("signals", {}).get("Cl") or {}).get("spectrum") or {}
+    frequency = np.asarray(cl_spectrum.get("frequency_hz") or [], dtype=float)
+    density = np.asarray(cl_spectrum.get("psd") or [], dtype=float)
+    strouhal = np.asarray(cl_spectrum.get("strouhal") or [], dtype=float)
+    wave = np.asarray(cl_spectrum.get("wave_number_1_over_st") or [], dtype=float)
+    for name, x, label in (
+        ("lift_psd_frequency.png", frequency, "Frequency, f [Hz]"),
+        ("lift_psd_strouhal.png", strouhal, "Strouhal number, St [-]"),
+        ("lift_psd_wave_number.png", wave, "Wave number, 1/St [-]"),
+    ):
+        mask = np.isfinite(x) & np.isfinite(density) & (x > 0.0)
+        if not np.any(mask):
+            continue
+        order = np.argsort(x[mask])
+        fig, axis = plt.subplots(figsize=(7.4, 4.2))
+        axis.plot(x[mask][order], density[mask][order], lw=1.0)
+        axis.set(xlabel=label, ylabel="Power spectral density", title="Lift-force PSD")
+        axis.grid(alpha=0.25)
+        fig.tight_layout()
+        target = output / name
+        fig.savefig(target, dpi=180)
+        plt.close(fig)
+        products.append(str(target))
+
+    time_name = _column(sampled, "time_s", "time", "Time")
+    traces: dict[str, pd.Series] = {}
+    for label, names in {
+        "Cl": ("Cl", "CL"), "Cd": ("Cd", "CD"), "Cm": ("Cm", "CM")
+    }.items():
+        try:
+            traces[label] = pd.to_numeric(sampled[_column(sampled, *names)], errors="coerce")
+        except KeyError:
+            pass
+    if "Cl" in traces and "Cd" in traces:
+        traces["Cl/Cd"] = traces["Cl"] / traces["Cd"].replace(0.0, np.nan)
+    if traces:
+        window = max(8, min(len(sampled) // 4, max(8, len(sampled) // 20)))
+        fig, axes = plt.subplots(len(traces), 3, figsize=(13.0, 2.7 * len(traces)), sharex=True)
+        axes = np.atleast_2d(axes)
+        time_values = pd.to_numeric(sampled[time_name], errors="coerce")
+        for row, (label, values) in enumerate(traces.items()):
+            moving_mean = values.rolling(window, min_periods=max(3, window // 2)).mean()
+            moving_rms = np.sqrt(((values - moving_mean) ** 2).rolling(window, min_periods=max(3, window // 2)).mean())
+            drift = moving_mean.diff(window)
+            for axis, data, title in zip(
+                axes[row], (moving_mean, moving_rms, drift),
+                ("moving mean", "moving RMS", "moving drift"),
+            ):
+                axis.plot(time_values, data, lw=0.9)
+                axis.set_ylabel(label)
+                axis.set_title(title)
+                axis.grid(alpha=0.25)
+        for axis in axes[-1]:
+            axis.set_xlabel("Physical time [s]")
+        fig.tight_layout()
+        target = output / "moving_statistics.png"
+        fig.savefig(target, dpi=180)
+        plt.close(fig)
+        products.append(str(target))
+    return products
 
 
 def review_run(run_root: Path) -> dict[str, Any]:
@@ -183,28 +332,84 @@ def review_run(run_root: Path) -> dict[str, Any]:
     if source is None:
         raise FileNotFoundError("No real URANS force-coefficient CSV was found")
     frame = pd.read_csv(source)
-    sampling_start = float(
-        metadata.get("sampling_start_s")
-        or plan.get("sampling_start_s")
-        or 0.0
-    )
-    sampling_end_raw = (
-        metadata.get("sampling_end_s")
-        or plan.get("sampling_end_s")
-    )
-    sampling_end = (
-        float(sampling_end_raw)
-        if sampling_end_raw is not None
-        else None
+    sampling_stage, sampling_start, sampling_end, available_samples = _select_analysis_window(
+        frame, plan, metadata
     )
     condition = metadata.get("operating_condition") or {}
+    chord_m = float(condition.get("chord_m") or metadata.get("chord_m") or 1.0)
+    velocity_m_s = float(condition.get("velocity_m_s") or metadata.get("U_inf_m_s") or 1.0)
+    alpha_deg = float(condition.get("alpha_deg") or metadata.get("alpha_deg") or 0.0)
+    thickness_m, thickness_source = _profile_thickness_m(metadata, chord_m)
+    alpha_rad = math.radians(alpha_deg)
+    projected_length_m = abs(
+        thickness_m * math.cos(alpha_rad) + chord_m * math.sin(alpha_rad)
+    )
     report = review_urans_signals(
         frame,
         sampling_start_s=sampling_start,
         sampling_end_s=sampling_end,
-        chord_m=float(condition.get("chord_m") or 1.0),
-        velocity_m_s=float(condition.get("velocity_m_s") or 1.0),
+        chord_m=chord_m,
+        velocity_m_s=velocity_m_s,
+        reference_length_m=projected_length_m,
+        sampling_stage=sampling_stage,
     )
+    report["sampling_window"]["available_samples_before_analysis"] = available_samples
+    report["frequency_method"] = {
+        "source_signal": "time-accurate lift coefficient (normal-force proxy)",
+        "estimator": "Welch PSD",
+        "window": "Hann",
+        "detrend": "constant",
+        "overlap_fraction": 0.5,
+        "reference_length_formula": "L=t*cos(alpha)+c*sin(alpha)",
+        "airfoil_thickness_m": thickness_m,
+        "airfoil_thickness_source": thickness_source,
+        "projected_reference_length_m": projected_length_m,
+        "alpha_deg": alpha_deg,
+        "velocity_m_s": velocity_m_s,
+    }
+    report["mean_force_stability"] = {
+        name: {
+            "stationary": bool(values.get("stationarity", {}).get("passed")),
+            "mean_variation_percent": values.get("stationarity", {}).get("mean_variation_percent"),
+            "rms_variation_percent": values.get("stationarity", {}).get("rms_variation_percent"),
+        }
+        for name, values in report.get("signals", {}).items()
+    }
+    stage = next(
+        (row for row in plan.get("stages", []) if str(row.get("stage")) == sampling_stage),
+        {},
+    )
+    report["time_step"] = {
+        "stage": sampling_stage,
+        "minimum_s": stage.get("dt_s"),
+        "maximum_s": stage.get("dt_s"),
+        "fixed_within_analysis_window": stage.get("dt_s") is not None,
+    }
+    residual_candidates = (
+        run_root / "postprocess/URANS/solver_residuals.csv",
+        run_root / "postprocess/solver_residuals.csv",
+        run_root / "residuals.csv",
+    )
+    residual_source = next((path for path in residual_candidates if path.is_file()), None)
+    if residual_source is not None:
+        try:
+            residuals = pd.read_csv(residual_source)
+            continuity = (
+                residuals[residuals["field"] == "continuity_global"]
+                if "field" in residuals.columns else pd.DataFrame()
+            )
+            values = pd.to_numeric(continuity.get("initial_residual"), errors="coerce").dropna()
+            report["continuity"] = {
+                "status": "AVAILABLE" if not values.empty else "NOT_AVAILABLE",
+                "samples": int(len(values)),
+                "maximum_absolute_global_error": float(values.max()) if not values.empty else None,
+                "final_absolute_global_error": float(values.iloc[-1]) if not values.empty else None,
+                "source": str(residual_source),
+            }
+        except (OSError, ValueError, pd.errors.ParserError):
+            report["continuity"] = {"status": "READ_FAILED", "source": str(residual_source)}
+    else:
+        report["continuity"] = {"status": "NOT_AVAILABLE"}
     report["run_id"] = metadata.get("run_id") or run_root.name
     report["source_csv"] = str(source)
     stationarity = {
@@ -231,6 +436,7 @@ def review_run(run_root: Path) -> dict[str, Any]:
         frequencies = spectrum.get("frequency_hz")
         density = spectrum.get("psd")
         strouhal = spectrum.get("strouhal")
+        wave_number = spectrum.get("wave_number_1_over_st")
         if not (
             isinstance(frequencies, list)
             and isinstance(density, list)
@@ -243,7 +449,11 @@ def review_run(run_root: Path) -> dict[str, Any]:
         })
         if isinstance(strouhal, list) and len(strouhal) == len(psd):
             psd["strouhal"] = strouhal
+        if isinstance(wave_number, list) and len(wave_number) == len(psd):
+            psd["wave_number_1_over_st"] = wave_number
         psd.to_csv(run_root / f"psd_{name}.csv", index=False)
+    sampled = _sampling_frame(frame, sampling_start, sampling_end)
+    report["plots"] = _write_review_plots(run_root, sampled, report)
     write_json_atomic(run_root / "review.json", report)
     return report
 

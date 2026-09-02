@@ -903,6 +903,7 @@ def analyze_study(project_root: Path) -> dict[str, Any]:
         read_json(root / "study_manifest.json", {}) or {},
     ) or {}
     metrics: list[dict[str, Any]] = []
+    histories: dict[int, Any] = {}
     for entry in manifest.get("entries", []):
         run_root = root / entry["run_id"]
         try:
@@ -929,6 +930,16 @@ def analyze_study(project_root: Path) -> dict[str, Any]:
                 "pimple_converged": summary.get("pimple_converged"),
             }
         )
+        history_path = run_root / "time_history.csv"
+        if history_path.is_file():
+            try:
+                import pandas as pd
+                history = pd.read_csv(history_path)
+                time_name = next((name for name in ("Time", "time", "time_s") if name in history.columns), None)
+                if time_name:
+                    histories[int(entry["nOuterCorrectors"])] = (history, time_name)
+            except (OSError, ValueError):
+                pass
     comparison = compare_pimple_outer_correctors(metrics)
     result = {
         "status": comparison.get("status", "NOT_AVAILABLE"),
@@ -959,6 +970,58 @@ def analyze_study(project_root: Path) -> dict[str, Any]:
             writer.writerows(metrics)
 
         outer = [int(row["nOuterCorrectors"]) for row in metrics]
+
+        if len(histories) >= 2:
+            overlap_start = max(float(frame[time_name].min()) for frame, time_name in histories.values())
+            overlap_end = min(float(frame[time_name].max()) for frame, time_name in histories.values())
+            if overlap_end > overlap_start:
+                fig, axes = plt.subplots(3, 1, figsize=(9.0, 8.0), sharex=True)
+                plotted = False
+                for axis, candidates, label in zip(
+                    axes,
+                    (("Cl", "CL"), ("Cd", "CD"), ("Cm", "CM")),
+                    ("Cl", "Cd", "Cm"),
+                ):
+                    collected: list[float] = []
+                    for n_outer, (frame, time_name) in sorted(histories.items()):
+                        column = next((name for name in candidates if name in frame.columns), None)
+                        if column is None:
+                            continue
+                        selected = frame[
+                            (frame[time_name] >= overlap_start) & (frame[time_name] <= overlap_end)
+                        ]
+                        if selected.empty:
+                            continue
+                        axis.plot(selected[time_name], selected[column], lw=0.9, label=f"nOuter={n_outer}")
+                        collected.extend(pd.to_numeric(selected[column], errors="coerce").dropna().tolist())
+                        plotted = True
+                    if collected:
+                        lower, upper = min(collected), max(collected)
+                        span = upper - lower
+                        pad = 0.25 * span if span > 0.0 else 0.25 * max(abs(lower), 1.0e-6)
+                        axis.set_ylim(lower - pad, upper + pad)
+                    axis.set_ylabel(label)
+                    axis.grid(alpha=0.25)
+                    axis.legend(fontsize=8)
+                axes[-1].set_xlabel("Physical time [s]")
+                axes[0].set_title("PIMPLE 2/3/4: coefficients over the same final-time interval")
+                fig.tight_layout()
+                if plotted:
+                    save_scientific_figure(
+                        fig,
+                        reports / "pimple_outer_coefficients_common_final_period.png",
+                        data={
+                            "overlap_start_s": overlap_start,
+                            "overlap_end_s": overlap_end,
+                            "nOuterCorrectors": sorted(histories),
+                        },
+                        metadata={
+                            "source": "PIMPLE 2/3/4 real force histories",
+                            "y_scale": "observed min/max plus 25 percent of observed span",
+                        },
+                    )
+                else:
+                    plt.close(fig)
 
         def plot_values(
             filename: str,

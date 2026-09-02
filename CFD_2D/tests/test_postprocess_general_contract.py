@@ -16,6 +16,7 @@ if str(SCRIPTS) not in sys.path:
 from paraview_case_viewer import write_automatic_products_script  # noqa: E402
 from ramair_2d_postprocess import (  # noqa: E402
     available_postprocess_fields,
+    parse_solver_log,
     readable_axis_limits,
     select_final_force_window,
     summarize_force_coeffs,
@@ -114,6 +115,13 @@ def test_paraview_script_contains_portable_state_and_complete_views(tmp_path: Pa
     assert 'registrationName="PositiveQRegions"' in text
     assert 'products["q_positive_filter"] = "Threshold(Q >= 0) for one-cell-thick 2-D mesh"' in text
     assert 'registrationName="HighVorticity"' in text
+    assert 'velocity_contour_name = "U"' in text
+    assert 'pressure_name = (\n        "Cp" if available_array("Cp")' in text
+    assert 'vorticity_name = "vorticity"' in text
+    assert 'for i in range(1, 41)' in text
+    assert 'for i in range(40)' in text
+    assert 'lut.RescaleTransferFunction(0.0, 10.0)' in text
+    assert 'max Co = %.1f' in text
     compile(text, str(script), "exec")
 
 
@@ -141,3 +149,19 @@ def test_static_paraview_mode_uses_only_latest_time_for_scales_and_defers_frames
     assert "range_times = selected_times if include_animations else selected_times[-1:]" in text
     assert 'products["animation_generation"] = "included" if include_animations else "deferred"' in text
     compile(text, str(script), "exec")
+
+
+def test_solver_log_parser_stitches_restart_segments(tmp_path: Path) -> None:
+    (tmp_path / "log.foamRun.001").write_text(
+        "Time = 0\nSolving for Ux, Initial residual = 1e-2, Final residual = 1e-5, No Iterations 2\n"
+        "Time = 1\nSolving for Ux, Initial residual = 5e-3, Final residual = 1e-6, No Iterations 2\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "log.foamRun.002").write_text(
+        "Time = 1\nSolving for Ux, Initial residual = 5e-3, Final residual = 1e-6, No Iterations 2\n"
+        "Time = 2\nSolving for Ux, Initial residual = 1e-3, Final residual = 1e-7, No Iterations 2\n",
+        encoding="utf-8",
+    )
+    residuals, _, metadata = parse_solver_log(tmp_path)
+    assert residuals["Time"].tolist() == [0.0, 1.0, 2.0]
+    assert metadata["stitched_segments"] == 2

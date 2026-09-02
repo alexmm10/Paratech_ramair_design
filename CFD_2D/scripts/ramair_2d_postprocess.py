@@ -99,11 +99,22 @@ def numeric_time_dirs(case_dir: Path) -> list[tuple[float, Path]]:
 
 
 def parse_solver_log(case_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
-    candidates = [
-        path for pattern in ("log.foamRun", "log.pimpleFoam", "*PyFoamRunner*")
-        for path in case_dir.glob(pattern)
-        if path.is_file()
-    ]
+    patterns = (
+        "log.foamRun*",
+        "log.pimpleFoam*",
+        "log.simpleFoam*",
+        "PyFoamRunner*.logfile",
+        "*PyFoamRunner*",
+    )
+    candidates = sorted(
+        {
+            path.resolve()
+            for pattern in patterns
+            for path in case_dir.glob(pattern)
+            if path.is_file()
+        },
+        key=lambda path: (path.stat().st_mtime_ns, path.name),
+    )
     if not candidates:
         return pd.DataFrame(), pd.DataFrame(), {"solver_log_found": False}
     log_path = max(candidates, key=lambda path: path.stat().st_mtime)
@@ -125,7 +136,11 @@ def parse_solver_log(case_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame, dict[s
         r"time step continuity errors\s*:\s*sum local\s*=\s*([0-9.eE+-]+),\s*"
         r"global\s*=\s*([0-9.eE+-]+)(?:,\s*cumulative\s*=\s*([0-9.eE+-]+))?"
     )
-    for line in log_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+    for segment_index, log_path in enumerate(candidates):
+      current_time = None
+      pending_courant = None
+      pending_delta_t = None
+      for line in log_path.read_text(encoding="utf-8", errors="ignore").splitlines():
         tm = time_re.search(line.strip())
         if tm:
             try:
@@ -153,6 +168,8 @@ def parse_solver_log(case_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame, dict[s
                 "Co_mean": float(cm.group(1)),
                 "Co_max": float(cm.group(2)),
                 "deltaT": np.nan,
+                "source_log": log_path.name,
+                "segment_order": segment_index,
             }
             continue
         rm = residual_re.search(line)
@@ -163,6 +180,8 @@ def parse_solver_log(case_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame, dict[s
                 "initial_residual": float(rm.group(2)),
                 "final_residual": float(rm.group(3)),
                 "iterations": int(rm.group(4)),
+                "source_log": log_path.name,
+                "segment_order": segment_index,
             })
             continue
         continuity = continuity_re.search(line)
@@ -175,23 +194,42 @@ def parse_solver_log(case_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame, dict[s
                 "initial_residual": abs(global_error),
                 "final_residual": abs(cumulative),
                 "iterations": 0,
+                "source_log": log_path.name,
+                "segment_order": segment_index,
             })
             continue
         em = exec_re.search(line)
         if em:
             execution_time = float(em.group(1))
             clock_time = float(em.group(2))
-    if pending_courant is not None and current_time is not None:
-        pending_courant["Time"] = current_time
-        pending_courant["deltaT"] = pending_delta_t if pending_delta_t is not None else np.nan
-        courant_rows.append(pending_courant)
+      if pending_courant is not None and current_time is not None:
+          pending_courant["Time"] = current_time
+          pending_courant["deltaT"] = pending_delta_t if pending_delta_t is not None else np.nan
+          pending_courant["source_log"] = log_path.name
+          pending_courant["segment_order"] = segment_index
+          courant_rows.append(pending_courant)
+    residual_frame = pd.DataFrame(residual_rows)
+    if not residual_frame.empty:
+        residual_frame = residual_frame.dropna(subset=["Time"])
+        residual_frame = residual_frame.drop_duplicates(
+            subset=["Time", "field", "initial_residual", "final_residual", "iterations"],
+            keep="last",
+        ).sort_values(["Time", "segment_order"], kind="stable").reset_index(drop=True)
+    courant_frame = pd.DataFrame(courant_rows)
+    if not courant_frame.empty:
+        courant_frame = courant_frame.dropna(subset=["Time"])
+        courant_frame = courant_frame.drop_duplicates(
+            subset=["Time", "Co_mean", "Co_max", "deltaT"], keep="last"
+        ).sort_values(["Time", "segment_order"], kind="stable").reset_index(drop=True)
     meta = {
         "solver_log_found": True,
-        "solver_log": str(log_path),
+        "solver_log": str(candidates[-1]),
+        "solver_logs": [str(path) for path in candidates],
+        "stitched_segments": len(candidates),
         "execution_time_s": execution_time,
         "clock_time_s": clock_time,
     }
-    return pd.DataFrame(residual_rows), pd.DataFrame(courant_rows), meta
+    return residual_frame, courant_frame, meta
 
 
 def select_final_force_window(
@@ -322,6 +360,8 @@ def plot_force_coeffs(
                 ax.grid(True, linewidth=0.3)
                 ax.legend(fontsize=8, loc="best")
             axes[-1].set_xlabel(x_label)
+            if float(pd.to_numeric(history["Time"], errors="coerce").min()) >= 0.0:
+                axes[-1].set_xlim(left=0.0)
             axes[0].set_title(title)
             fig.tight_layout()
             save_scientific_figure(
@@ -340,6 +380,7 @@ def write_aerodynamic_efficiency_products(
     x_label: str = r"Physical time, $t$ [s]",
     title: str = "Aerodynamic efficiency - averaging window",
     mean_from_fraction: float = 0.6,
+    average_window: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
     """Write traceable Cl/Cd data without inventing values near Cd=0."""
     required = {"Time", "Cl", "Cd"}
@@ -365,10 +406,22 @@ def write_aerodynamic_efficiency_products(
             float(usable["Time"].max()) - float(usable["Time"].min())
         )
         mean_window = usable[usable["Time"] >= start]
+        if average_window is not None and not average_window.empty:
+            window_start = float(average_window["Time"].min())
+            window_end = float(average_window["Time"].max())
+            mean_window = usable[
+                (usable["Time"] >= window_start) & (usable["Time"] <= window_end)
+            ]
         if mean_window.empty:
             mean_window = usable.tail(1)
         fig, ax = plt.subplots(figsize=(7.2, 3.6))
-        ax.plot(usable["Time"], usable["Cl_over_Cd"], color="#176b87", linewidth=1.15, alpha=0.9)
+        line, = ax.plot(usable["Time"], usable["Cl_over_Cd"], color="#176b87", linewidth=1.15, alpha=0.9)
+        if not mean_window.empty:
+            ax.axvspan(
+                float(mean_window["Time"].min()),
+                float(mean_window["Time"].max()),
+                color=line.get_color(), alpha=0.12, label="averaging interval",
+            )
         mean_value = float(mean_window["Cl_over_Cd"].mean())
         ax.axhline(
             mean_value,
@@ -379,7 +432,20 @@ def write_aerodynamic_efficiency_products(
         )
         ax.set_xlabel(x_label)
         ax.set_ylabel(r"$C_L/C_D$ [-]")
-        ax.set_ylim(0.0, 75.0)
+        efficiency_values = usable["Cl_over_Cd"].replace([np.inf, -np.inf], np.nan).dropna()
+        if len(efficiency_values) >= 20:
+            central = efficiency_values[
+                efficiency_values.between(
+                    efficiency_values.quantile(0.01),
+                    efficiency_values.quantile(0.99),
+                )
+            ]
+        else:
+            central = efficiency_values
+        display_limits = readable_axis_limits(central)
+        ax.set_ylim(*display_limits)
+        if float(usable["Time"].min()) >= 0.0:
+            ax.set_xlim(left=0.0)
         ax.set_title(title)
         ax.grid(True, linewidth=0.3, alpha=0.6)
         ax.legend(fontsize=8)
@@ -394,8 +460,9 @@ def write_aerodynamic_efficiency_products(
         "status": "OK",
         "samples": int(len(usable)),
         "excluded_cd_near_zero": int((~safe_drag).sum()),
-        "samples_outside_display_range_0_100": int(
-            ((usable["Cl_over_Cd"] < 0.0) | (usable["Cl_over_Cd"] > 100.0)).sum()
+        "display_limits": list(display_limits),
+        "samples_outside_display_range": int(
+            ((usable["Cl_over_Cd"] < display_limits[0]) | (usable["Cl_over_Cd"] > display_limits[1])).sum()
         ),
         "mean_Cl_over_Cd": mean_value,
         "mean_from_fraction": fraction,
@@ -407,7 +474,13 @@ def write_aerodynamic_efficiency_products(
     }
 
 
-def plot_residuals(df: pd.DataFrame, out: Path) -> None:
+def plot_residuals(
+    df: pd.DataFrame,
+    out: Path,
+    *,
+    x_label: str = r"Physical time, $t$ [s]",
+    title: str = "OpenFOAM solver residuals",
+) -> None:
     if df.empty or "Time" not in df.columns:
         return
     try:
@@ -419,9 +492,12 @@ def plot_residuals(df: pd.DataFrame, out: Path) -> None:
                 ax.semilogy(clean["Time"], clean["initial_residual"], label=f"{field} initial", alpha=0.55, linewidth=1.0)
         ax.grid(True, which="both", linewidth=0.3)
         ax.legend(fontsize=8)
-        ax.set_xlabel(r"Physical time, $t$ [s]")
+        ax.set_xlabel(x_label)
         ax.set_ylabel("Initial residual [-]")
-        ax.set_title("OpenFOAM solver residuals")
+        ax.set_title(title)
+        finite_time = pd.to_numeric(df["Time"], errors="coerce").dropna()
+        if not finite_time.empty and float(finite_time.min()) >= 0.0:
+            ax.set_xlim(left=0.0)
         fig.tight_layout()
         save_scientific_figure(
             fig, out, data=df,
@@ -752,6 +828,11 @@ def prepare_steady_stage_results(
             target = stage_dir / name
             shutil.copy2(source, target)
             copied.append(str(target))
+    paraview_case = (
+        archive / "paraview_case"
+        if (archive / "paraview_case" / "system" / "controlDict").is_file()
+        else archive
+    )
     records, force_sources = read_force_coefficient_history(archive, include_processor0=True)
     force_summary: dict[str, Any] = {"status": "NOT_AVAILABLE"}
     if records:
@@ -771,11 +852,45 @@ def prepare_steady_stage_results(
         plot_force_coeffs(
             force_history,
             mean,
-            stage_dir / "forceCoeffs_RANS_history.png",
+            stage_dir / "Cl_Cd_Cm_history.png",
             average_window=force_window,
             x_label="SIMPLE iteration",
             title="RANS coefficients: complete iteration history and final averaging window",
         )
+        shutil.copy2(
+            stage_dir / "Cl_Cd_Cm_history.png",
+            stage_dir / "forceCoeffs_RANS_history.png",
+        )
+        efficiency = write_aerodynamic_efficiency_products(
+            force_history,
+            stage_dir / "aerodynamic_efficiency.csv",
+            stage_dir / "aerodynamic_efficiency.png",
+            x_label="SIMPLE iteration",
+            title="RANS aerodynamic efficiency: complete history and averaging window",
+            average_window=force_window,
+        )
+        rans_residuals, _, rans_solver_meta = parse_solver_log(archive)
+        if paraview_case != archive:
+            paraview_residuals, _, paraview_solver_meta = parse_solver_log(paraview_case)
+            if not paraview_residuals.empty:
+                rans_residuals = pd.concat(
+                    [rans_residuals, paraview_residuals], ignore_index=True
+                ).drop_duplicates(
+                    subset=["Time", "field", "initial_residual", "final_residual", "iterations"],
+                    keep="last",
+                ).sort_values(["Time", "segment_order"], kind="stable")
+                rans_solver_meta = {
+                    "archive": rans_solver_meta,
+                    "paraview_case": paraview_solver_meta,
+                }
+        if not rans_residuals.empty:
+            rans_residuals.to_csv(stage_dir / "solver_residuals.csv", index=False)
+            plot_residuals(
+                rans_residuals,
+                stage_dir / "solver_residuals.png",
+                x_label="SIMPLE iteration",
+                title="RANS solver residuals: complete stitched history",
+            )
         force_summary = {
             "status": "AVAILABLE",
             "time_semantics": "SIMPLE iteration counter; not physical seconds",
@@ -787,15 +902,12 @@ def prepare_steady_stage_results(
             "mean": json_safe(mean.iloc[0].to_dict()),
             "std": json_safe(std.iloc[0].to_dict()),
             "source_files": [str(path) for path in force_sources],
+            "aerodynamic_efficiency": efficiency,
+            "solver_log": rans_solver_meta,
         }
         (stage_dir / "RANS_force_summary.json").write_text(
             json.dumps(force_summary, indent=2) + "\n", encoding="utf-8"
         )
-    paraview_case = (
-        archive / "paraview_case"
-        if (archive / "paraview_case" / "system" / "controlDict").is_file()
-        else archive
-    )
     rans_field_exports: dict[str, Any] = {"status": "DISABLED"}
     rans_wall_analysis: dict[str, Any] = {"status": "DISABLED"}
     if paraview_case.is_dir() and (run_openfoam_tools or wall_profile_analysis):
@@ -1093,6 +1205,7 @@ def postprocess(
     direct_output_dir: Path | None = None,
     simulation_mode: str = "URANS",
     rans_average_tail_samples: int = 500,
+    include_rans_stage: bool = True,
 ) -> Path:
     postprocess_started = time.monotonic()
     stage_timings: dict[str, float] = {}
@@ -1129,7 +1242,7 @@ def postprocess(
             raise FileNotFoundError(f"OpenFOAM case not found: {case_dir}")
         animation_reports: dict[str, Any] = {}
         archive = latest_steady_archive(case_dir)
-        if archive is not None:
+        if include_rans_stage and archive is not None:
             rans_case = (
                 archive / "paraview_case"
                 if (archive / "paraview_case" / "system" / "controlDict").is_file()
@@ -1307,7 +1420,10 @@ def postprocess(
             robust_percentiles=robust_percentiles,
             manual_scales=manual_scales,
             average_tail_samples=max(1, int(rans_average_tail_samples)),
-        )
+        ) if include_rans_stage else {
+            "status": "DISABLED",
+            "reason": "RANS products are generated from the dedicated RANS section",
+        }
         stage_timings["rans_products_s"] = time.monotonic() - stage_started
         stage_started = time.monotonic()
         automatic_products = (
@@ -1353,10 +1469,11 @@ def postprocess(
                 average_window=win,
             )
             aerodynamic_efficiency = write_aerodynamic_efficiency_products(
-                win,
+                df,
                 out_dir / "aerodynamic_efficiency.csv",
                 out_dir / "aerodynamic_efficiency.png",
-                mean_from_fraction=0.0,
+                title="URANS aerodynamic efficiency: complete history and averaging window",
+                average_window=win,
             )
             average_start = float(win["Time"].min()) if "Time" in win.columns and not win.empty else None
             average_end = float(win["Time"].max()) if "Time" in win.columns and not win.empty else None
@@ -1643,6 +1760,12 @@ def parse_args() -> argparse.Namespace:
         "--simulation-mode", choices=("AUTO", "RANS", "URANS"), default="AUTO",
         help="AUTO separates SIMPLE iteration histories from physical URANS time using case evidence.",
     )
+    p.add_argument(
+        "--include-rans-stage",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Also generate archived SIMPLE/RANS products; disable in the dedicated URANS convergence section.",
+    )
     return p.parse_args()
 
 
@@ -1684,6 +1807,7 @@ def main() -> None:
         direct_output_dir=args.output_dir,
         rans_average_tail_samples=max(1, int(args.rans_average_tail_samples)),
         simulation_mode=args.simulation_mode,
+        include_rans_stage=args.include_rans_stage,
     )
     print(f"Post-processing outputs in: {out.resolve()}")
 

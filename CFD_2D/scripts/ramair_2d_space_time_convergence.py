@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 from typing import Any, Iterable
 
 import pandas as pd
+import numpy as np
 
 from ramair_2d_convergence_analysis import generalized_gci, relative_percent
 from ramair_2d_study_registry import (
@@ -258,6 +260,7 @@ def build_workspace_reports(project_root: Path) -> dict[str, Any]:
                 / topology
             ),
         )
+    frequency = build_frequency_reports(project_root)
     return {
         "status": (
             "AVAILABLE"
@@ -268,7 +271,172 @@ def build_workspace_reports(project_root: Path) -> dict[str, Any]:
             else "INSUFFICIENT_ACCEPTED_RUNS"
         ),
         "reports": reports,
+        "frequency": frequency,
     }
+
+
+def _frequency_rows(project_root: Path) -> list[dict[str, Any]]:
+    active = active_workspace_root(Path(project_root).resolve())
+    rows: list[dict[str, Any]] = []
+    for metadata_path in sorted((active / "runs").glob("*/*/*/case_metadata.json")):
+        run_root = metadata_path.parent
+        metadata = read_json(metadata_path, {}) or {}
+        review = read_json(run_root / "review.json", {}) or {}
+        signal = (review.get("signals") or {}).get("Cl") or {}
+        spectrum = signal.get("spectrum") or {}
+        if not spectrum.get("frequency_hz") or not spectrum.get("psd"):
+            continue
+        rows.append({
+            "run_id": metadata.get("run_id") or run_root.name,
+            "topology": metadata.get("topology"),
+            "mesh_level": metadata.get("mesh_level"),
+            "alpha_deg": metadata.get("alpha_deg", 0.0),
+            "dt_s": metadata.get("dt_s"),
+            "review_status": review.get("status"),
+            "sampling_stage": (review.get("sampling_window") or {}).get("stage"),
+            "dominant_frequency_hz": spectrum.get("dominant_frequency_hz"),
+            "dominant_strouhal": spectrum.get("dominant_strouhal"),
+            "dominant_wave_number": spectrum.get("dominant_wave_number"),
+            "frequency_hz": spectrum.get("frequency_hz"),
+            "strouhal": spectrum.get("strouhal"),
+            "wave_number": spectrum.get("wave_number_1_over_st"),
+            "psd": spectrum.get("psd"),
+        })
+    return rows
+
+
+def build_frequency_reports(project_root: Path) -> dict[str, Any]:
+    """Render Cummings-style PSD and steepest-descent products from real runs."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    active = active_workspace_root(Path(project_root).resolve())
+    root = active / "postprocess/frequency"
+    root.mkdir(parents=True, exist_ok=True)
+    rows = _frequency_rows(project_root)
+    products: list[str] = []
+    level_colours = {"coarse": "#d94841", "medium": "#1b9e77", "fine": "#3559b7"}
+    for topology in ("closed", "open"):
+        topology_rows = [row for row in rows if row.get("topology") == topology]
+        for alpha in sorted({float(row.get("alpha_deg") or 0.0) for row in topology_rows}):
+            selected = [row for row in topology_rows if math.isclose(float(row.get("alpha_deg") or 0.0), alpha)]
+            output = root / topology / f"alpha_{alpha:g}"
+            output.mkdir(parents=True, exist_ok=True)
+            for key, xlabel, filename in (
+                ("frequency_hz", "Frequency, f [Hz]", "lift_psd_vs_frequency.png"),
+                ("strouhal", "Strouhal number, St [-]", "lift_psd_vs_strouhal.png"),
+                ("wave_number", "Wave number, 1/St [-]", "lift_psd_vs_wave_number.png"),
+            ):
+                fig, axis = plt.subplots(figsize=(8.0, 4.8))
+                plotted = False
+                for row in selected:
+                    x = np.asarray(row.get(key) or [], dtype=float)
+                    y = np.asarray(row.get("psd") or [], dtype=float)
+                    mask = np.isfinite(x) & np.isfinite(y) & (x > 0.0)
+                    if not np.any(mask):
+                        continue
+                    order = np.argsort(x[mask])
+                    level = str(row.get("mesh_level"))
+                    axis.plot(
+                        x[mask][order], y[mask][order], lw=0.9,
+                        color=level_colours.get(level),
+                        label=f"{level} | dt={float(row['dt_s']):.5g} s | {row.get('sampling_stage')}",
+                    )
+                    plotted = True
+                if plotted:
+                    axis.set(xlabel=xlabel, ylabel="Power spectral density", title=f"{topology.title()} alpha={alpha:g} deg: lift PSD")
+                    axis.grid(alpha=0.25)
+                    axis.legend(fontsize=7)
+                    fig.tight_layout()
+                    target = output / filename
+                    fig.savefig(target, dpi=180)
+                    products.append(str(target))
+                plt.close(fig)
+            for metric, ylabel, filename in (
+                ("dominant_wave_number", "Dominant wave number, 1/St [-]", "steepest_descent_wave_number.png"),
+                ("dominant_strouhal", "Dominant Strouhal number, St [-]", "steepest_descent_strouhal.png"),
+            ):
+                fig, axis = plt.subplots(figsize=(7.2, 4.8))
+                plotted = False
+                for level in ("coarse", "medium", "fine"):
+                    points = sorted(
+                        (row for row in selected if row.get("mesh_level") == level and row.get(metric) is not None and row.get("dt_s") is not None),
+                        key=lambda row: float(row["dt_s"]),
+                    )
+                    if not points:
+                        continue
+                    axis.plot(
+                        [float(row["dt_s"]) for row in points],
+                        [float(row[metric]) for row in points],
+                        marker="s", lw=1.0, color=level_colours[level], label=level.title(),
+                    )
+                    plotted = True
+                if plotted:
+                    axis.set_xscale("log")
+                    axis.set(xlabel="Time step, dt [s]", ylabel=ylabel, title=f"{topology.title()} alpha={alpha:g} deg: Cummings steepest descent")
+                    axis.grid(alpha=0.25, which="both")
+                    axis.legend()
+                    fig.tight_layout()
+                    target = output / filename
+                    fig.savefig(target, dpi=180)
+                    products.append(str(target))
+                plt.close(fig)
+    combined = root / "combined"
+    combined.mkdir(parents=True, exist_ok=True)
+    for metric, ylabel, filename in (
+        ("dominant_wave_number", "Dominant wave number, 1/St [-]", "open_closed_wave_number_vs_dt.png"),
+        ("dominant_strouhal", "Dominant Strouhal number, St [-]", "open_closed_strouhal_vs_dt.png"),
+    ):
+        fig, axis = plt.subplots(figsize=(8.4, 5.0))
+        plotted = False
+        for topology, linestyle in (("closed", "-"), ("open", "--")):
+            for level in ("coarse", "medium", "fine"):
+                angles = sorted({
+                    float(row.get("alpha_deg") or 0.0) for row in rows
+                    if row.get("topology") == topology and row.get("mesh_level") == level
+                })
+                for alpha in angles:
+                    points = sorted(
+                        (
+                            row for row in rows
+                            if row.get("topology") == topology
+                            and row.get("mesh_level") == level
+                            and math.isclose(float(row.get("alpha_deg") or 0.0), alpha)
+                            and row.get(metric) is not None
+                            and row.get("dt_s") is not None
+                        ),
+                        key=lambda row: float(row["dt_s"]),
+                    )
+                    if not points:
+                        continue
+                    axis.plot(
+                        [float(row["dt_s"]) for row in points],
+                        [float(row[metric]) for row in points],
+                        marker="s", linestyle=linestyle, lw=1.0,
+                        color=level_colours[level],
+                        label=f"{topology} {level} alpha={alpha:g} deg",
+                    )
+                    plotted = True
+        if plotted:
+            axis.set_xscale("log")
+            axis.set(xlabel="Time step, dt [s]", ylabel=ylabel, title="Open/closed space-time frequency convergence")
+            axis.grid(alpha=0.25, which="both")
+            axis.legend(fontsize=8)
+            fig.tight_layout()
+            target = combined / filename
+            fig.savefig(target, dpi=180)
+            products.append(str(target))
+        plt.close(fig)
+    report = {
+        "status": "AVAILABLE" if products else "INSUFFICIENT_FREQUENCY_RESULTS",
+        "run_count": len(rows),
+        "products": products,
+        "method": "Cummings-style lift-force Welch PSD and dominant St/1-St trend versus fixed dt",
+        "generated_at": utc_stamp(),
+    }
+    write_json_atomic(root / "frequency_convergence_report.json", report)
+    return report
 
 
 def parse_args() -> argparse.Namespace:

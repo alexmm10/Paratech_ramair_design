@@ -184,7 +184,7 @@ def _plot_inventory(
     excluded = exclude_names or set()
     images = [
         image
-        for image in sorted(folder.glob("*.png"))
+        for image in sorted(folder.rglob("*.png"))
         if image.name not in excluded
     ]
     if not images:
@@ -206,96 +206,103 @@ def _postprocess_product_browser(
     key_scope: str,
     inline: bool = False,
 ) -> None:
-    """Render products lazily using only paths declared by the manifest."""
-    labels = {
-        "scalar_histories": "Scalar histories",
-        "statistics_convergence": "Convergence / statistics",
-        "surface_plots": "Surface distributions",
-        "field_images": "Field images",
-        "animations": "Animations",
-        "paraview": "ParaView products",
-        "technical_files": "Technical logs and manifests",
-        "errors": "Errors and missing products",
-    }
+    """List only visual products and load heavy media on explicit request."""
+    project_root = next(
+        (parent for parent in manifest_path.parents if (parent / "CFD_2D").is_dir()),
+        None,
+    )
+    manager = JobManager(project_root) if project_root is not None else None
+    jobs = (
+        [
+            manager.poll(job) for job in manager.list_jobs(limit=40)
+            if "postprocess" in str(job.stage).lower()
+            or "animation" in str(job.stage).lower()
+        ]
+        if manager is not None else []
+    )
+    active_on_render = any(job.status == "RUNNING" for job in jobs)
+
+    @st.fragment(run_every=2 if active_on_render else None)
     def render_browser() -> None:
+        if active_on_render:
+            current = [manager.poll(job) for job in jobs] if manager is not None else []
+            if any(job.status == "RUNNING" for job in current):
+                st.caption("Postproceso en curso; se incorporan los productos al quedar escritos.")
+            else:
+                st.rerun()
         manifest = _read_json(manifest_path)
         if not manifest:
             st.info(f"No postprocess manifest is available: {manifest_path}")
             return
-        raw_groups = dict(manifest.get("groups") or {})
-        if not raw_groups:
-            for row in manifest.get("products") or []:
-                raw_groups.setdefault(
-                    str(row.get("group") or "technical_files"), []
-                ).append(row)
-        raw_groups["errors"] = [
-            {"name": str(error), "generation_status": "ERROR"}
-            for error in manifest.get("errors") or []
-        ]
-        available_groups = [
-            group for group in labels if raw_groups.get(group)
-        ] or ["technical_files"]
-        selected_group = st.selectbox(
-            "Product group",
-            available_groups,
-            format_func=lambda value: labels[value],
-            key=f"postprocess-browser-group-{key_scope}",
-        )
-        rows = list(raw_groups.get(selected_group) or [])
+        rows = list(manifest.get("products") or [])
+        if not rows:
+            rows = [
+                row
+                for grouped in (manifest.get("groups") or {}).values()
+                for row in grouped
+            ]
         def product_path(row: dict[str, Any]) -> Path:
             value = Path(str(row.get("path") or ""))
             if value.is_absolute() or int(manifest.get("schema_version") or 0) < 3:
                 return value
             return (manifest_path.parent / value).resolve()
+        visual_rows = [
+            row for row in rows
+            if product_path(row).suffix.lower()
+            in {".png", ".jpg", ".jpeg", ".gif", ".mp4", ".webm"}
+            and "courant_hotspots" not in product_path(row).name.lower()
+            and not (
+                key_scope.lower().startswith("urans-")
+                and "RANS" in product_path(row).parts
+            )
+            and not (
+                key_scope.lower().startswith("rans-")
+                and "URANS" in product_path(row).parts
+            )
+        ]
+        if not visual_rows:
+            st.info("Todavía no hay imágenes o animaciones disponibles.")
+            return
         st.dataframe(
             [
                 {
                     "product": row.get("name"),
+                    "type": (
+                        "animation"
+                        if product_path(row).suffix.lower() in {".gif", ".mp4", ".webm"}
+                        else "image"
+                    ),
                     "status": row.get("generation_status", "AVAILABLE"),
                     "path": row.get("path"),
                     "bytes": row.get("bytes"),
-                    "modified": row.get("modified_at_epoch_s"),
                 }
-                for row in rows
+                for row in visual_rows
             ],
             hide_index=True,
             width="stretch",
         )
         controls = st.columns(2)
-        if controls[0].button(
-            "Open product folder",
-            key=f"postprocess-browser-open-{key_scope}-{selected_group}",
-        ):
-            try:
-                open_local_folder(manifest_path.parent)
-            except Exception as exc:
-                st.error(str(exc))
-        command = (manifest.get("regeneration_commands") or {}).get(
-            selected_group
+        show_images = controls[0].toggle(
+            "Cargar y mostrar todas las imágenes",
+            value=False,
+            key=f"postprocess-browser-images-{key_scope}",
         )
-        if controls[1].button(
-            "Regenerate selected group",
-            disabled=not command,
-            key=f"postprocess-browser-regenerate-{key_scope}-{selected_group}",
-            help=(
-                "Enabled only when the backend recorded an auditable command "
-                "for this product group in postprocess_manifest.json."
-            ),
-        ):
-            start_job(
-                f"postprocess_regenerate_{key_scope}_{selected_group}",
-                [str(value) for value in command],
-            )
+        play_animations = controls[1].toggle(
+            "Cargar y mostrar las animaciones",
+            value=False,
+            key=f"postprocess-browser-animations-{key_scope}",
+            help="Al desactivarlo se retiran los reproductores y se detiene la reproducción.",
+        )
         image_rows = [
             row
-            for row in rows
+            for row in visual_rows
             if product_path(row).suffix.lower()
             in {".png", ".jpg", ".jpeg"}
             and "velocity_frames" not in product_path(row).parts
             and "pressure_frames" not in product_path(row).parts
             and "courant_hotspots" not in product_path(row).name.lower()
         ]
-        if image_rows:
+        if show_images and image_rows:
             columns = st.columns(2)
             for index, row in enumerate(image_rows):
                 path = product_path(row)
@@ -306,24 +313,17 @@ def _postprocess_product_browser(
                         width="stretch",
                     )
         animation_rows = [
-            row for row in rows
+            row for row in visual_rows
             if product_path(row).suffix.lower() in {".mp4", ".webm", ".gif"}
         ]
-        if animation_rows:
-            play = st.toggle(
-                "Reproducir animaciones",
-                value=False,
-                key=f"postprocess-browser-play-{key_scope}-{selected_group}",
-                help="Al desactivarlo, el reproductor se retira y la reproducción se detiene.",
-            )
-            if play:
-                for row in animation_rows:
-                    path = product_path(row)
-                    if path.is_file():
-                        if path.suffix.lower() == ".gif":
-                            st.image(str(path), caption=path.name, width="stretch")
-                        else:
-                            st.video(str(path), autoplay=True, loop=True)
+        if play_animations:
+            for row in animation_rows:
+                path = product_path(row)
+                if path.is_file():
+                    if path.suffix.lower() == ".gif":
+                        st.image(str(path), caption=path.name, width="stretch")
+                    else:
+                        st.video(str(path), autoplay=True, loop=True)
     if inline:
         render_browser()
     else:
@@ -704,136 +704,6 @@ def _save_strategy(
         st.error(str(exc))
 
 
-def _postprocess_scale_controls(
-    root: Path,
-    config: dict[str, Any],
-    *,
-    key_scope: str,
-) -> dict[str, Any]:
-    settings = dict(config.get("postprocess") or {})
-    settings.setdefault("static_scale_mode", "exact")
-    settings.setdefault("animation_scale_mode", "global_exact")
-    settings.setdefault("robust_percentiles", [1.0, 99.0])
-    settings.setdefault(
-        "manual_scales",
-        {"Cp": [-3.0, 1.5], "U": [0.0, 1.5]},
-    )
-    st.markdown("#### Escalas de campo")
-    st.caption(
-        "La escala exacta usa los extremos finitos reales. La robusta evita "
-        "que unos pocos outliers saturen el mapa; la manual conserva un rango "
-        "fijo. Las animaciones usan una unica escala global."
-    )
-    labels = {
-        "Exact min/max": "exact",
-        "Robust 1-99 percentile": "robust",
-        "Manual": "manual",
-    }
-    inverse = {value: label for label, value in labels.items()}
-    columns = st.columns(2)
-    static_mode = str(settings.get("static_scale_mode") or "exact")
-    static_label = columns[0].selectbox(
-        "Imagen estatica",
-        list(labels),
-        index=list(labels).index(inverse.get(static_mode, "Exact min/max")),
-        key=f"validation-scale-static-{key_scope}",
-    )
-    animation_mode = str(
-        settings.get("animation_scale_mode") or "global_exact"
-    ).removeprefix("global_")
-    animation_label = columns[1].selectbox(
-        "Animacion (global)",
-        list(labels),
-        index=list(labels).index(
-            inverse.get(animation_mode, "Exact min/max")
-        ),
-        key=f"validation-scale-animation-{key_scope}",
-    )
-    settings["static_scale_mode"] = labels[static_label]
-    settings["animation_scale_mode"] = (
-        f"global_{labels[animation_label]}"
-    )
-    percentile_columns = st.columns(2)
-    percentiles = list(settings.get("robust_percentiles") or [1.0, 99.0])
-    low = percentile_columns[0].number_input(
-        "Percentil inferior",
-        min_value=0.0,
-        max_value=99.0,
-        value=float(percentiles[0]),
-        key=f"validation-scale-low-{key_scope}",
-    )
-    high = percentile_columns[1].number_input(
-        "Percentil superior",
-        min_value=1.0,
-        max_value=100.0,
-        value=float(percentiles[1]),
-        key=f"validation-scale-high-{key_scope}",
-    )
-    if low >= high:
-        st.error("El percentil inferior debe ser menor que el superior.")
-    else:
-        settings["robust_percentiles"] = [float(low), float(high)]
-    manual = dict(settings.get("manual_scales") or {})
-    manual_columns = st.columns(4)
-    cp_bounds = list(manual.get("Cp") or [-3.0, 1.5])
-    u_bounds = list(manual.get("U") or [0.0, 1.5])
-    manual["Cp"] = [
-        manual_columns[0].number_input(
-            "Cp min manual",
-            value=float(cp_bounds[0]),
-            key=f"validation-scale-cp-min-{key_scope}",
-        ),
-        manual_columns[1].number_input(
-            "Cp max manual",
-            value=float(cp_bounds[1]),
-            key=f"validation-scale-cp-max-{key_scope}",
-        ),
-    ]
-    manual["U"] = [
-        manual_columns[2].number_input(
-            "|U| min manual",
-            value=float(u_bounds[0]),
-            key=f"validation-scale-u-min-{key_scope}",
-        ),
-        manual_columns[3].number_input(
-            "|U| max manual",
-            value=float(u_bounds[1]),
-            key=f"validation-scale-u-max-{key_scope}",
-        ),
-    ]
-    settings["manual_scales"] = manual
-    config["postprocess"] = settings
-    if st.button(
-        "Guardar escalas de postproceso",
-        key=f"validation-save-scales-{key_scope}",
-    ):
-        _save_strategy(root, config)
-    return settings
-
-
-def _paraview_scale_args(
-    settings: dict[str, Any],
-    *,
-    animation: bool,
-) -> list[str]:
-    key = "animation_scale_mode" if animation else "static_scale_mode"
-    mode = str(settings.get(key) or "exact").removeprefix("global_")
-    arguments = ["--field-scale-mode", mode]
-    percentiles = list(settings.get("robust_percentiles") or [1.0, 99.0])
-    arguments.extend(
-        ["--robust-percentiles", str(percentiles[0]), str(percentiles[1])]
-    )
-    manual = dict(settings.get("manual_scales") or {})
-    for flag, name in (
-        ("--manual-cp-range", "Cp"),
-        ("--manual-u-range", "U"),
-    ):
-        bounds = list(manual.get(name) or [])
-        if len(bounds) == 2:
-            arguments.extend([flag, str(bounds[0]), str(bounds[1])])
-    return arguments
-
-
 def _render_rans_execution_menu(
     root: Path,
     start_job: StartJob,
@@ -1175,24 +1045,6 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
             st.caption(
                 "No hay una ejecución activa. Los monitores de revisión son "
                 "instantáneas estáticas y no lanzan refresco automático."
-            )
-
-    postprocess_scale_settings = dict(config.get("postprocess") or {})
-    if (
-        top_section == "RANS"
-        and subsection == "Revisión y postproceso"
-    ) or (
-        top_section == "URANS"
-        and subsection == "Revisión y postproceso"
-    ):
-        with st.expander(
-            "Escalas de campo avanzadas (desactivadas por defecto)",
-            expanded=False,
-        ):
-            postprocess_scale_settings = _postprocess_scale_controls(
-                root,
-                config,
-                key_scope=top_section.lower(),
             )
 
     if section == "Mallas y condiciones":
@@ -2777,22 +2629,48 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
                 "temporal y los estudios PIMPLE no aparecen en esta revisión."
             )
         else:
-            labels = {
-                str(row["case_id"]): (
-                    f"{str(row.get('topology') or '?').title()} · "
-                    f"{str(row.get('mesh_level') or '?').title()} · "
-                    f"dt={float(row.get('deltaT_s') or row.get('dt_s') or 0):.6g} s · "
-                    f"{row.get('status')}"
-                )
-                for row in canonical_rows
-            }
-            case_id = st.selectbox(
-                "Caso URANS canónico para revisar",
-                list(labels),
-                format_func=lambda value: labels[value],
-                key="validation-canonical-urans-review-case",
+            topology_options = [value for value in ("closed", "open") if any(str(row.get("topology")) == value for row in canonical_rows)]
+            topology = st.segmented_control(
+                "Topología",
+                topology_options,
+                format_func=lambda value: "Perfil cerrado" if value == "closed" else "Perfil abierto",
+                default=topology_options[0],
+                key="validation-canonical-urans-topology",
             )
-            row = next(item for item in canonical_rows if item["case_id"] == case_id)
+            topology_rows = [row for row in canonical_rows if str(row.get("topology")) == topology]
+            levels = [value for value in MESH_LEVELS if any(str(row.get("mesh_level")) == value for row in topology_rows)]
+            mesh_level = st.segmented_control(
+                "Nivel de malla", levels, format_func=str.title,
+                default=levels[0],
+                key="validation-canonical-urans-level",
+            ) if levels else None
+            level_rows = [row for row in topology_rows if str(row.get("mesh_level")) == mesh_level]
+            angles = sorted({float(row.get("alpha_deg") or 0.0) for row in level_rows})
+            alpha_deg = st.segmented_control(
+                "Ángulo de ataque", angles,
+                format_func=lambda value: f"{value:g}°",
+                default=angles[0],
+                key="validation-canonical-urans-angle",
+            ) if angles else None
+            angle_rows = [
+                row for row in level_rows
+                if alpha_deg is not None and abs(float(row.get("alpha_deg") or 0.0) - float(alpha_deg)) < 1.0e-10
+            ]
+            dt_options = [str(row["case_id"]) for row in angle_rows]
+            case_id = st.selectbox(
+                "Paso temporal disponible",
+                dt_options,
+                format_func=lambda value: next(
+                    f"dt={float(item.get('deltaT_s') or item.get('dt_s') or 0):.8g} s · {item.get('status')}"
+                    for item in angle_rows if str(item["case_id"]) == value
+                ),
+                key="validation-canonical-urans-review-case",
+                placeholder="No hay ejecuciones para esta combinación",
+            ) if dt_options else None
+            if case_id is None:
+                st.info("No hay pasos temporales ejecutados para esta combinación.")
+                return
+            row = next(item for item in angle_rows if str(item["case_id"]) == case_id)
             case_path = Path(str(row["case_path"]))
             run_root = Path(str(row["run_root"]))
             mesh_id = str(row.get("mesh_id") or "")
@@ -2883,6 +2761,7 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
                         "--variant", mesh_id,
                         "--alpha", str(config.get("study_angle_deg", 8.0)),
                         "--simulation-mode", "URANS",
+                        "--no-include-rans-stage",
                         "--run-openfoam-postprocess",
                         "--automatic-paraview-products",
                         "--no-include-paraview-animations",
@@ -2890,10 +2769,6 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
                             ["--paraview-time-range-s", str(float(interval_start_s)), str(float(interval_end_s))]
                             if interval_enabled and float(interval_start_s) <= float(interval_end_s)
                             else []
-                        ),
-                        *_paraview_scale_args(
-                            postprocess_scale_settings,
-                            animation=True,
                         ),
                     ],
                 )
@@ -2913,6 +2788,7 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
                         "--variant", mesh_id,
                         "--alpha", str(config.get("study_angle_deg", 8.0)),
                         "--simulation-mode", "URANS",
+                        "--no-include-rans-stage",
                         "--automatic-paraview-products",
                         "--paraview-animations-only",
                         *(
@@ -2920,21 +2796,41 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
                             if interval_enabled and float(interval_start_s) <= float(interval_end_s)
                             else []
                         ),
-                        *_paraview_scale_args(
-                            postprocess_scale_settings,
-                            animation=True,
-                        ),
                     ],
                 )
-            with st.expander("Evidencia canónica y gráficas almacenadas"):
+            with st.expander("Gráficas y métricas de convergencia", expanded=True):
                 _json_panel(run_root / "case_manifest.json", "Caso", inline=True)
                 _json_panel(
                     run_root / "execution_summary.json",
                     "Ejecución",
                     inline=True,
                 )
-                _json_panel(run_root / "review.json", "Revisión", inline=True)
                 _plot_inventory(run_root / "plots")
+                review = _read_json(run_root / "review.json")
+                if review:
+                    review_cols = st.columns(4)
+                    review_cols[0].metric("Estado", str(review.get("status") or "-"))
+                    review_cols[1].metric("Fase analizada", str((review.get("sampling_window") or {}).get("stage") or "-"))
+                    review_cols[2].metric("Continuidad", str((review.get("continuity") or {}).get("status") or "-"))
+                    dt_data = review.get("time_step") or {}
+                    review_cols[3].metric("dt [s]", str(dt_data.get("minimum_s") or "-"))
+                    signal_rows = []
+                    for signal_name, values in (review.get("signals") or {}).items():
+                        summary = values.get("summary") or {}
+                        stationarity = values.get("stationarity") or {}
+                        spectrum = values.get("spectrum") or {}
+                        signal_rows.append({
+                            "Variable": signal_name,
+                            "Media": summary.get("mean"),
+                            "RMS": summary.get("rms"),
+                            "Deriva media [%]": stationarity.get("mean_variation_percent"),
+                            "Estacionaria": stationarity.get("passed"),
+                            "f [Hz]": spectrum.get("dominant_frequency_hz"),
+                            "St": spectrum.get("dominant_strouhal"),
+                            "1/St": spectrum.get("dominant_wave_number"),
+                        })
+                    if signal_rows:
+                        st.dataframe(signal_rows, hide_index=True, width="stretch")
                 case_summary = _read_json(run_root / "case_summary.json")
                 if case_summary.get("status") == "COMPLETED":
                     metrics_summary = dict(case_summary.get("metrics") or {})
@@ -2953,6 +2849,10 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
                             "W=1/St": mode.get("wave_number"),
                         })
                     st.dataframe(summary_rows, hide_index=True, width="stretch")
+                with st.expander("Detalles técnicos", expanded=False):
+                    _json_panel(run_root / "review.json", "Revisión URANS", inline=True)
+                    _json_panel(run_root / "stage_plan.json", "Plan de fases", inline=True)
+                    _json_panel(run_root / "stage_journal.json", "Transiciones registradas", inline=True)
             _postprocess_product_browser(
                 run_root / "postprocess/postprocess_manifest.json",
                 start_job=start_job,
@@ -3148,7 +3048,15 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
             "Welch usa ventana Hann, detrend constante y 50% de solape "
             "solo sobre el muestreo uniforme. Startup y settling se excluyen."
         )
-        _plot_inventory(active / "postprocess/frequency")
+        closed_frequency, open_frequency, combined_frequency = st.tabs([
+            "Perfil cerrado", "Perfil abierto", "Comparación abierta/cerrada",
+        ])
+        with closed_frequency:
+            _plot_inventory(active / "postprocess/frequency/closed")
+        with open_frequency:
+            _plot_inventory(active / "postprocess/frequency/open")
+        with combined_frequency:
+            _plot_inventory(active / "postprocess/frequency/combined")
         st.info(
             "Una frecuencia se acepta con estacionariedad y al menos 10 ciclos "
             "de la frecuencia minima relevante; se prefieren 20."
