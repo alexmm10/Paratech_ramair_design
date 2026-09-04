@@ -17,6 +17,32 @@ import numpy as np
 SEGMENTS = ("te", "upper", "leading_or_inlet", "lower")
 
 
+def feasible_automatic_divisions(
+    lengths: dict[str, float],
+    divisions: dict[str, int],
+) -> tuple[dict[str, int], list[str]]:
+    """Increase curved-segment divisions only when exact junction matching needs it."""
+    selected = {name: int(divisions[name]) for name in SEGMENTS}
+    requested = dict(selected)
+    body_mean_limit = min(
+        float(lengths["upper"]) / selected["upper"],
+        float(lengths["lower"]) / selected["lower"],
+    )
+    warnings: list[str] = []
+    for name in ("te", "leading_or_inlet"):
+        minimum = max(
+            2,
+            int(math.floor(float(lengths[name]) / (0.98 * body_mean_limit))) + 1,
+        )
+        if selected[name] < minimum:
+            selected[name] = minimum
+            warnings.append(
+                f"Automatic matching increased {name} divisions from "
+                f"{requested[name]} to {minimum} after segment extension."
+            )
+    return selected, warnings
+
+
 def _bump_density(coefficient: float, length: float, divisions: int, t: np.ndarray) -> np.ndarray:
     coefficient = float(coefficient)
     length = float(length)
@@ -67,6 +93,264 @@ def bump_cell_sizes(
     if np.any(sizes <= 0.0) or not np.all(np.isfinite(sizes)):
         raise ValueError("The Bump distribution generated invalid physical cell sizes")
     return sizes
+
+
+def partition_composite_bump(
+    section_lengths: dict[str, float],
+    divisions: int,
+    coefficient: float,
+    *,
+    minimum_divisions_per_section: int = 4,
+) -> dict[str, Any]:
+    """Partition one conceptual Bump distribution over connected real curves.
+
+    The returned sections retain the cell sizes of the conceptual curve at each
+    split.  Monotone pieces can therefore be represented by a local Gmsh
+    Progression without replacing the physical geometry by an overlapping
+    auxiliary spline.
+    """
+    names = list(section_lengths)
+    lengths = np.asarray([float(section_lengths[name]) for name in names], dtype=float)
+    if len(names) < 2 or np.any(lengths <= 0.0):
+        raise ValueError("A composite Bump requires at least two positive sections")
+    minimum = max(2, int(minimum_divisions_per_section))
+    total_divisions = int(divisions)
+    if total_divisions < minimum * len(names):
+        raise ValueError("Too few divisions for the composite Bump sections")
+
+    sizes = bump_cell_sizes(float(coefficient), float(np.sum(lengths)), total_divisions)
+    positions = np.concatenate(([0.0], np.cumsum(sizes)))
+    targets = np.cumsum(lengths)[:-1]
+    cuts: list[int] = []
+    previous = 0
+    for index, target in enumerate(targets):
+        remaining_sections = len(names) - index - 1
+        lower = previous + minimum
+        upper = total_divisions - minimum * remaining_sections
+        selected = int(np.argmin(np.abs(positions[lower : upper + 1] - target))) + lower
+        cuts.append(selected)
+        previous = selected
+    bounds = [0, *cuts, total_divisions]
+
+    sections: dict[str, dict[str, float | int]] = {}
+    for index, name in enumerate(names):
+        start, end = bounds[index], bounds[index + 1]
+        local_sizes = sizes[start:end]
+        count = end - start
+        first = float(local_sizes[0])
+        last = float(local_sizes[-1])
+        progression = (
+            float((last / first) ** (1.0 / (count - 1))) if count > 1 else 1.0
+        )
+        sections[name] = {
+            "divisions": count,
+            "target_length_m": float(lengths[index]),
+            "represented_length_m": float(np.sum(local_sizes)),
+            "first_size_m": first,
+            "last_size_m": last,
+            "progression_coefficient": progression,
+        }
+    return {
+        "total_length_m": float(np.sum(lengths)),
+        "divisions": total_divisions,
+        "bump_coefficient": float(coefficient),
+        "sections": sections,
+        "split_position_errors_m": [
+            float(positions[cut] - target) for cut, target in zip(cuts, targets)
+        ],
+    }
+
+
+def _geometric_sizes(length: float, divisions: int, ratio: float) -> np.ndarray:
+    count = int(divisions)
+    value = float(ratio)
+    if count < 2 or value <= 0.0:
+        raise ValueError("A progression requires at least two divisions and ratio > 0")
+    if math.isclose(value, 1.0, rel_tol=0.0, abs_tol=1.0e-12):
+        return np.full(count, float(length) / count, dtype=float)
+    exponents = np.arange(count, dtype=float) * math.log(value)
+    exponents -= float(np.max(exponents))
+    weights = np.exp(exponents)
+    return float(length) * weights / float(np.sum(weights))
+
+
+def solve_progression_for_fixed_endpoint(
+    length: float,
+    divisions: int,
+    endpoint_size: float,
+    *,
+    endpoint: str,
+) -> float:
+    """Solve a Gmsh per-cell Progression ratio for one fixed endpoint size."""
+    if endpoint not in {"first", "last"}:
+        raise ValueError("endpoint must be 'first' or 'last'")
+    target = float(endpoint_size)
+    if not 0.0 < target < float(length):
+        raise ValueError("Progression endpoint size must lie between zero and its length")
+    low_log, high_log = -12.0, 12.0
+    for _ in range(90):
+        middle_log = 0.5 * (low_log + high_log)
+        ratio = math.exp(middle_log)
+        sizes = _geometric_sizes(length, divisions, ratio)
+        value = float(sizes[0] if endpoint == "first" else sizes[-1])
+        increasing = endpoint == "last"
+        if (value < target) == increasing:
+            low_log = middle_log
+        else:
+            high_log = middle_log
+    return math.exp(0.5 * (low_log + high_log))
+
+
+def match_extended_inlet_distribution(
+    section_lengths: dict[str, float],
+    divisions: int,
+    junction_size: float,
+    *,
+    minimum_divisions_per_section: int = 4,
+) -> dict[str, Any]:
+    """Match wall extensions and the virtual inlet without changing the wall."""
+    required = {"upper_wall_extension", "virtual_inlet", "lower_wall_extension"}
+    if set(section_lengths) != required:
+        raise ValueError(f"Extended inlet sections must be exactly {sorted(required)}")
+    total = int(divisions)
+    minimum = max(3, int(minimum_divisions_per_section))
+    lengths = {name: float(section_lengths[name]) for name in required}
+    if total < 3 * minimum or any(value <= 0.0 for value in lengths.values()):
+        raise ValueError("Invalid extended inlet lengths or division count")
+
+    upper_guess = lengths["upper_wall_extension"] / float(junction_size)
+    lower_guess = lengths["lower_wall_extension"] / float(junction_size)
+    upper_range = range(
+        minimum,
+        min(total - 2 * minimum, max(minimum + 1, int(math.ceil(2.0 * upper_guess)) + 12)),
+    )
+    lower_limit = min(
+        total - 2 * minimum,
+        max(minimum + 1, int(math.ceil(2.0 * lower_guess)) + 12),
+    )
+    upper_candidates: list[tuple[int, float, np.ndarray]] = []
+    for upper_count in upper_range:
+        upper_ratio = solve_progression_for_fixed_endpoint(
+            lengths["upper_wall_extension"], upper_count, junction_size, endpoint="last"
+        )
+        upper_sizes = _geometric_sizes(
+            lengths["upper_wall_extension"], upper_count, upper_ratio
+        )
+        upper_candidates.append((upper_count, upper_ratio, upper_sizes))
+    lower_candidates: list[tuple[int, float, np.ndarray]] = []
+    for lower_count in range(minimum, lower_limit):
+        lower_ratio = solve_progression_for_fixed_endpoint(
+            lengths["lower_wall_extension"], lower_count, junction_size, endpoint="first"
+        )
+        lower_sizes = _geometric_sizes(
+            lengths["lower_wall_extension"], lower_count, lower_ratio
+        )
+        lower_candidates.append((lower_count, lower_ratio, lower_sizes))
+
+    # Rank inexpensive geometric candidates first.  Solving the virtual-inlet
+    # Bump by bisection for every Cartesian pair was needlessly quadratic and
+    # made a UI diagnostic take tens of seconds.  The shortlist retains the
+    # best lip match, balanced division count and smoothest extension laws.
+    ranked: list[tuple[float, tuple[int, float, np.ndarray], tuple[int, float, np.ndarray]]] = []
+    for upper in upper_candidates:
+        upper_count, upper_ratio, upper_sizes = upper
+        for lower in lower_candidates:
+            lower_count, lower_ratio, lower_sizes = lower
+            inlet_count = total - upper_count - lower_count
+            if inlet_count < minimum:
+                continue
+            lip_target = math.sqrt(float(upper_sizes[0] * lower_sizes[-1]))
+            inlet_mean = lengths["virtual_inlet"] / inlet_count
+            rank = (
+                abs(math.log(float(upper_sizes[0] / lower_sizes[-1])))
+                + 0.08 * abs(math.log(lip_target / inlet_mean))
+                + 0.02 * max(
+                    upper_ratio, 1.0 / upper_ratio,
+                    lower_ratio, 1.0 / lower_ratio,
+                )
+            )
+            ranked.append((rank, upper, lower))
+
+    best: tuple[float, dict[str, Any]] | None = None
+    for _, upper, lower in sorted(ranked, key=lambda item: item[0])[:192]:
+        upper_count, upper_ratio, upper_sizes = upper
+        lower_count, lower_ratio, lower_sizes = lower
+        inlet_count = total - upper_count - lower_count
+        lip_target = math.sqrt(float(upper_sizes[0] * lower_sizes[-1]))
+        inlet_mean = lengths["virtual_inlet"] / inlet_count
+        try:
+            if math.isclose(lip_target, inlet_mean, rel_tol=1.0e-7):
+                inlet_bump = 1.0
+            else:
+                branch = "greater" if lip_target > inlet_mean else "less"
+                inlet_bump = solve_bump_for_endpoint(
+                    lengths["virtual_inlet"], inlet_count, lip_target, branch=branch
+                )
+        except ValueError:
+            continue
+        inlet_sizes = bump_cell_sizes(
+            inlet_bump, lengths["virtual_inlet"], inlet_count
+        )
+        interface_ratios = {
+                "upper_wall_to_virtual_inlet": max(
+                    float(upper_sizes[0] / inlet_sizes[0]),
+                    float(inlet_sizes[0] / upper_sizes[0]),
+                ),
+                "virtual_inlet_to_lower_wall": max(
+                    float(inlet_sizes[-1] / lower_sizes[-1]),
+                    float(lower_sizes[-1] / inlet_sizes[-1]),
+                ),
+        }
+        local_growth = max(
+                upper_ratio,
+                1.0 / upper_ratio,
+                lower_ratio,
+                1.0 / lower_ratio,
+                _distribution_metrics(inlet_sizes)["maximum_growth_ratio"],
+        )
+        mismatch = max(interface_ratios.values())
+        objective = local_growth + 8.0 * (mismatch - 1.0)
+        report = {
+                "divisions": total,
+                "junction_size_m": float(junction_size),
+                "lip_target_size_m": lip_target,
+                "sections": {
+                    "upper_wall_extension": {
+                        "divisions": upper_count,
+                        "length_m": lengths["upper_wall_extension"],
+                        "progression_coefficient": upper_ratio,
+                        "lip_size_m": float(upper_sizes[0]),
+                        "junction_size_m": float(upper_sizes[-1]),
+                        "minimum_size_m": float(np.min(upper_sizes)),
+                        "maximum_size_m": float(np.max(upper_sizes)),
+                    },
+                    "virtual_inlet": {
+                        "divisions": inlet_count,
+                        "length_m": lengths["virtual_inlet"],
+                        "bump_coefficient": inlet_bump,
+                        "upper_lip_size_m": float(inlet_sizes[0]),
+                        "lower_lip_size_m": float(inlet_sizes[-1]),
+                        "minimum_size_m": float(np.min(inlet_sizes)),
+                        "maximum_size_m": float(np.max(inlet_sizes)),
+                    },
+                    "lower_wall_extension": {
+                        "divisions": lower_count,
+                        "length_m": lengths["lower_wall_extension"],
+                        "progression_coefficient": lower_ratio,
+                        "junction_size_m": float(lower_sizes[0]),
+                        "lip_size_m": float(lower_sizes[-1]),
+                        "minimum_size_m": float(np.min(lower_sizes)),
+                        "maximum_size_m": float(np.max(lower_sizes)),
+                    },
+                },
+                "interface_size_ratios": interface_ratios,
+                "maximum_local_growth_ratio": local_growth,
+        }
+        if best is None or objective < best[0]:
+            best = (objective, report)
+    if best is None:
+        raise ValueError("No feasible extended inlet transfinite distribution was found")
+    return best[1]
 
 
 def _endpoint_size(coefficient: float, length: float, divisions: int) -> float:
@@ -213,4 +497,3 @@ def match_four_segment_bumps(
         "warnings": warnings,
         "blocks_generation": False,
     }
-

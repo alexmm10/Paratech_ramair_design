@@ -412,7 +412,7 @@ def render_open_experimental_mesh(
                 boundary["te_segment_early_start_enabled"] = st.toggle(
                     "Adelantar el inicio del segmento TE",
                     value=bool(boundary.get("te_segment_early_start_enabled", False)),
-                    disabled=(not automatic or tangential_method == "bump_split_progression"),
+                    disabled=not automatic,
                     help=(
                         "Solo afecta al matching automático: incorpora al segmento TE la parte de "
                         "intradós y extradós situada por detrás del x/c indicado. La geometría no "
@@ -420,7 +420,6 @@ def render_open_experimental_mesh(
                     ),
                 )
                 if tangential_method == "bump_split_progression":
-                    boundary["te_segment_early_start_enabled"] = False
                     boundary["split_progression_midpoint_x_chord"] = st.number_input(
                         "Punto de división de cuerpos [x/c]", 0.20, 0.80,
                         float(boundary.get("split_progression_midpoint_x_chord", 0.50)),
@@ -436,6 +435,21 @@ def render_open_experimental_mesh(
                             "0.98 incluye en el segmento TE todo el contorno con x/c >= 0.98. "
                             "Reducirlo inicia antes la concentración progresiva."
                         ),
+                    )
+                boundary["leading_segment_extension_enabled"] = st.toggle(
+                    "Extender el segmento LE/inlet sobre la pared",
+                    value=bool(boundary.get("leading_segment_extension_enabled", False)),
+                    help=(
+                        "Reserva una zona de transición suave desde ambos labios hacia la pared. "
+                        "Es independiente del adelanto del TE y queda registrada en la revisión."
+                    ),
+                )
+                if boundary["leading_segment_extension_enabled"]:
+                    boundary["leading_segment_end_x_over_c"] = st.number_input(
+                        "Fin del segmento LE/inlet [x/c]", 0.005, 0.30,
+                        float(boundary.get("leading_segment_end_x_over_c", 0.05)),
+                        format="%.4f",
+                        help="Extensión longitudinal reservada para suavizar el matching junto a los labios.",
                     )
                 divisions = dict(boundary.get("segment_divisions") or {})
                 div_cols = st.columns(4)
@@ -756,15 +770,16 @@ def render_open_experimental_mesh(
                     max_value=200.0, value=float(external.get("domain_radius_chord", 50.0)),
                     help="Radio del dominio circular medido desde el centro geométrico, en cuerdas.",
                 )
-                if external["automatic_extend_enabled"]:
-                    cols[1].caption("El primer tamaño se hereda por segmento mediante Extend.")
-                else:
-                    external["interface_size_mode"] = cols[1].selectbox(
-                        "Primer triángulo tras BL",
-                        ["tangential_match", "fixed"],
-                        index=0 if external.get("interface_size_mode", "tangential_match") == "tangential_match" else 1,
-                        format_func=lambda value: "Automático desde discretización tangencial" if value == "tangential_match" else "Tamaño fijo",
-                    )
+                external["interface_size_mode"] = cols[1].selectbox(
+                    "Primer triángulo tras BL",
+                    ["tangential_match", "fixed"],
+                    index=0 if external.get("interface_size_mode", "tangential_match") == "tangential_match" else 1,
+                    format_func=lambda value: "Automático desde discretización tangencial" if value == "tangential_match" else "Tamaño fijo",
+                    help=(
+                        "Se aplica también con Extend. El modo automático parte del espaciado "
+                        "tangencial de las curvas; el fijo permite imponer una transición aún más fina."
+                    ),
+                )
                 external["farfield_size_chord"] = cols[2].number_input(
                     "Tamaño en farfield [c]", min_value=0.01, max_value=200.0,
                     value=float(external.get("farfield_size_chord", 4.0)), format="%.3f",
@@ -824,9 +839,9 @@ def render_open_experimental_mesh(
                         )
                 interface_cols = st.columns(2)
                 external["interface_size_chord"] = interface_cols[0].number_input(
-                    "Límite del primer triángulo [c]", min_value=0.0000001, max_value=2.0,
-                    value=float(external.get("interface_size_chord", 0.00045)), format="%.6f",
-                    disabled=external["automatic_extend_enabled"], help=(
+                    "Límite del primer triángulo [c]", min_value=0.00000001, max_value=5.0,
+                    value=float(external.get("interface_size_chord", 0.00045)), format="%.8f",
+                    help=(
                         "Tamaño objetivo de la primera fila triangular después de la BL. Se refiere "
                         "al ancho tangencial de la celda, no a la altura y1; en modo automático es "
                         "un valor informativo y solo se aplica en modo Tamaño fijo. En modo automático "
@@ -834,14 +849,24 @@ def render_open_experimental_mesh(
                     ),
                 )
                 external["interface_tangential_factor"] = interface_cols[1].number_input(
-                    "Factor sobre espaciado tangencial", min_value=0.02, max_value=10.0,
-                    value=float(external.get("interface_tangential_factor", 1.25)), format="%.2f",
-                    disabled=external["automatic_extend_enabled"], help=(
-                        "Multiplica el menor espaciado medio de inlet y pared para casar el ancho "
-                        "de la primera celda exterior con la BL. 1.0 hace match directo; valores "
-                        "menores refinan esa primera transición y valores mayores la relajan."
+                    "Factor sobre espaciado tangencial", min_value=0.001, max_value=20.0,
+                    value=float(external.get("interface_tangential_factor", 1.25)), format="%.3f",
+                    help=(
+                        "Multiplica el menor espaciado tangencial real calculado por cada tramo Bump "
+                        "o Progression. El campo se aplica localmente: TE, cuerpos, extensiones e inlet "
+                        "pueden tener tamaños distintos. 1.0 casa anchos. La interfaz es conformal: "
+                        "valores menores pueden reducir la altura de los triángulos siguientes, pero "
+                        "no subdividen el borde compartido con la última celda prismática."
                     ),
                 )
+                if external["interface_size_mode"] == "tangential_match" and float(
+                    external["interface_tangential_factor"]
+                ) < 1.0:
+                    st.caption(
+                        "Factor < 1: Gmsh no puede partir el borde conformal de la última capa BL. "
+                        "La reducción solo actúa sobre el campo radial posterior; para reducir el "
+                        "ancho de interfaz hay que aumentar las divisiones tangenciales del tramo."
+                    )
                 st.caption(
                     "Gmsh no ofrece nCellsBetweenLevels para Delaunay. Se usa una ley continua "
                     "h(d)=h0+g·d: al avanzar una celda local, g=0.12 limita aproximadamente el "

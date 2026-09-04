@@ -26,7 +26,10 @@ from ramair_2d_run_lease import (  # noqa: E402
     acquire_run_lease,
 )
 from ramair_2d_validation_live_monitor import _parse_increment  # noqa: E402
-from ramair_2d_rans_checkpoint_batch import mesh_angle_id  # noqa: E402
+from ramair_2d_rans_checkpoint_batch import (  # noqa: E402
+    _restart_freestream_alpha_deg,
+    mesh_angle_id,
+)
 
 
 def test_rans_checkpoint_identity_preserves_primary_and_separates_secondary_angle() -> None:
@@ -42,6 +45,21 @@ def test_rans_checkpoint_identity_preserves_primary_and_separates_secondary_angl
     assert mesh_angle_id(study, "closed_medium", 8.0) == "closed_medium__alpha_p8"
     assert mesh_angle_id(study, "open_medium", 8.0) == "open_medium"
     assert mesh_angle_id(study, "open_medium", 16.0) == "open_medium__alpha_p16"
+
+
+def test_restart_freestream_angle_is_read_from_compressed_boundary_field(
+    tmp_path: Path,
+) -> None:
+    import gzip
+
+    zero = tmp_path / "20000"
+    zero.mkdir()
+    with gzip.open(zero / "U.gz", "wt", encoding="utf-8") as stream:
+        stream.write(
+            "boundaryField\n{\nfarfield\n{\n"
+            "freestreamValue uniform (49.0671 14.0672 0);\n}\n}\n"
+        )
+    assert _restart_freestream_alpha_deg(zero) == pytest.approx(16.0, abs=1.0e-2)
 
 
 def test_absolute_simple_targets_never_gate_at_7840() -> None:

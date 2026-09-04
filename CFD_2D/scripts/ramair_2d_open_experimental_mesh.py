@@ -33,7 +33,12 @@ from boundary_layer_estimates import (
     turbulent_flat_plate_delta99,
 )
 from ramair_2d_mesh_science import first_cell_height_audit
-from ramair_2d_bump_matching import bump_cell_sizes, match_four_segment_bumps
+from ramair_2d_bump_matching import (
+    bump_cell_sizes,
+    feasible_automatic_divisions,
+    match_extended_inlet_distribution,
+    match_four_segment_bumps,
+)
 from ramair_2d_split_progression import (
     automatic_split_progression,
     evaluate_manual_split_progression,
@@ -132,6 +137,8 @@ def default_config() -> dict[str, Any]:
             "bump_maximum_size_percent_chord": 1.00,
             "te_segment_early_start_enabled": False,
             "te_segment_start_x_over_c": 0.98,
+            "leading_segment_extension_enabled": False,
+            "leading_segment_end_x_over_c": 0.05,
             "te_geometry_points": 35,
         },
         "external_volume": {
@@ -332,7 +339,9 @@ def _recover_open_profile_base_coordinates(
     upper_distance = _polyline_projection_distances(aligned_upper, base_upper)
     lower_distance = _polyline_projection_distances(aligned_lower, base_lower)
     distances = np.concatenate([upper_distance, lower_distance])
-    identity_tolerance = max(100.0 * tolerance, 2.0e-7 * chord)
+    # Geometry identity is a source-data check, not a meshing-size check.  Do
+    # not weaken it when a legacy draft uses a coarse point-cleaning tolerance.
+    identity_tolerance = max(1.0e-10, 1.0e-8 * chord)
     report = {
         "method": "inverse_retained_chord_normalization_about_TE",
         "scale_to_full_base_chord": float(scale),
@@ -625,8 +634,11 @@ def load_geometry(root: Path, config: dict[str, Any]) -> dict[str, Any]:
             "The experimental mesh requires both open and uncut profile_points.csv files: "
             f"{open_path}; {base_path}"
         )
-    open_frame = pd.read_csv(open_path)
-    base_frame = pd.read_csv(base_path)
+    # ``round_trip`` preserves every decimal written by the geometry exporter.
+    # Gmsh then receives IEEE-754 doubles; transfinite refinement samples the
+    # spline and does not require inventing extra polyline points.
+    open_frame = pd.read_csv(open_path, float_precision="round_trip")
+    base_frame = pd.read_csv(base_path, float_precision="round_trip")
     chord = float(geometry.get("chord_m", 1.0))
     tolerance = max(
         1.0e-12,
@@ -688,9 +700,16 @@ def load_geometry(root: Path, config: dict[str, Any]) -> dict[str, Any]:
         ]),
         tolerance,
     )
+    blend_length_chord = float(
+        config["boundary_layer"].get("base_inlet_blend_length_chord", 0.035)
+    )
+    if bool(config["boundary_layer"].get("leading_segment_extension_enabled", False)):
+        blend_length_chord = float(
+            config["boundary_layer"].get("leading_segment_end_x_over_c", blend_length_chord)
+        )
     inlet, inlet_join = _canonical_base_inlet(
         raw_inlet, wall, chord,
-        float(config["boundary_layer"].get("base_inlet_blend_length_chord", 0.035)),
+        blend_length_chord,
         tolerance,
         float(config["boundary_layer"].get("base_inlet_tangent_scale", 0.40)),
         bool(config["boundary_layer"].get("prefer_exact_base_inlet", True)),
@@ -743,6 +762,16 @@ def load_geometry(root: Path, config: dict[str, Any]) -> dict[str, Any]:
                     np.max(source_cap_distance)
                 ),
                 "cap_diagnostics": cap_info,
+            },
+            "coordinate_import": {
+                "csv_float_parser": "round_trip",
+                "coordinate_storage": "IEEE-754 binary64",
+                "open_source_rows": int(len(open_frame)),
+                "closed_source_rows": int(len(base_frame)),
+                "gmsh_wall_representation": (
+                    "one interpolating spline split in-place at transfinite boundaries"
+                ),
+                "artificial_wall_resampling": False,
             },
         },
         "base_projection": {
@@ -907,6 +936,58 @@ def _transfinite_node_bounds(
     return lower, upper
 
 
+def _progression_spacing_bounds(
+    length_m: float,
+    divisions: int,
+    coefficient: float,
+) -> tuple[float, float]:
+    """Return stable min/max cell widths for a Gmsh Progression curve."""
+    count = max(1, int(divisions))
+    ratio = float(coefficient)
+    if ratio <= 0.0:
+        raise ValueError("Progression coefficient must be positive")
+    if count == 1 or math.isclose(ratio, 1.0, rel_tol=0.0, abs_tol=1.0e-12):
+        size = float(length_m) / count
+        return size, size
+    exponents = np.arange(count, dtype=float) * math.log(ratio)
+    exponents -= float(np.max(exponents))
+    weights = np.exp(exponents)
+    sizes = float(length_m) * weights / float(np.sum(weights))
+    return float(np.min(sizes)), float(np.max(sizes))
+
+
+def _bump_spacing_bounds(
+    length_m: float,
+    divisions: int,
+    coefficient: float,
+) -> tuple[float, float]:
+    sizes = bump_cell_sizes(float(coefficient), float(length_m), int(divisions))
+    return float(np.min(sizes)), float(np.max(sizes))
+
+
+def _split_imported_wall_spline(
+    geo: Any,
+    point_tags: list[int],
+    section_bounds: list[tuple[int, int]],
+) -> list[int]:
+    """Split one interpolating wall spline without rebuilding its subcurves."""
+    if not section_bounds or section_bounds[0][0] != 0:
+        raise ValueError("Wall sections must start at the imported upper inlet lip")
+    if section_bounds[-1][1] != len(point_tags) - 1:
+        raise ValueError("Wall sections must finish at the imported lower inlet lip")
+    for previous, current in zip(section_bounds, section_bounds[1:]):
+        if previous[1] != current[0]:
+            raise ValueError("Wall sections must form one continuous imported contour")
+    master = geo.addSpline(point_tags)
+    split_points = [point_tags[end] for _, end in section_bounds[:-1]]
+    curves = list(geo.splitCurve(master, split_points)) if split_points else [master]
+    if len(curves) != len(section_bounds):
+        raise RuntimeError(
+            f"Gmsh returned {len(curves)} wall curves for {len(section_bounds)} sections"
+        )
+    return [int(curve) for curve in curves]
+
+
 def _add_curve_segments(
     gmsh: Any,
     point_tags: list[int],
@@ -1038,6 +1119,7 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
     wall = geometry["wall"]
     inlet = geometry["inlet"]
     chord = float(geometry["chord"])
+    tolerance = max(1.0e-14, 1.0e-12 * chord)
     cap_range = (int(geometry["upper_end_index"]), int(geometry["cap_end_index"]))
     layer = flat_plate_first_height(config)
     gmsh.initialize()
@@ -1064,12 +1146,40 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
     gmsh.option.setNumber("Mesh.RecombinationAlgorithm", 1)
     gmsh.option.setNumber("Mesh.RecombineAll", 0)
     gmsh.option.setNumber("Mesh.BoundaryLayerFanElements", 7)
+    gmsh.option.setNumber("Geometry.Tolerance", 1.0e-12)
+    gmsh.option.setNumber("Geometry.ToleranceBoolean", 1.0e-12)
     gmsh.logger.start()
     try:
         gmsh.model.add(EXPERIMENT_ID)
         geo = gmsh.model.geo
         ext_points = [geo.addPoint(float(x), float(y), 0.0) for x, y in wall]
-        inlet_points = [ext_points[0]] + [geo.addPoint(float(x), float(y), 0.0) for x, y in inlet[1:-1]] + [ext_points[-1]]
+        upper_leading_end = 0
+        lower_leading_start = len(wall) - 1
+        leading_extension = bool(
+            config["boundary_layer"].get("leading_segment_extension_enabled", False)
+        )
+        if leading_extension:
+            leading_end_x = chord * min(0.30, max(0.005, float(
+                config["boundary_layer"].get("leading_segment_end_x_over_c", 0.05)
+            )))
+            upper_leading_end = max(2, min(
+                cap_range[0] - 3,
+                int(np.argmin(np.abs(wall[: cap_range[0], 0] - leading_end_x))),
+            ))
+            lower_leading_start = cap_range[1] + int(np.argmin(
+                np.abs(wall[cap_range[1] :, 0] - leading_end_x)
+            ))
+            lower_leading_start = max(
+                cap_range[1] + 3,
+                min(len(wall) - 3, lower_leading_start),
+            )
+        # The virtual inlet always joins the imported lips.  Segment extension
+        # changes only the BL/transfinite parameterization; moving these
+        # endpoints to the extension anchors would remove physical wall from
+        # the OpenFOAM airfoil_wall patch and widen the cut.
+        inlet_points = [ext_points[0]] + [
+            geo.addPoint(float(x), float(y), 0.0) for x, y in inlet[1:-1]
+        ] + [ext_points[-1]]
         lip_transition_length = chord * float(
             config["boundary_layer"].get("unstructured_lip_length_chord", 0.01)
         )
@@ -1101,11 +1211,18 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
                 lower_te_end = max(cap_range[1] + 1, min(len(wall) - 3, lower_te_end))
             else:
                 upper_te_start, lower_te_end = cap_range
-            wall_sections = [
-                (0, upper_te_start, "smooth_bump_at_lip_and_te"),
+            wall_sections = []
+            if leading_extension:
+                wall_sections.append((0, upper_leading_end, "leading_extension_upper"))
+            wall_sections.extend([
+                (upper_leading_end, upper_te_start, "smooth_bump_at_lip_and_te"),
                 (upper_te_start, lower_te_end, "te_segment_with_optional_approach"),
-                (lower_te_end, len(wall) - 1, "smooth_bump_at_lip_and_te"),
-            ]
+                (lower_te_end, lower_leading_start, "smooth_bump_at_lip_and_te"),
+            ])
+            if leading_extension:
+                wall_sections.append(
+                    (lower_leading_start, len(wall) - 1, "leading_extension_lower")
+                )
         else:
             wall_sections = [
                 (0, upper_split, "unstructured_lip_transition"),
@@ -1188,19 +1305,36 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
         inlet_length_for_match = float(
             np.sum(np.linalg.norm(np.diff(inlet, axis=0), axis=1))
         )
+        upper_extension_length = (
+            float(np.sum(np.linalg.norm(
+                np.diff(wall[: upper_leading_end + 1], axis=0), axis=1
+            ))) if leading_extension else 0.0
+        )
+        lower_extension_length = (
+            float(np.sum(np.linalg.norm(
+                np.diff(wall[lower_leading_start:], axis=0), axis=1
+            ))) if leading_extension else 0.0
+        )
         base_wall_lengths = {
             "upper": float(np.sum(np.linalg.norm(
-                np.diff(wall[0 : cap_range[0] + 1], axis=0), axis=1
+                np.diff(wall[upper_leading_end : upper_te_start + 1], axis=0), axis=1
             ))),
             "te": float(np.sum(np.linalg.norm(
-                np.diff(wall[cap_range[0] : cap_range[1] + 1], axis=0), axis=1
+                np.diff(wall[upper_te_start : lower_te_end + 1], axis=0), axis=1
             ))),
             "lower": float(np.sum(np.linalg.norm(
-                np.diff(wall[cap_range[1] :], axis=0), axis=1
+                np.diff(wall[lower_te_end : lower_leading_start + 1], axis=0), axis=1
             ))),
-            "leading_or_inlet": inlet_length_for_match,
+            "leading_or_inlet": (
+                upper_extension_length + inlet_length_for_match + lower_extension_length
+            ),
         }
         if automatic_bump:
+            requested_divisions = dict(auto_divisions)
+            auto_divisions, division_warnings = feasible_automatic_divisions(
+                base_wall_lengths,
+                auto_divisions,
+            )
             automatic_report = match_four_segment_bumps(
                 base_wall_lengths,
                 auto_divisions,
@@ -1212,40 +1346,81 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
                     config["boundary_layer"].get("bump_maximum_size_percent_chord", 1.00)
                 ),
             )
+            automatic_report["requested_divisions"] = requested_divisions
+            automatic_report["automatic_division_adjustments"] = division_warnings
+            automatic_report["warnings"] = [
+                *division_warnings,
+                *list(automatic_report.get("warnings") or []),
+            ]
+            if automatic_report["warnings"]:
+                automatic_report["status"] = "WARNING"
+        leading_composite_report: dict[str, Any] | None = None
+        if leading_extension and (automatic_report is not None or manual_four_segment_bump):
+            selected_divisions = (
+                automatic_report["divisions"]
+                if automatic_report is not None else auto_divisions
+            )
+            selected_coefficients = (
+                automatic_report["coefficients"]
+                if automatic_report is not None else manual_coefficients
+            )
+            leading_composite_report = match_extended_inlet_distribution(
+                {
+                    "upper_wall_extension": upper_extension_length,
+                    "virtual_inlet": inlet_length_for_match,
+                    "lower_wall_extension": lower_extension_length,
+                },
+                int(selected_divisions["leading_or_inlet"]),
+                float(automatic_report["junction_size_m"])
+                if automatic_report is not None
+                else float(bump_cell_sizes(
+                    selected_coefficients["leading_or_inlet"],
+                    base_wall_lengths["leading_or_inlet"],
+                    selected_divisions["leading_or_inlet"],
+                )[0]),
+            )
         split_report: dict[str, Any] | None = None
         if tangential_method == "bump_split_progression":
-            midpoint_x = chord * float(config["boundary_layer"].get(
+            split_x = float(config["boundary_layer"].get(
                 "split_progression_midpoint_x_chord", 0.50
             ))
-            upper_index = min(cap_range[0] - 3, max(3, int(np.argmin(
-                np.abs(wall[: cap_range[0], 0] - midpoint_x)
-            ))))
-            lower_index = cap_range[1] + int(np.argmin(
-                np.abs(wall[cap_range[1] :, 0] - midpoint_x)
+            midpoint_x = chord * min(0.999, max(0.20, split_x))
+            upper_index = min(upper_te_start - 3, max(upper_leading_end + 3, int(np.argmin(
+                np.abs(wall[upper_leading_end : upper_te_start, 0] - midpoint_x)
+            )) + upper_leading_end))
+            lower_index = lower_te_end + int(np.argmin(
+                np.abs(wall[lower_te_end : lower_leading_start + 1, 0] - midpoint_x)
             ))
-            lower_index = min(len(wall) - 4, max(cap_range[1] + 3, lower_index))
-            specs = [
-                ("upper_leading_or_inlet", ext_points[0 : upper_index + 1], 1),
-                ("upper_te", list(reversed(ext_points[upper_index : cap_range[0] + 1])), -1),
-                ("te", ext_points[cap_range[0] : cap_range[1] + 1], 1),
-                ("lower_te", ext_points[cap_range[1] : lower_index + 1], 1),
-                ("lower_leading_or_inlet", list(reversed(ext_points[lower_index:])), -1),
-            ]
+            lower_index = min(lower_leading_start - 3, max(lower_te_end + 3, lower_index))
+            specs: list[tuple[str, int, int]] = []
+            if leading_extension:
+                specs.append(("leading_extension_upper", 0, upper_leading_end))
+            specs.extend([
+                ("upper_leading_or_inlet", upper_leading_end, upper_index),
+                ("upper_te", upper_index, upper_te_start),
+                ("te", upper_te_start, lower_te_end),
+                ("lower_te", lower_te_end, lower_index),
+                ("lower_leading_or_inlet", lower_index, lower_leading_start),
+            ])
+            if leading_extension:
+                specs.append(
+                    ("leading_extension_lower", lower_leading_start, len(wall) - 1)
+                )
             half_lengths = {
                 "upper": {
                     "leading_or_inlet": float(np.sum(np.linalg.norm(
-                        np.diff(wall[0 : upper_index + 1], axis=0), axis=1
+                        np.diff(wall[upper_leading_end : upper_index + 1], axis=0), axis=1
                     ))),
                     "te": float(np.sum(np.linalg.norm(
-                        np.diff(wall[upper_index : cap_range[0] + 1], axis=0), axis=1
+                        np.diff(wall[upper_index : upper_te_start + 1], axis=0), axis=1
                     ))),
                 },
                 "lower": {
                     "leading_or_inlet": float(np.sum(np.linalg.norm(
-                        np.diff(wall[lower_index:], axis=0), axis=1
+                        np.diff(wall[lower_index : lower_leading_start + 1], axis=0), axis=1
                     ))),
                     "te": float(np.sum(np.linalg.norm(
-                        np.diff(wall[cap_range[1] : lower_index + 1], axis=0), axis=1
+                        np.diff(wall[lower_te_end : lower_index + 1], axis=0), axis=1
                     ))),
                 },
             }
@@ -1277,8 +1452,6 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
                         "bump_maximum_size_percent_chord", 0.50
                     )),
                 )
-                if split_report["blocks_generation"]:
-                    raise ValueError("; ".join(split_report["warnings"]))
             else:
                 manual_split = dict(config["boundary_layer"].get(
                     "manual_split_progression") or {})
@@ -1303,31 +1476,48 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
                         "bump_maximum_size_percent_chord", 0.50
                     )),
                 )
-            for label, tags, loop_sign in specs:
-                ext_curve = geo.addSpline(tags)
+            split_curves = _split_imported_wall_spline(
+                geo,
+                ext_points,
+                [(start, end) for _, start, end in specs],
+            )
+            for (label, start, end), ext_curve in zip(specs, split_curves):
                 if label == "te":
                     divisions = int(auto_divisions["te"])
                     coefficient = curved_bumps["te"]
                     geo.mesh.setTransfiniteCurve(ext_curve, divisions + 1, "Bump", coefficient)
                     distribution = f"bump_{coefficient:.8g}"
+                elif label.startswith("leading_extension_"):
+                    if leading_composite_report is None:
+                        raise RuntimeError("Missing composite inlet distribution")
+                    section_name = (
+                        "upper_wall_extension"
+                        if label.endswith("upper") else "lower_wall_extension"
+                    )
+                    section = leading_composite_report["sections"][section_name]
+                    divisions = int(section["divisions"])
+                    coefficient = float(section["progression_coefficient"])
+                    geo.mesh.setTransfiniteCurve(
+                        ext_curve, divisions + 1, "Progression", coefficient
+                    )
+                    distribution = f"composite_progression_{coefficient:.8g}"
                 else:
                     divisions = int(split_report["split_divisions"][label])
                     coefficient = float(split_report["progression_coefficients"][label])
+                    if label in {"upper_te", "lower_leading_or_inlet"}:
+                        coefficient = 1.0 / coefficient
                     geo.mesh.setTransfiniteCurve(
                         ext_curve, divisions + 1, "Progression", coefficient
                     )
                     distribution = f"progression_fine_to_mid_{coefficient:.8g}"
                 ext_curves.append(ext_curve)
-                external_loop_curves.append(loop_sign * ext_curve)
+                external_loop_curves.append(ext_curve)
                 ext_report.append({
                     "curve": ext_curve,
                     "label": label,
-                    "length_m": (
-                        base_wall_lengths["te"] if label == "te"
-                        else half_lengths[label.split("_", 1)[0]][
-                            "leading_or_inlet" if label.endswith("leading_or_inlet") else "te"
-                        ]
-                    ),
+                    "length_m": float(np.sum(np.linalg.norm(
+                        np.diff(wall[start : end + 1], axis=0), axis=1
+                    ))),
                     "nodes": divisions + 1,
                     "method": distribution,
                     "tangential_sizing": {
@@ -1336,14 +1526,25 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
                     },
                 })
         else:
-            for wall_index, ((start, end, method), length) in enumerate(zip(wall_sections, lengths)):
+            split_curves = _split_imported_wall_spline(
+                geo,
+                ext_points,
+                [(start, end) for start, end, _ in wall_sections],
+            )
+            if leading_extension and len(wall_sections) == 5:
+                four_segment_order: list[str | None] = [None, "upper", "te", "lower", None]
+            elif len(wall_sections) == 3:
+                four_segment_order = wall_segment_names
+            else:
+                four_segment_order = [None] * len(wall_sections)
+            for wall_index, (((start, end, method), length), ext_curve) in enumerate(
+                zip(zip(wall_sections, lengths), split_curves)
+            ):
                 four_segment = (
-                    wall_segment_names[wall_index]
-                    if (automatic_report is not None or manual_four_segment_bump)
-                    and len(wall_sections) == 3
+                    four_segment_order[wall_index]
+                    if automatic_report is not None or manual_four_segment_bump
                     else None
                 )
-                ext_curve = geo.addSpline(ext_points[start : end + 1])
                 if four_segment is not None:
                     selected_divisions = (
                         automatic_report["divisions"]
@@ -1364,6 +1565,29 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
                         "selected_divisions": ext_nodes - 1,
                         "selected_nodes": ext_nodes,
                         "bump_coefficient": selected_coefficient,
+                    }
+                elif method.startswith("leading_extension_"):
+                    if leading_composite_report is None:
+                        raise RuntimeError("Missing composite inlet distribution")
+                    section_name = (
+                        "upper_wall_extension"
+                        if method.endswith("upper") else "lower_wall_extension"
+                    )
+                    section = leading_composite_report["sections"][section_name]
+                    ext_nodes = int(section["divisions"]) + 1
+                    selected_coefficient = float(section["progression_coefficient"])
+                    geo.mesh.setTransfiniteCurve(
+                        ext_curve, ext_nodes, "Progression", selected_coefficient
+                    )
+                    sizing_report = {
+                        "four_segment_mode": (
+                            "automatic" if automatic_report is not None else "manual"
+                        ),
+                        "segment": "leading_or_inlet",
+                        "composite_section": section_name,
+                        "selected_divisions": ext_nodes - 1,
+                        "selected_nodes": ext_nodes,
+                        "progression_coefficient": selected_coefficient,
                     }
                 elif method in {"uniform_te_cap", "unstructured_lip_transition"}:
                     minimum_required_nodes, _ = _transfinite_node_bounds(
@@ -1405,6 +1629,42 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
                     "tangential_sizing": sizing_report,
                 })
 
+        # Record the actual smallest transfinite interval on each curve.  A
+        # segment mean misses precisely the fine TE/lip cells that need the
+        # smallest receiving triangles at the outer BL front.
+        for item in ext_report:
+            sizing = dict(item.get("tangential_sizing") or {})
+            divisions = max(1, int(item.get("nodes", 2)) - 1)
+            length = float(item["length_m"])
+            if "bump_coefficient" in sizing:
+                minimum_size, maximum_size = _bump_spacing_bounds(
+                    length, divisions, float(sizing["bump_coefficient"]),
+                )
+            elif "progression_coefficient" in sizing:
+                minimum_size, maximum_size = _progression_spacing_bounds(
+                    length, divisions, float(sizing["progression_coefficient"]),
+                )
+            elif str(item.get("method", "")).startswith("bump_"):
+                minimum_size, maximum_size = _bump_spacing_bounds(
+                    length, divisions, float(sizing.get("coefficient", 1.0)),
+                )
+            elif "progression" in str(item.get("method", "")):
+                minimum_size, maximum_size = _progression_spacing_bounds(
+                    length, divisions, float(sizing.get("coefficient", 1.0)),
+                )
+            elif item.get("bump") is not None:
+                minimum_size, maximum_size = _bump_spacing_bounds(
+                    length, divisions, float(item["bump"]),
+                )
+            else:
+                minimum_size = maximum_size = length / divisions
+            sizing.update({
+                "minimum_size_m": minimum_size,
+                "maximum_size_m": maximum_size,
+                "mean_size_m": length / divisions,
+            })
+            item["tangential_sizing"] = sizing
+
         inlet_nodes = int(config["boundary_layer"].get("inlet_nodes", 240))
         inlet_bump = float(config["boundary_layer"].get("inlet_bump_coefficient", 0.08))
         base_start = int(geometry["inlet_join"]["base_start_index"])
@@ -1422,14 +1682,19 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
             for start, end, _ in inlet_sections
         ]
         inlet_length = float(np.sum(np.linalg.norm(np.diff(inlet, axis=0), axis=1)))
-        requested_elements = max(
-            18,
-            int(automatic_report["divisions"]["leading_or_inlet"])
-            if automatic_report is not None
-            else int(auto_divisions["leading_or_inlet"])
-            if manual_four_segment_bump
-            else inlet_nodes - 1,
-        )
+        if leading_composite_report is not None:
+            requested_elements = int(
+                leading_composite_report["sections"]["virtual_inlet"]["divisions"]
+            )
+        else:
+            requested_elements = max(
+                18,
+                int(automatic_report["divisions"]["leading_or_inlet"])
+                if automatic_report is not None
+                else int(auto_divisions["leading_or_inlet"])
+                if manual_four_segment_bump
+                else inlet_nodes - 1,
+            )
         element_counts = [
             max(5 if "connector" in method else 8, int(round(requested_elements * length / inlet_length)))
             for length, (_, _, method) in zip(section_lengths, inlet_sections)
@@ -1458,10 +1723,27 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
         # spline to the original uncut contour without a global lip-to-lip
         # Hermite bridge.
         inlet_curve = geo.addSpline(inlet_points)
-        if automatic_report is not None:
-            inlet_bump = float(
-                automatic_report["coefficients"]["leading_or_inlet"]
-            )
+        if leading_composite_report is not None:
+            inlet_section = leading_composite_report["sections"]["virtual_inlet"]
+            inlet_bump = float(inlet_section["bump_coefficient"])
+            if math.isclose(inlet_bump, 1.0, rel_tol=0.0, abs_tol=1.0e-12):
+                geo.mesh.setTransfiniteCurve(inlet_curve, requested_elements + 1)
+            else:
+                geo.mesh.setTransfiniteCurve(
+                    inlet_curve, requested_elements + 1, "Bump", inlet_bump,
+                )
+            leading_composite_report["virtual_inlet_applied"] = {
+                "actual_length_m": inlet_length,
+                "divisions": requested_elements,
+                "target_endpoint_size_m": float(
+                    leading_composite_report["lip_target_size_m"]
+                ),
+                "bump_coefficient": inlet_bump,
+                "preserves_imported_lip_endpoints": True,
+            }
+            inlet_distribution = f"composite_bump_{inlet_bump:.8g}"
+        elif automatic_report is not None:
+            inlet_bump = float(automatic_report["coefficients"]["leading_or_inlet"])
             geo.mesh.setTransfiniteCurve(
                 inlet_curve, requested_elements + 1, "Bump", inlet_bump,
             )
@@ -1486,7 +1768,11 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
             "length_m": inlet_length,
             "elements": requested_elements,
             "mean_size_m": inlet_length / max(requested_elements, 1),
-            "method": "single_gmsh_spline_over_exact_base_samples_and_local_c1_connectors",
+            "method": (
+                "virtual_inlet_between_imported_lips_with_composite_bl_parameterization"
+                if leading_extension
+                else "single_gmsh_spline_over_exact_base_samples_and_local_c1_connectors"
+            ),
             "distribution": inlet_distribution,
             "sections": [
                 {
@@ -1500,7 +1786,14 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
             ],
             "inlet_bump_coefficient": inlet_bump,
         }]
-        inlet_spacing = inlet_length / max(1, sum(element_counts))
+        inlet_spacing = inlet_length / max(1, requested_elements)
+        inlet_minimum_spacing, inlet_maximum_spacing = _bump_spacing_bounds(
+            inlet_length, requested_elements, inlet_bump,
+        )
+        inlet_report[0].update({
+            "minimum_tangential_size_m": inlet_minimum_spacing,
+            "maximum_tangential_size_m": inlet_maximum_spacing,
+        })
 
         radius = chord * float(config["external_volume"]["domain_radius_chord"])
         center_x = 0.25 * chord
@@ -1555,13 +1848,19 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
             gmsh.model.mesh.field.setNumber(boundary_field, "NbLayers", int(layer["layers"]))
         else:
             gmsh.model.mesh.field.setNumber(boundary_field, "Ratio", float(layer["growth_rate"]))
+            # Without NbLayers Gmsh may terminate individual geometric columns
+            # one row early on curved segments, triangulating the apparent last
+            # layer. The calculated integer layer count is authoritative.
+            gmsh.model.mesh.field.setNumber(boundary_field, "NbLayers", int(layer["layers"]))
         gmsh.model.mesh.field.setNumber(boundary_field, "Quads", 1)
         # SizeFar is corrected below after the tangential match is known.  It
         # must describe the first unstructured layer, not the raw UI cap.
         gmsh.model.mesh.field.setNumber(boundary_field, "SizeFar", chord * 0.001)
         fan_elements = int(config["boundary_layer"].get("lip_fan_elements", 0))
         if fan_elements > 0:
-            gmsh.model.mesh.field.setNumbers(boundary_field, "FanPointsList", [ext_points[0], ext_points[-1]])
+            gmsh.model.mesh.field.setNumbers(
+                boundary_field, "FanPointsList", [inlet_points[0], inlet_points[-1]]
+            )
             gmsh.model.mesh.field.setNumbers(
                 boundary_field, "FanPointsSizesList", [fan_elements] * 2,
             )
@@ -1574,16 +1873,32 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
         interface_mode = str(
             config["external_volume"].get("interface_size_mode", "fixed")
         ).strip().lower()
-        tangential_reference = min(
-            inlet_spacing,
-            min(
-                float(item["length_m"]) / max(1, int(item["nodes"]) - 1)
-                for item in ext_report
-            ),
-        )
-        matched_interface = tangential_reference * float(
+        interface_factor = float(
             config["external_volume"].get("interface_tangential_factor", 1.25)
         )
+        local_tangential_sources = [
+            {
+                "curve": int(item["curve"]),
+                "label": str(item.get("label") or dict(item.get("tangential_sizing") or {}).get("segment") or item.get("method")),
+                "minimum_tangential_size_m": float(
+                    dict(item.get("tangential_sizing") or {})["minimum_size_m"]
+                ),
+            }
+            for item in ext_report
+        ]
+        local_tangential_sources.extend({
+            "curve": int(curve),
+            "label": "virtual_inlet",
+            "minimum_tangential_size_m": inlet_minimum_spacing,
+        } for curve in inlet_curves)
+        tangential_reference = min(
+            row["minimum_tangential_size_m"] for row in local_tangential_sources
+        )
+        for row in local_tangential_sources:
+            row["automatic_interface_size_m"] = (
+                row["minimum_tangential_size_m"] * interface_factor
+            )
+        matched_interface = tangential_reference * interface_factor
         # In automatic matching the tangential spacing is the source of truth.
         # Treating the optional fixed value as a hidden upper bound allowed a
         # stale 1e-5[c] draft value to override the actual wall spacing and
@@ -1592,7 +1907,15 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
         external_interface = (
             matched_interface if interface_mode == "tangential_match" else requested_interface
         )
-        gmsh.model.mesh.field.setNumber(boundary_field, "SizeFar", external_interface)
+        # SizeFar is scalar in Gmsh.  Use the least restrictive local value
+        # here and impose every finer section through local background guards.
+        # This preserves local TE/lip refinement without forcing it around the
+        # complete airfoil.
+        boundary_size_far = (
+            max(row["automatic_interface_size_m"] for row in local_tangential_sources)
+            if interface_mode == "tangential_match" else requested_interface
+        )
+        gmsh.model.mesh.field.setNumber(boundary_field, "SizeFar", boundary_size_far)
         external_far = chord * float(config["external_volume"]["farfield_size_chord"])
         radial_growth = min(0.50, max(0.005, float(
             config["external_volume"].get("radial_growth_rate", 0.20)
@@ -1600,6 +1923,34 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
         external_extend = bool(
             config["external_volume"].get("automatic_extend_enabled", False)
         )
+
+        def interface_guard_fields() -> list[int]:
+            if not bool(config["external_volume"].get("extend_interface_guard_enabled", True)):
+                return []
+            transition = chord * float(config["external_volume"].get(
+                "extend_interface_transition_chord", 0.10
+            ))
+            sources = (
+                local_tangential_sources
+                if interface_mode == "tangential_match" else
+                [{
+                    "curve": curve,
+                    "automatic_interface_size_m": requested_interface,
+                } for curve in ext_curves + inlet_curves]
+            )
+            return [
+                add_smooth_interface_guard(
+                    gmsh,
+                    surfaces=[external_surface],
+                    curves=[int(row["curve"])],
+                    size_at_interface=float(row["automatic_interface_size_m"]),
+                    size_far=external_far,
+                    boundary_layer_thickness=float(layer["total_thickness_m"]),
+                    transition_distance=transition,
+                )
+                for row in sources
+            ]
+
         if external_extend:
             external_restrict = add_extend_field(
                 gmsh,
@@ -1615,21 +1966,12 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
                 )),
             )
             size_fields = [external_restrict]
-            if bool(config["external_volume"].get("extend_interface_guard_enabled", True)):
-                guard_transition = chord * float(config["external_volume"].get(
-                    "extend_interface_transition_chord", 0.10
-                ))
-                guard = add_smooth_interface_guard(
-                    gmsh,
-                    surfaces=[external_surface],
-                    curves=ext_curves + inlet_curves,
-                    size_at_interface=external_interface,
-                    size_far=external_far,
-                    boundary_layer_thickness=float(layer["total_thickness_m"]),
-                    transition_distance=guard_transition,
-                )
+            local_guards = interface_guard_fields()
+            if local_guards:
                 combined = gmsh.model.mesh.field.add("Min")
-                gmsh.model.mesh.field.setNumbers(combined, "FieldsList", [external_restrict, guard])
+                gmsh.model.mesh.field.setNumbers(
+                    combined, "FieldsList", [external_restrict, *local_guards]
+                )
                 external_restrict = combined
             external_size_report = {
                 "type": "gmsh_extend_from_variable_geometric_boundary",
@@ -1656,6 +1998,12 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
                 "interface_guard": {
                     "enabled": bool(config["external_volume"].get("extend_interface_guard_enabled", True)),
                     "size_chord": external_interface / chord,
+                    "boundary_size_far_chord": boundary_size_far / chord,
+                    "local_curve_sizes": local_tangential_sources,
+                    "conformal_interface_constraint": (
+                        "The BL-front edge cannot be subdivided independently. Factors below 1 "
+                        "can influence subsequent radial triangles but not that shared edge width."
+                    ),
                     "starts_at_bl_thickness_chord": float(layer["total_thickness_m"]) / chord,
                     "transition_distance_chord": float(config["external_volume"].get(
                         "extend_interface_transition_chord", 0.10
@@ -1675,14 +2023,30 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
             external_restrict = gmsh.model.mesh.field.add("Restrict")
             gmsh.model.mesh.field.setNumber(external_restrict, "InField", external_threshold)
             gmsh.model.mesh.field.setNumbers(external_restrict, "SurfacesList", [external_surface])
+            local_guards = interface_guard_fields()
+            if local_guards:
+                combined = gmsh.model.mesh.field.add("Min")
+                gmsh.model.mesh.field.setNumbers(
+                    combined, "FieldsList", [external_restrict, *local_guards]
+                )
+                external_restrict = combined
             external_size_report = {
                 "type": "linear_distance_capped",
                 "interface_size_chord": external_interface / chord,
                 "requested_interface_size_chord": requested_interface / chord,
                 "interface_size_mode": interface_mode,
                 "tangential_reference_chord": tangential_reference / chord,
+                "boundary_size_far_chord": boundary_size_far / chord,
+                "local_curve_sizes": local_tangential_sources,
+                "conformal_interface_constraint": (
+                    "The BL-front edge cannot be subdivided independently. Factors below 1 "
+                    "can influence subsequent radial triangles but not that shared edge width."
+                ),
                 "farfield_size_chord": external_far / chord,
                 "maximum_local_growth_fraction": radial_growth,
+                "interface_guard_enabled": bool(
+                    config["external_volume"].get("extend_interface_guard_enabled", True)
+                ),
             }
 
         internal_distance = gmsh.model.mesh.field.add("Distance")
@@ -1880,6 +2244,7 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
             "boundary_layer": layer, "external_wall_curves": ext_report,
             "boundary_layer_mesh_audit": measured_boundary_layer,
             "automatic_bump_matching": automatic_report,
+            "leading_or_inlet_composite_parameterization": leading_composite_report,
             "split_progression_matching": split_report,
             "manual_four_segment_bump": {
                 "enabled": manual_four_segment_bump,
@@ -1890,10 +2255,22 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
             },
             "post_generation_optimization": optimization,
             "boundary_layer_curves": (
-                "wall_plus_single_curve_exact_base_inlet"
+                "complete_imported_wall_plus_virtual_inlet_between_original_lips"
                 if any(curve in layer_curves for curve in inlet_curves)
                 else "wall_only"
             ),
+            "physical_wall_geometry": {
+                "source": "normalized imported cut-airfoil wall",
+                "source_point_count": len(wall),
+                "upper_lip_m": [float(value) for value in wall[0]],
+                "lower_lip_m": [float(value) for value in wall[-1]],
+                "physical_curve_count": len(ext_curves),
+                "extension_changes_wall_geometry": False,
+                "extension_role": (
+                    "transfinite/BL segment partition only"
+                    if leading_extension else "disabled"
+                ),
+            },
             "internal_wall_curves": "inherits shared tangential discretization before baffle split",
             "inlet_curves": inlet_report,
             "inlet_y1_transition": {

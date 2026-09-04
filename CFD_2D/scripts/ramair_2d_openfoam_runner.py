@@ -635,8 +635,16 @@ def run_script_with_timeout(
             monitor.join(timeout=2.0)
         external_stop_thread.join(timeout=2.0)
         external_stop_path.unlink(missing_ok=True)
+        solver_log = cdir / "log.foamRun"
+        event = classify_openfoam_log(
+            solver_log.read_text(encoding="utf-8", errors="replace")
+            if solver_log.is_file() else "",
+            returncode=proc.returncode,
+        )
         if outcome in {"stopped_partial", "stopped_forced", "timeout_partial"}:
             status = "PAUSED_RECOVERABLE"
+        elif event.numerical_divergence or event.setup_error or event.solver_failure:
+            status = "FAILED"
         else:
             status = "COMPLETED" if int(proc.returncode or 0) == 0 else "FAILED"
         publish_solver_process(

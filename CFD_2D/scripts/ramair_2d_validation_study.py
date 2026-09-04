@@ -62,6 +62,7 @@ from ramair_2d_rans_checkpoint_batch import (
     delete_active_base,
     execute_base,
     execute_queue,
+    execute_selection_queue,
     mesh_angle_id,
     require_compatible_checkpoint,
 )
@@ -238,17 +239,29 @@ def prepare_checkpoint(
     persistent matrix-selection flag.
     """
     study = load_study(project_root)
-    mesh = _find_mesh(study, mesh_id)
+    base_mesh_id = str(mesh_id).split("__alpha_", 1)[0]
+    mesh = _find_mesh(study, base_mesh_id)
     candidates = [
         row for row in study["run_matrix"]["runs"]
-        if row["mesh_id"] == mesh_id
+        if row["mesh_id"] == base_mesh_id
         and (_run_root(project_root, row) / "case/system/controlDict").is_file()
     ]
     if not candidates:
         raise RuntimeError(
             f"{mesh_id}: prepare at least one canonical dry-run case before its checkpoint"
         )
-    source_row = sorted(candidates, key=lambda row: (float(row["dt_s"]), row["run_id"]))[0]
+    matching_angle = [
+        row for row in candidates
+        if mesh_angle_id(
+            study,
+            base_mesh_id,
+            float(row.get("alpha_deg", 0.0)),
+        ) == mesh_id
+    ]
+    source_row = sorted(
+        matching_angle or candidates,
+        key=lambda row: (float(row["dt_s"]), row["run_id"]),
+    )[0]
     source_case = _run_root(project_root, source_row) / "case"
     checkpoint = _checkpoint_root(project_root, mesh_id)
     if checkpoint.exists():
@@ -273,6 +286,32 @@ def prepare_checkpoint(
     case = checkpoint / "case"
     checkpoint.mkdir(parents=True, exist_ok=True)
     _copy_case_inputs(source_case, case)
+    target_alpha = next(
+        float(row.get("alpha_deg", 0.0))
+        for row in study["run_matrix"]["runs"]
+        if row["mesh_id"] == base_mesh_id
+        and mesh_angle_id(
+            study,
+            base_mesh_id,
+            float(row.get("alpha_deg", 0.0)),
+        ) == mesh_id
+    )
+    source_config = read_json(source_case / "case_config.json", {}) or {}
+    if not source_config:
+        source_config = read_json(source_case / "case_input_summary.json", {}) or {}
+    config_fields = OpenFOAMCaseConfig.__dataclass_fields__
+    config_values = {
+        name: source_config[name]
+        for name in config_fields
+        if name in source_config
+    }
+    config_values["alpha_deg"] = target_alpha
+    cfg = OpenFOAMCaseConfig(**config_values)
+    patches = parse_boundary_patches(case / "constant/polyMesh")
+    shutil.rmtree(case / "0", ignore_errors=True)
+    write_0(case, cfg, patches)
+    write_constant(case, cfg)
+    write_system(case, cfg, patches)
     manifest = {
         "schema_version": 1,
         "checkpoint_id": f"{mesh_id}_simple",
@@ -280,7 +319,10 @@ def prepare_checkpoint(
         "mesh_hash": mesh["mesh_hash"],
         "topology": mesh["topology"],
         "mesh_level": mesh["level"],
+        "alpha_deg": target_alpha,
         "source_run_id": source_row["run_id"],
+        "source_alpha_deg": float(source_row.get("alpha_deg", 0.0)),
+        "initial_conditions_retargeted_to_alpha_deg": target_alpha,
         "source_case": str(source_case),
         "case": str(case),
         "status": "READY_TO_RUN",
@@ -326,6 +368,18 @@ def _plan_config_for_topology(
         urans = dict(validation.get("urans") or {})
         urans["sampling_time_star"] = 100.0 if topology == "closed" else 200.0
         urans["temporal_package"] = active_package
+        if topology == "open":
+            # The open-cavity meshes contain much smaller cells at both lips.
+            # A quarter-target first step produced local Co~9 and a nuTilda
+            # runaway in real startup tests. Keep the convergence target dt
+            # fixed, but approach it through a conservative open-only ramp.
+            safe_factors = (0.02, 0.05, 0.10)
+            startup = copy.deepcopy(list(urans.get("startup_stages") or []))
+            for stage, factor in zip(startup, safe_factors):
+                stage["dt_factor"] = factor
+                stage["stability_basis"] = "open_lip_minimum_cell_courant_startup"
+            urans["startup_stages"] = startup
+            urans["startup_profile"] = "open_cavity_conservative_0p02_0p05_0p10"
         validation["urans"] = urans
     return plan_config, active_package
 
@@ -767,8 +821,16 @@ def prepare_run(
                 "nuTilda": {"tolerance": 1.0e-4, "relTol": 0.0},
             }
         ),
-        transient_velocity_divergence_scheme="Gauss linearUpwind limited",
-        transient_turbulence_divergence_scheme="Gauss linearUpwind limited",
+        transient_velocity_divergence_scheme=(
+            "Gauss limitedLinearV 1"
+            if topology == "open"
+            else "Gauss linearUpwind limited"
+        ),
+        transient_turbulence_divergence_scheme=(
+            "Gauss upwind"
+            if topology == "open"
+            else "Gauss linearUpwind limited"
+        ),
         time_step_mode="fixed",
         deltaT_star=dt_s / condition["tc_s"],
         maxDeltaT_star=dt_s / condition["tc_s"],
@@ -1129,8 +1191,27 @@ def execute_run(
     study = load_study(project_root)
     row = _find_run(study, run_id)
     run_root = _run_root(project_root, row)
-    if not (run_root / "case/system/controlDict").is_file():
-        prepare_run(project_root, run_id)
+    required_definition = (
+        run_root / "case/system/controlDict",
+        run_root / "case_metadata.json",
+        run_root / "case_manifest.json",
+        run_root / "run_manifest.json",
+        run_root / "stage_plan.json",
+    )
+    missing_definition = [str(path) for path in required_definition if not path.is_file()]
+    if missing_definition:
+        existing_state = inspect_canonical_case(project_root, row)
+        if existing_state.get("case_presence") == "STARTED":
+            raise CanonicalCaseError(
+                "STARTED_CASE_WITH_INCOMPLETE_DEFINITION",
+                f"{run_id} contains solver time but its frozen definition is incomplete.",
+                remediation="Recover the missing manifests before resuming; solver fields were preserved.",
+                evidence={"missing": missing_definition, "case_state": existing_state},
+            )
+        # A failed preparation can leave controlDict/resolved_config behind.
+        # Before physical time exists it is safe and deterministic to rebuild
+        # the complete canonical package from the same matrix identity.
+        prepare_run(project_root, run_id, overwrite=run_root.exists())
     repair_legacy_classification(run_root)
     manifest = read_json(run_root / "case_manifest.json", {}) or {}
     state = inspect_canonical_case(
@@ -1178,10 +1259,12 @@ def execute_run(
         )
     expected_checkpoint_hash = str(manifest.get("mesh_hash") or "")
     actual_checkpoint_hash = str(checkpoint_identity.get("poly_mesh_hash") or "")
+    started_case = state["case_presence"] == "STARTED"
     copied_identity = checkpoint_mesh_identity(case, case / "0")
-    if copied_identity.get("status") != "READY" or str(
-        copied_identity.get("poly_mesh_hash") or ""
-    ) != actual_checkpoint_hash:
+    if not started_case and (
+        copied_identity.get("status") != "READY"
+        or str(copied_identity.get("poly_mesh_hash") or "") != actual_checkpoint_hash
+    ):
         raise CanonicalCaseError(
             "CASE_CHECKPOINT_MISMATCH",
             f"{run_id}: the prepared URANS case does not contain the checkpoint mesh and fields.",
@@ -1191,7 +1274,14 @@ def execute_run(
                 "prepared_case": copied_identity,
             },
         )
-    if expected_checkpoint_hash and expected_checkpoint_hash != actual_checkpoint_hash:
+    if started_case and not bool((state.get("restart_evidence") or {}).get("valid")):
+        raise CanonicalCaseError(
+            "URANS_RESTART_STATE_INVALID",
+            f"{run_id}: no complete written URANS state is available for resume.",
+            remediation="Inspect the retained time directories before restarting this identity.",
+            evidence=state.get("restart_evidence") or {},
+        )
+    if not started_case and expected_checkpoint_hash and expected_checkpoint_hash != actual_checkpoint_hash:
         # Historical manifests used a registry/package hash.  A stale stored
         # value is not a mesh change when the actual prepared case and the
         # actual RANS checkpoint are byte-identical.  Persist the content hash
@@ -1597,47 +1687,12 @@ def main() -> int:
         )
         generate_storage_inventory(root)
     elif args.action == "rans-selection-queue":
-        study = load_study(root)
-        state_path = active_workspace_root(root) / "rans_selection_queue_state.json"
-        state = {
-            "schema_version": 1,
-            "status": "RUNNING" if args.run else "PREPARED",
-            "cases": [],
-            "updated_at": utc_stamp(),
-        }
-        write_json_atomic(state_path, state)
-        for order, case_spec in enumerate(args.case, start=1):
-            try:
-                base_mesh_id, alpha_text = str(case_spec).rsplit(":", 1)
-                alpha_deg = float(alpha_text)
-                checkpoint_id = mesh_angle_id(study, base_mesh_id, alpha_deg)
-                result = execute_base(
-                    root, checkpoint_id, run=args.run, overwrite=False,
-                    consume_previous_stop_marker=False,
-                )
-            except Exception as exc:
-                result = {
-                    "mesh_id": str(case_spec), "status": "RANS_BASE_FAILED",
-                    "message": str(exc),
-                }
-            state["cases"].append({
-                "order": order, "requested_case": str(case_spec), **result,
-            })
-            state["updated_at"] = utc_stamp()
-            write_json_atomic(state_path, state)
-            if (
-                args.run
-                and str(result.get("status")) in {"RANS_BASE_FAILED", "RANS_BASE_DIVERGED"}
-                and not args.continue_on_nonfatal_failure
-            ):
-                state["status"] = "STOPPED_ON_FAILURE"
-                write_json_atomic(state_path, state)
-                break
-        else:
-            state["status"] = "COMPLETED" if args.run else "PREPARED"
-            state["updated_at"] = utc_stamp()
-            write_json_atomic(state_path, state)
-        result = state
+        result = execute_selection_queue(
+            root,
+            list(args.case),
+            run=bool(args.run),
+            continue_on_nonfatal_failure=bool(args.continue_on_nonfatal_failure),
+        )
     elif args.action == "rans-delete":
         result = delete_active_base(
             root,

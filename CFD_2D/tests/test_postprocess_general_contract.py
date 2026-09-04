@@ -118,8 +118,8 @@ def test_paraview_script_contains_portable_state_and_complete_views(tmp_path: Pa
     assert 'velocity_contour_name = "U"' in text
     assert 'pressure_name = (\n        "Cp" if available_array("Cp")' in text
     assert 'vorticity_name = "vorticity"' in text
-    assert 'for i in range(1, 41)' in text
-    assert 'for i in range(40)' in text
+    assert 'for i in range(1, 21)' in text
+    assert 'for i in range(20)' in text
     assert 'lut.RescaleTransferFunction(0.0, 10.0)' in text
     assert 'max Co = %.1f' in text
     compile(text, str(script), "exec")

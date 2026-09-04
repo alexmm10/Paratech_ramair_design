@@ -375,6 +375,257 @@ def _run_phase_command(
     return int(process.returncode or 0), last_status
 
 
+def _bootstrap_backward_history(
+    *,
+    case: Path,
+    run_root: Path,
+    stage: dict[str, Any],
+    project_root: Path,
+    runtime_base: dict[str, Any],
+    journal: dict[str, Any],
+    n_cores: int,
+    timeout_min: float,
+    automatic_core_selection: bool,
+    renumber_before_decompose: bool,
+) -> dict[str, Any]:
+    """Create three target-deltaT Euler states before enabling backward."""
+    checkpoint = restart_time_evidence(case)
+    if not checkpoint.get("valid"):
+        raise RuntimeError("BACKWARD_BOOTSTRAP_INPUT_MISSING")
+    start = Decimal(str(checkpoint["time_s"]))
+    delta_t = Decimal(str(stage["dt_s"]))
+
+    topology = str(
+        (runtime_base.get("scientific_key") or {}).get("topology") or ""
+    ).lower()
+    if topology == "open":
+        # The open lip contains the smallest and most distorted local cells. A
+        # direct 10x jump from phase C to the target step produced a local Co
+        # spike before backward was enabled. Ramp with Euler and robust Co=10,
+        # then create the three equally-spaced target-step states below.
+        ramp_start = start
+        ramp_dt = delta_t * Decimal("0.25")
+        ramp_end = ramp_start + Decimal("8") * delta_t
+        ramp = {
+            **stage,
+            "stage": f"{stage['stage']}_EULER_RAMP",
+            "purpose": "bounded open-lip time-step ramp before backward history",
+            "scheme": "Euler",
+            "dt_s": float(ramp_dt),
+            "start_s": float(ramp_start),
+            "end_s": float(ramp_end),
+            "duration_s": float(ramp_end - ramp_start),
+            "sampling": False,
+            "purge_write": max(4, int(stage.get("purge_write") or 0)),
+            "adjust_time_step": True,
+            "maxCo": 10.0,
+            "maxDeltaT_s": float(delta_t),
+            "first_order_bootstrap": True,
+        }
+        ramp_applied = configure_stage(
+            case,
+            ramp,
+            start_mode=RESUME_EXISTING,
+            preserve_temporal_history=False,
+        )
+        ramp_log = _log_file(case)
+        ramp_offset = ramp_log.stat().st_size if ramp_log.is_file() else 0
+        ramp_started = time.monotonic()
+        ramp_command = runner_command(
+            case,
+            n_cores=n_cores,
+            timeout_min=timeout_min,
+            start_mode=RESUME_EXISTING,
+            expected_start_time=float(ramp_start),
+            run=True,
+            automatic_core_selection=automatic_core_selection,
+            renumber_before_decompose=renumber_before_decompose,
+        )
+        ramp_returncode, ramp_status = _run_phase_command(
+            ramp_command,
+            case=case,
+            project_root=project_root,
+            runtime_base={
+                **runtime_base,
+                "target_deltaT": float(delta_t),
+                "phase_deltaT": float(ramp_dt),
+                "deltaT": float(ramp_dt),
+            },
+            phase=str(ramp["stage"]),
+            current_log=ramp_log,
+            log_offset=ramp_offset,
+        )
+        ramp_output = restart_time_evidence(case)
+        ramp_segment = _log_segment(
+            ramp_log,
+            ramp_offset,
+            run_root / "logs" / f"phase_{ramp['stage']}_{len(journal['phases']) + 1:03d}.log",
+            returncode=ramp_returncode,
+        )
+        ramp_event = dict(ramp_segment.get("openfoam_event") or {})
+        ramp_complete = bool(
+            ramp_returncode == 0
+            and ramp_output.get("valid")
+            and ramp_event.get("normal_end")
+            and not ramp_event.get("numerical_divergence")
+            and (
+                ramp_event.get("maximum_courant") is None
+                or float(ramp_event["maximum_courant"]) <= 50.0
+            )
+        )
+        ramp_row = {
+            **ramp_applied,
+            "actual_start_s": float(ramp_start),
+            "actual_end_s": ramp_output.get("time_s"),
+            "input_checkpoint": checkpoint,
+            "output_checkpoint": ramp_output,
+            "returncode": int(ramp_returncode),
+            "wall_seconds": time.monotonic() - ramp_started,
+            "terminal_reason": (
+                "OPEN_EULER_RAMP_READY" if ramp_complete else "OPEN_EULER_RAMP_FAILED"
+            ),
+            **ramp_segment,
+        }
+        journal["phases"].append(ramp_row)
+        journal["updated_at"] = utc_stamp()
+        write_json_atomic(run_root / "stage_journal.json", journal)
+        if not ramp_complete:
+            raise RuntimeError(
+                "OPEN_EULER_RAMP_FAILED: the target time step is not stable at the open lip"
+            )
+        start = Decimal(str(ramp_output["time_s"]))
+        checkpoint = ramp_output
+
+    end = start + 3 * delta_t
+    if end >= Decimal(str(stage["end_s"])):
+        raise RuntimeError("BACKWARD_BOOTSTRAP_DOES_NOT_FIT_PHASE")
+
+    bootstrap = {
+        **stage,
+        "stage": f"{stage['stage']}_BOOTSTRAP",
+        "purpose": "first-order history for backward",
+        "scheme": "Euler",
+        "start_s": float(start),
+        "end_s": float(end),
+        "duration_s": float(3 * delta_t),
+        "steps": 3,
+        "sampling": False,
+        "purge_write": max(3, int(stage.get("purge_write") or 0)),
+        "first_order_bootstrap": True,
+    }
+    applied = configure_stage(
+        case,
+        bootstrap,
+        start_mode=RESUME_EXISTING,
+        preserve_temporal_history=True,
+    )
+    expected_times = [
+        float(start + delta_t),
+        float(start + 2 * delta_t),
+        float(end),
+    ]
+    log = _log_file(case)
+    started_at = utc_stamp()
+    started = time.monotonic()
+    command = runner_command(
+        case,
+        n_cores=n_cores,
+        timeout_min=timeout_min,
+        start_mode=RESUME_EXISTING,
+        expected_start_time=float(start),
+        run=True,
+        reconstruct_times=expected_times,
+        automatic_core_selection=automatic_core_selection,
+        renumber_before_decompose=renumber_before_decompose,
+    )
+    returncode, run_status = _run_phase_command(
+        command,
+        case=case,
+        project_root=project_root,
+        runtime_base={
+            **runtime_base,
+            "target_deltaT": float(stage["dt_s"]),
+            "phase_deltaT": float(stage["dt_s"]),
+            "deltaT": float(stage["dt_s"]),
+        },
+        phase=str(bootstrap["stage"]),
+        current_log=log,
+        log_offset=0,
+    )
+    output = restart_time_evidence(case)
+    segment = _log_segment(
+        log,
+        0,
+        run_root / "logs" / f"phase_{bootstrap['stage']}_{len(journal['phases']) + 1:03d}.log",
+        returncode=returncode,
+    )
+    event = dict(segment.get("openfoam_event") or {})
+    runner_status = str(run_status.get("status") or "")
+    partial = runner_status.upper() in PARTIAL_RUNNER_STATES
+    end_tolerance = max(1.0e-12, abs(float(delta_t)) * 1.0e-4)
+    target_reached = bool(
+        output.get("valid")
+        and float(output["time_s"]) + end_tolerance >= float(end)
+        and event.get("normal_end")
+        and returncode == 0
+    )
+    history = _history_evidence(case, float(delta_t))
+    maximum_courant = event.get("maximum_courant")
+    courant_limit = float(stage.get("maxCo") or 50.0)
+    numerically_acceptable = bool(
+        not event.get("numerical_divergence")
+        and (
+            maximum_courant is None
+            or float(maximum_courant) <= courant_limit
+        )
+    )
+    history_ready = bool(
+        target_reached and history.get("valid") and numerically_acceptable
+    )
+    terminal_reason = (
+        "USER_REQUESTED_STOP"
+        if runner_status.upper() in USER_STOP_RUNNER_STATES
+        else "RUN_TIMEOUT"
+        if partial
+        else "NUMERICAL_DIVERGENCE"
+        if target_reached and not numerically_acceptable
+        else "BACKWARD_HISTORY_READY"
+        if history_ready
+        else "BACKWARD_BOOTSTRAP_HISTORY_INVALID"
+        if target_reached
+        else "BACKWARD_BOOTSTRAP_FAILED"
+    )
+    row = {
+        **applied,
+        "actual_start_s": float(start),
+        "actual_end_s": output.get("time_s"),
+        "input_checkpoint": checkpoint,
+        "output_checkpoint": output,
+        "started_at": started_at,
+        "ended_at": utc_stamp(),
+        "returncode": int(returncode),
+        "solver_started": bool(run_status.get("solver_started")),
+        "steps_completed": run_status.get("steps_completed"),
+        "wall_seconds": time.monotonic() - started,
+        "terminal_reason": terminal_reason,
+        "primary_error": None if history_ready else terminal_reason,
+        "backward_history": history,
+        "maximum_courant_limit": courant_limit,
+        **segment,
+    }
+    journal["phases"].append(row)
+    journal["updated_at"] = utc_stamp()
+    write_json_atomic(run_root / "stage_journal.json", journal)
+    return {
+        "complete": history_ready,
+        "partial": partial,
+        "row": row,
+        "history": history,
+        "checkpoint": output,
+        "returncode": int(returncode),
+    }
+
+
 def _log_file(case: Path) -> Path:
     candidates = [case / "log.foamRun", case / "PyFoamRunner.foamRun.logfile"]
     return next((path for path in candidates if path.is_file()), candidates[0])
@@ -879,8 +1130,78 @@ def execute(
             if str(stage.get("scheme") or "").lower() == "backward":
                 history = _history_evidence(case, float(stage["dt_s"]))
                 if not history["valid"]:
-                    raise RuntimeError(
-                        "TEMPORAL_HISTORY_MISSING: backward requires the current state and two consecutive previous target-deltaT states"
+                    bootstrap_result = _bootstrap_backward_history(
+                        case=case,
+                        run_root=run_root,
+                        stage=stage,
+                        project_root=project_root,
+                        runtime_base=runtime_base,
+                        journal=journal,
+                        n_cores=n_cores,
+                        timeout_min=timeout_min,
+                        automatic_core_selection=automatic_core_selection,
+                        renumber_before_decompose=renumber_before_decompose,
+                    )
+                    if not bootstrap_result["complete"]:
+                        reason = str(
+                            (bootstrap_result.get("row") or {}).get("terminal_reason")
+                            or "BACKWARD_BOOTSTRAP_FAILED"
+                        )
+                        manifest.update(
+                            execution_outcome=(
+                                ExecutionOutcome.PAUSED.value
+                                if bootstrap_result.get("partial")
+                                else ExecutionOutcome.ERROR.value
+                            ),
+                            restartable=bool(
+                                (bootstrap_result.get("checkpoint") or {}).get("valid")
+                            ),
+                            current_phase=str(stage["stage"]),
+                            current_time_s=(
+                                bootstrap_result.get("checkpoint") or {}
+                            ).get("time_s"),
+                            terminal_reason=reason,
+                            primary_error=(bootstrap_result.get("row") or {}).get(
+                                "primary_error"
+                            ),
+                            updated_at=utc_stamp(),
+                        )
+                        write_json_atomic(run_root / "case_manifest.json", manifest)
+                        transition_execution_state(
+                            case,
+                            (
+                                CanonicalExecutionState.PAUSED_RECOVERABLE
+                                if bootstrap_result.get("partial")
+                                else CanonicalExecutionState.FAILED
+                            ),
+                            phase=str(stage["stage"]),
+                            run_id=case_id,
+                            reason=reason,
+                            evidence=bootstrap_result.get("checkpoint") or {},
+                            returncode=int(bootstrap_result.get("returncode") or 0),
+                            force=True,
+                        )
+                        clear_active_runtime(
+                            project_root,
+                            {
+                                **runtime_base,
+                                "phase": str(stage["stage"]),
+                                "status": manifest["execution_outcome"],
+                                "terminal_reason": reason,
+                            },
+                        )
+                        return 0 if bootstrap_result.get("partial") else 2
+                    input_checkpoint = dict(bootstrap_result["checkpoint"])
+                    history = dict(bootstrap_result["history"])
+                    transition_execution_state(
+                        case,
+                        CanonicalExecutionState.RUNNING,
+                        phase=str(stage["stage"]),
+                        run_id=case_id,
+                        idempotency_key=phase_key,
+                        reason="backward_history_ready",
+                        evidence=history,
+                        force=True,
                     )
             else:
                 history = {}

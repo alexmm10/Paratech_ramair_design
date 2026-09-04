@@ -30,6 +30,7 @@ from workflow_backend import (
     validation_publish_command,
     validation_monitor_snapshot,
     request_openfoam_clean_stop,
+    request_openfoam_sweep_stop,
 )
 
 
@@ -372,19 +373,40 @@ def _validation_execution_monitor(root: Path, refresh_seconds: int) -> None:
                 charts[1].pyplot(coefficient_plot, width="stretch")
             finally:
                 close_figures(residual_plot, coefficient_plot)
-        stop_cols = st.columns(2)
+        is_queue = bool(
+            job is not None
+            and (
+                job.stage in {"solver_sweep", "ls1_validation_solver_queue"}
+                or any("ramair_2d_openfoam_sweep.py" in str(part) for part in job.command)
+            )
+        )
+        stop_cols = st.columns(3 if is_queue else 2)
         running_evidence = live_status in {"RUNNING", "STOP_REQUESTED", "STOPPING"}
-        if stop_cols[0].button(
-            "Solicitar parada limpia",
-            disabled=not (running_evidence or (job is not None and job.status == "RUNNING")),
+        controls_enabled = running_evidence or (job is not None and job.status == "RUNNING")
+        if is_queue and stop_cols[0].button(
+            "Guardar caso y pasar al siguiente",
+            disabled=not controls_enabled,
+            key=f"ls1-validation-skip-current-{case.name}",
+            help="Escribe el estado actual, detiene sólo este ángulo y continúa con el siguiente de la cola.",
+        ):
+            marker = request_openfoam_sweep_stop(job.command, scope="current")
+            st.warning(f"Parada limpia del ángulo solicitada; la cola continuará. Control: {marker}")
+        stop_index = 1 if is_queue else 0
+        if stop_cols[stop_index].button(
+            "Pausar toda la cola" if is_queue else "Solicitar parada limpia",
+            disabled=not controls_enabled,
             key=f"ls1-validation-clean-stop-{case.name}",
             help="Cambia stopAt a writeNow; OpenFOAM escribe un checkpoint antes de salir.",
         ):
-            backup = request_openfoam_clean_stop(case, "writeNow")
+            if is_queue:
+                backup = request_openfoam_sweep_stop(job.command, scope="queue")
+            else:
+                backup = request_openfoam_clean_stop(case, "writeNow")
             if job is not None and job.status == "RUNNING":
                 manager.mark_stop_requested(job)
             st.warning(f"Parada limpia solicitada. Copia de controlDict: {backup}")
-        if stop_cols[1].button(
+        interrupt_index = 2 if is_queue else 1
+        if stop_cols[interrupt_index].button(
             "Interrumpir solver que no responde",
             disabled=not running_evidence,
             key=f"ls1-validation-interrupt-{case.name}",

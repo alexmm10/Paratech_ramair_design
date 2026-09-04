@@ -84,6 +84,16 @@ def queue_path(project_root: Path) -> Path:
     return queue_paths(project_root)["json"]
 
 
+def queue_control_path(project_root: Path) -> Path:
+    return active_workspace_root(Path(project_root).resolve()) / ".urans_queue_control_request.json"
+
+
+def _queue_control_action(project_root: Path) -> str | None:
+    request = read_json(queue_control_path(project_root), {}) or {}
+    action = str(request.get("action") or "")
+    return action if action in {"pause_current_continue", "pause_queue"} else None
+
+
 def _write_csv_atomic(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     handle, temporary_name = tempfile.mkstemp(
@@ -263,6 +273,7 @@ def execute_queue(
         return state
     available, aliases = _available_rows(project_root)
     start_index = int(state.get("current_index") or 0) if resume else 0
+    queue_control_path(project_root).unlink(missing_ok=True)
     state["status"] = "RUNNING"
     _persist(project_root, state)
     for index in range(start_index, len(state["runs"])):
@@ -328,6 +339,14 @@ def execute_queue(
                 and str(refreshed.get("terminal_reason") or "")
                 == "USER_REQUESTED_STOP"
             ):
+                action = _queue_control_action(project_root) or "pause_queue"
+                if action == "pause_current_continue":
+                    entry["result"] = "PAUSED_AND_SKIPPED_BY_USER"
+                    entry["terminal_reason"] = "USER_REQUESTED_SKIP"
+                    queue_control_path(project_root).unlink(missing_ok=True)
+                    state["current_index"] = index + 1
+                    _persist(project_root, state)
+                    continue
                 state["status"] = "PAUSED_BY_USER"
                 state["current_index"] = index
                 _persist(project_root, state)

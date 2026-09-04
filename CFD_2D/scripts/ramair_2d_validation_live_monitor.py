@@ -22,6 +22,7 @@ from ramair_2d_study_registry import (
     write_json_atomic,
 )
 from ramair_2d_execution_registry import load_registry
+from ramair_execution_control import discover_live_solver_cases
 from ramair_monitor_core import parse_openfoam_lines
 
 
@@ -189,6 +190,27 @@ def resolve_live_execution(
                     or runtime.get("mpi_ranks")
                 ),
             }
+        live = discover_live_solver_cases(active_workspace_root(Path(project_root).resolve()))
+        if live:
+            case = Path(str(live[0]["case_dir"]))
+            is_rans = "checkpoints" in case.parts
+            owner = case.parent
+            metadata = read_json(owner / ("checkpoint_manifest.json" if is_rans else "case_manifest.json"), {}) or {}
+            return {
+                "run_id": metadata.get("checkpoint_id") or metadata.get("case_id") or owner.name,
+                "case_id": metadata.get("case_id") or owner.name,
+                "case_path": str(case),
+                "mode": "RANS" if is_rans else "URANS",
+                "run_kind": "RECOVERED_LIVE_PROCESS",
+                "topology": metadata.get("topology"),
+                "mesh_id": metadata.get("mesh_id") or owner.name,
+                "mesh_level": metadata.get("mesh_level"),
+                "alpha_deg": metadata.get("alpha_deg"),
+                "stage": "SIMPLE" if is_rans else metadata.get("current_phase"),
+                "status": "RUNNING",
+                "queue_position": metadata.get("queue_position"),
+                "queue_total": metadata.get("queue_total"),
+            }
     registry = load_registry(Path(project_root))
     target_id = (
         registry.get("active_run_id")
@@ -276,6 +298,10 @@ def build_monitor_snapshot(
         if recent.get("execution")
         else None
     )
+    if mode == "RANS" and elapsed is not None and str(case_manifest.get("status") or "") in {
+        "RANS_BASE_EXTENDING", "RANS_BASE_RUNNING"
+    }:
+        elapsed += float(case_manifest.get("total_wall_time") or 0.0)
     steps_done = int(recent.get("steps_total") or len(recent.get("iterations") or []))
     remaining = None
     performance = _performance(list(recent.get("execution") or []))

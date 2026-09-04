@@ -15,7 +15,11 @@ SCRIPTS = ROOT / "CFD_2D/scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 from ramair_2d_convergence_analysis import welch_spectrum  # noqa: E402
-from ramair_2d_urans_review import _select_analysis_window, review_run  # noqa: E402
+from ramair_2d_urans_review import (  # noqa: E402
+    _maximum_normal_thickness,
+    _select_analysis_window,
+    review_run,
+)
 from ramair_2d_study_registry import default_study_config  # noqa: E402
 from ramair_2d_validation_study import (  # noqa: E402
     _plan_config_for_topology,
@@ -67,6 +71,24 @@ def test_welch_uses_projected_reference_length_for_st_and_wave_number() -> None:
     assert spectrum["detrend"] == "constant"
 
 
+def test_profile_thickness_is_measured_normal_to_mean_camber() -> None:
+    x = np.linspace(1.0, 0.0, 301)
+    camber = 0.12 * x
+    half_normal = 0.08 * np.sin(np.pi * x)
+    normal_scale = math.sqrt(1.0 + 0.12**2)
+    upper = camber + half_normal * normal_scale
+    lower = camber - half_normal * normal_scale
+    contour = pd.DataFrame({
+        "x_m": np.r_[x, x[::-1]],
+        "z_m": np.r_[upper, lower[::-1]],
+    })
+    result = _maximum_normal_thickness(contour)
+    assert result is not None
+    thickness, x_location = result
+    assert thickness == pytest.approx(0.16, rel=0.015)
+    assert x_location == pytest.approx(0.5, abs=0.02)
+
+
 def test_cummings_package_sets_topology_specific_production_duration() -> None:
     config = default_study_config()
     config["temporal_packages"]["active"] = "cummings_closed_low_cost"
@@ -77,6 +99,8 @@ def test_cummings_package_sets_topology_specific_production_duration() -> None:
         plan = _stage_plan(dt_s=0.0001, condition=condition, config=effective)
         assert package == "cummings_closed_low_cost"
         assert plan["stages"][-1]["duration_tc"] == pytest.approx(expected)
+        if topology == "open":
+            assert [row["dt_factor"] for row in plan["stages"][:3]] == [0.02, 0.05, 0.10]
 
 
 def test_partial_urans_review_writes_frequency_and_moving_statistics(tmp_path: Path) -> None:

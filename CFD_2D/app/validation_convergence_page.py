@@ -23,12 +23,15 @@ from workflow_backend import (
     open_local_folder,
     open_paraview_case,
     open_validation_mesh_viewer,
+    interrupt_openfoam_case,
     request_openfoam_clean_stop,
     request_validation_pimple_stop,
     request_validation_rans_stop,
+    request_validation_urans_stop,
     save_validation_study_config,
     validation_monitor_snapshot,
     validation_live_execution,
+    validation_live_solver_cases,
     validation_campaign_command,
     validation_urans_case_snapshot,
     validation_urans_queue_command,
@@ -241,6 +244,21 @@ def _postprocess_product_browser(
                 for grouped in (manifest.get("groups") or {}).values()
                 for row in grouped
             ]
+        known_paths = {str(row.get("path") or "") for row in rows}
+        for path in sorted(manifest_path.parent.rglob("*")):
+            if not path.is_file() or path.suffix.lower() not in {
+                ".png", ".jpg", ".jpeg", ".gif", ".mp4", ".webm",
+            }:
+                continue
+            relative = str(path.relative_to(manifest_path.parent))
+            if relative not in known_paths:
+                rows.append({
+                    "name": path.name,
+                    "path": relative,
+                    "generation_status": "AVAILABLE",
+                    "bytes": path.stat().st_size,
+                    "group": "discovered_visual_product",
+                })
         def product_path(row: dict[str, Any]) -> Path:
             value = Path(str(row.get("path") or ""))
             if value.is_absolute() or int(manifest.get("schema_version") or 0) < 3:
@@ -281,14 +299,29 @@ def _postprocess_product_browser(
             hide_index=True,
             width="stretch",
         )
-        controls = st.columns(2)
-        show_images = controls[0].toggle(
-            "Cargar y mostrar todas las imágenes",
+        def is_paraview_product(row: dict[str, Any]) -> bool:
+            path = product_path(row)
+            if any("paraview" in part.lower() for part in path.parts):
+                return True
+            name = path.name
+            return name.startswith((
+                "Cp_", "Velocity_", "Pressure_", "Vorticity_", "Q_positive_",
+                "Courant_", "YPlus_",
+            )) or "streamlines" in name.lower() or "contour" in name.lower()
+
+        controls = st.columns(3)
+        show_diagnostics = controls[0].toggle(
+            "Mostrar coeficientes y diagnósticos",
             value=False,
-            key=f"postprocess-browser-images-{key_scope}",
+            key=f"postprocess-browser-diagnostics-{key_scope}",
         )
-        play_animations = controls[1].toggle(
-            "Cargar y mostrar las animaciones",
+        show_paraview = controls[1].toggle(
+            "Mostrar productos de ParaView",
+            value=False,
+            key=f"postprocess-browser-paraview-{key_scope}",
+        )
+        play_animations = controls[2].toggle(
+            "Mostrar animaciones",
             value=False,
             key=f"postprocess-browser-animations-{key_scope}",
             help="Al desactivarlo se retiran los reproductores y se detiene la reproducción.",
@@ -302,9 +335,14 @@ def _postprocess_product_browser(
             and "pressure_frames" not in product_path(row).parts
             and "courant_hotspots" not in product_path(row).name.lower()
         ]
-        if show_images and image_rows:
+        selected_images = [
+            row for row in image_rows
+            if (show_paraview and is_paraview_product(row))
+            or (show_diagnostics and not is_paraview_product(row))
+        ]
+        if selected_images:
             columns = st.columns(2)
-            for index, row in enumerate(image_rows):
+            for index, row in enumerate(selected_images):
                 path = product_path(row)
                 if path.is_file():
                     columns[index % 2].image(
@@ -324,11 +362,7 @@ def _postprocess_product_browser(
                         st.image(str(path), caption=path.name, width="stretch")
                     else:
                         st.video(str(path), autoplay=True, loop=True)
-    if inline:
-        render_browser()
-    else:
-        with st.expander("Postprocess products", expanded=False):
-            render_browser()
+    render_browser()
 
 
 def _selected_checkpoint(
@@ -639,10 +673,11 @@ def _render_live_monitor(
     follow_active_execution: bool,
     pinned_run_id: str | None,
     refresh_seconds: int,
+    refresh_enabled: bool,
     tc_s: float,
     key_scope: str,
 ) -> None:
-    @st.fragment(run_every=refresh_seconds)
+    @st.fragment(run_every=refresh_seconds if refresh_enabled else None)
     def monitor_fragment() -> None:
         try:
             # Resolve from disk on every tick so a queue can switch canonical
@@ -977,6 +1012,22 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
                 if str(row.get("run_id")) == selected_monitor_id
             )
             pinned_run_id = selected_monitor_id
+        live_solver_cases = validation_live_solver_cases(root)
+        live_solver = live_solver_cases[0] if live_solver_cases else None
+        if live_solver is not None and (
+            monitored_execution is None
+            or str(monitored_execution.get("status") or "") not in {"RUNNING", "STOP_REQUESTED", "STOPPING"}
+        ):
+            live_case = Path(str(live_solver["case_dir"]))
+            is_rans_case = "checkpoints" in live_case.parts
+            monitored_execution = {
+                "run_id": live_case.parent.name,
+                "mesh_id": live_case.parent.name if is_rans_case else "",
+                "case_path": str(live_case),
+                "mode": "RANS" if is_rans_case else "URANS",
+                "stage": "SIMPLE" if is_rans_case else "PIMPLE",
+                "status": "RUNNING",
+            }
         if monitored_execution and monitored_execution.get("case_path"):
             if monitored_execution.get("error"):
                 st.error(
@@ -988,58 +1039,89 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
                     st.markdown(
                         "**Remediation:** " + " · ".join(map(str, remediation))
                     )
+            manager = JobManager(root)
+            active_jobs = manager.active_jobs()
+            active_job = active_jobs[0] if active_jobs else None
+            refresh_enabled = bool(
+                live_solver is not None
+                or (active_job is not None and active_job.status in {"RUNNING", "STOP_REQUESTED", "STOPPING"})
+            )
             _render_live_monitor(
                 root=root,
                 meshes=meshes,
                 follow_active_execution=bool(follow_active),
                 pinned_run_id=None if follow_active else pinned_run_id,
                 refresh_seconds=int(refresh_seconds),
+                refresh_enabled=refresh_enabled,
                 tc_s=float(condition["tc_s"]),
                 key_scope="active",
             )
-            manager = JobManager(root)
-            active_jobs = manager.active_jobs()
-            active_job = active_jobs[0] if active_jobs else None
             live_status = str(monitored_execution.get("status") or "")
-            stop_columns = st.columns([1, 1, 4])
-            if active_job is not None and active_job.status == "RUNNING":
-                if stop_columns[0].button(
-                    "Solicitar parada",
-                    key="validation-global-request-stop",
-                ):
-                    mode = str(monitored_execution.get("mode") or "").upper()
-                    try:
-                        if "PIMPLE" in mode or "pimple" in active_job.stage.lower():
-                            request_validation_pimple_stop(root)
-                        elif "RANS" in mode or "rans" in active_job.stage.lower():
-                            request_validation_rans_stop(root, active_job.command)
-                        else:
-                            request_openfoam_clean_stop(
-                                Path(str(monitored_execution["case_path"])),
-                                "writeNow",
-                            )
+            mode = str(monitored_execution.get("mode") or "").upper()
+            rans_queue = next((
+                _read_json(active / name) for name in
+                ("rans_selection_queue_state.json", "rans_queue_state.json")
+                if str(_read_json(active / name).get("status") or "") == "RUNNING"
+            ), {})
+            urans_queue = _read_json(active / "urans_queue_state.json")
+            queue_active = bool(rans_queue) if mode == "RANS" else (
+                str(urans_queue.get("status") or "") == "RUNNING" if mode == "URANS" else False
+            )
+            verified_live = live_solver is not None or (
+                active_job is not None and active_job.status in {"RUNNING", "STOP_REQUESTED", "STOPPING"}
+            )
+            if live_status in {"RUNNING", "STOP_REQUESTED", "STOPPING"} and verified_live:
+                stop_columns = st.columns([1.4, 1.4, 1.0, 2.2])
+
+                def request_pause(scope: str) -> None:
+                    command = active_job.command if active_job is not None else []
+                    if "PIMPLE" in mode:
+                        request_validation_pimple_stop(root)
+                    elif mode == "RANS":
+                        request_validation_rans_stop(root, command, scope=scope)
+                    elif mode == "URANS":
+                        request_validation_urans_stop(root, scope=scope)
+                    else:
+                        request_openfoam_clean_stop(Path(str(monitored_execution["case_path"])), "writeNow")
+                    if active_job is not None:
                         manager.mark_stop_requested(active_job)
-                        st.warning(
-                            "Parada limpia solicitada. Se conservara el ultimo "
-                            "estado escrito para reanudar la ejecucion."
-                        )
+
+                if queue_active and stop_columns[0].button(
+                    "Guardar caso y pasar al siguiente",
+                    key="validation-global-skip-current",
+                ):
+                    try:
+                        request_pause("current")
+                        st.warning("Se guardará el estado actual y la cola continuará con el siguiente caso.")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"No se pudo pausar el caso: {exc}")
+                if stop_columns[1].button(
+                    "Pausar toda la cola" if queue_active else "Pausar ejecución",
+                    key="validation-global-pause-queue",
+                ):
+                    try:
+                        request_pause("queue")
+                        st.warning("Parada limpia solicitada; los datos escritos quedan disponibles para reanudar.")
                         st.rerun()
                     except Exception as exc:
                         st.error(f"No se pudo solicitar la parada: {exc}")
-            elif active_job is not None and active_job.status in {
-                "STOP_REQUESTED", "STOPPING",
-            }:
-                stop_columns[1].warning("Parada limpia en curso")
-                if stop_columns[0].button(
-                    "Forzar parada",
-                    key="validation-global-force-stop",
+                stop_requested = (
+                    (active / ".rans_queue_stop_request.json").is_file()
+                    or (active / ".urans_queue_control_request.json").is_file()
+                    or Path(str(monitored_execution["case_path"]), ".ramair_stop_request.json").is_file()
+                )
+                if stop_requested and stop_columns[2].button(
+                    "Forzar parada", key="validation-global-force-stop"
                 ):
-                    manager.force_stop(active_job)
+                    if active_job is not None:
+                        manager.force_stop(active_job)
+                    interrupt_openfoam_case(Path(str(monitored_execution["case_path"])))
                     st.rerun()
             elif live_status in {"RUNNING", "STOP_REQUESTED", "STOPPING"}:
-                stop_columns[0].warning(
-                    "El registro indicaba una ejecucion activa, pero no existe "
-                    "un proceso propietario verificable. Se reconciliara al refrescar."
+                st.warning(
+                    "El registro era antiguo y no existe un solver verificable. "
+                    "No se enviará una señal a un PID no confirmado."
                 )
         else:
             st.caption(
@@ -2630,26 +2712,26 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
             )
         else:
             topology_options = [value for value in ("closed", "open") if any(str(row.get("topology")) == value for row in canonical_rows)]
-            topology = st.segmented_control(
+            topology = st.selectbox(
                 "Topología",
                 topology_options,
                 format_func=lambda value: "Perfil cerrado" if value == "closed" else "Perfil abierto",
-                default=topology_options[0],
+                index=0,
                 key="validation-canonical-urans-topology",
             )
             topology_rows = [row for row in canonical_rows if str(row.get("topology")) == topology]
             levels = [value for value in MESH_LEVELS if any(str(row.get("mesh_level")) == value for row in topology_rows)]
-            mesh_level = st.segmented_control(
+            mesh_level = st.selectbox(
                 "Nivel de malla", levels, format_func=str.title,
-                default=levels[0],
+                index=0,
                 key="validation-canonical-urans-level",
             ) if levels else None
             level_rows = [row for row in topology_rows if str(row.get("mesh_level")) == mesh_level]
             angles = sorted({float(row.get("alpha_deg") or 0.0) for row in level_rows})
-            alpha_deg = st.segmented_control(
+            alpha_deg = st.selectbox(
                 "Ángulo de ataque", angles,
                 format_func=lambda value: f"{value:g}°",
-                default=angles[0],
+                index=0,
                 key="validation-canonical-urans-angle",
             ) if angles else None
             angle_rows = [

@@ -48,7 +48,10 @@ from ramair_2d_rans_review import (
     generate_review_diagnostics,
     review_manifest,
 )
-from ramair_2d_checkpoint_integrity import checkpoint_mesh_identity
+from ramair_2d_checkpoint_integrity import (
+    POLYMESH_FILES,
+    checkpoint_mesh_identity,
+)
 from ramair_2d_mesh_numerics import quality_controls_for_mesh
 
 
@@ -195,6 +198,12 @@ def _queue_stop_marker(project_root: Path) -> Path:
 
 def _stop_requested(project_root: Path) -> bool:
     return _queue_stop_marker(project_root).is_file()
+
+
+def _queue_stop_action(project_root: Path) -> str | None:
+    request = read_json(_queue_stop_marker(project_root), {}) or {}
+    action = str(request.get("action") or "pause_queue")
+    return action if action in {"pause_current_continue", "pause_queue"} else "pause_queue"
 
 
 def _review_allows_use(project_root: Path, mesh_id: str) -> dict[str, bool]:
@@ -629,6 +638,33 @@ def compatibility_contract(
     }
 
 
+def _restart_freestream_alpha_deg(restart_zero: Path | None) -> float | None:
+    """Read the physical incidence encoded in the restart U boundary field."""
+    if restart_zero is None:
+        return None
+    field = restart_zero / "U"
+    if not field.is_file():
+        field = restart_zero / "U.gz"
+    if not field.is_file():
+        return None
+    try:
+        if field.suffix == ".gz":
+            with gzip.open(field, "rt", encoding="utf-8", errors="replace") as stream:
+                text = stream.read()
+        else:
+            text = field.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    match = re.search(
+        r"freestreamValue\s+uniform\s*\(\s*"
+        r"([-+0-9.eE]+)\s+([-+0-9.eE]+)\s+[-+0-9.eE]+\s*\)",
+        text,
+    )
+    if not match:
+        return None
+    return math.degrees(math.atan2(float(match.group(2)), float(match.group(1))))
+
+
 def canonical_rans_state(
     status: str,
     *,
@@ -706,6 +742,41 @@ def checkpoint_status(project_root: Path, mesh_id: str) -> dict[str, Any]:
         else None
     )
     checkpoint_case = _checkpoint_root(project_root, mesh_id) / "case"
+    actual_restart_alpha = _restart_freestream_alpha_deg(
+        Path(str(restart_zero)) if restart_zero else None
+    )
+    expected_restart_alpha = float(contract["physics"]["alpha_deg"])
+    if (
+        actual_restart_alpha is not None
+        and not math.isclose(
+            actual_restart_alpha,
+            expected_restart_alpha,
+            abs_tol=5.0e-2,
+        )
+    ):
+        status = "CHECKPOINT_STALE_PHYSICS_CHANGED"
+        compatibility_warnings.append(
+            "RESTART_FREESTREAM_ANGLE_MISMATCH: "
+            f"field={actual_restart_alpha:.6g} deg, "
+            f"expected={expected_restart_alpha:.6g} deg"
+        )
+    checkpoint_poly = checkpoint_case / "constant/polyMesh"
+    missing_poly = [name for name in POLYMESH_FILES if not (checkpoint_poly / name).is_file()]
+    if missing_poly:
+        source_case = Path(str(manifest.get("source_case") or ""))
+        source_poly = source_case / "constant/polyMesh"
+        source_identity = (
+            checkpoint_mesh_identity(source_case, Path(str(restart_zero)))
+            if restart_zero and source_case.is_dir()
+            else {}
+        )
+        if source_identity.get("status") == "READY":
+            checkpoint_poly.mkdir(parents=True, exist_ok=True)
+            for name in POLYMESH_FILES:
+                shutil.copy2(source_poly / name, checkpoint_poly / name)
+            compatibility_warnings.append(
+                "CHECKPOINT_POLYMESH_RESTORED_FROM_FIELD_COUNT_AND_PATCH_VERIFIED_SOURCE_CASE"
+            )
     checkpoint_identity: dict[str, Any] = {}
     if restart_zero and Path(str(restart_zero)).is_dir() and checkpoint_case.is_dir():
         checkpoint_identity = checkpoint_mesh_identity(
@@ -755,8 +826,20 @@ def checkpoint_status(project_root: Path, mesh_id: str) -> dict[str, Any]:
     automatic_gate_status = str(
         review.get("automatic_gate", {}).get("status") or ""
     )
+    observed_iterations = (
+        _pending_latest_iteration(checkpoint_case)
+        if checkpoint_case.is_dir()
+        else 0
+    )
+    reported_iterations = max(
+        int(manifest.get("iterations_completed") or 0),
+        int(manifest.get("absolute_simple_iteration") or 0),
+        int(observed_iterations),
+    )
     return {
         **manifest,
+        "iterations_completed": reported_iterations,
+        "absolute_simple_iteration": reported_iterations,
         "status": status,
         "rans_state": canonical_rans_state(
             status,
@@ -778,6 +861,8 @@ def checkpoint_status(project_root: Path, mesh_id: str) -> dict[str, Any]:
         "mesh_hash": checkpoint_identity.get("poly_mesh_hash") or manifest.get("mesh_hash"),
         "cell_count": checkpoint_identity.get("cell_count") or manifest.get("cell_count"),
         "initialization_risk": initialization_risk,
+        "expected_restart_alpha_deg": expected_restart_alpha,
+        "actual_restart_alpha_deg": actual_restart_alpha,
         "compatibility_warnings": compatibility_warnings,
     }
 
@@ -1088,8 +1173,16 @@ def _configure_simple_template(case: Path, rans: dict[str, Any]) -> None:
 
 def _select_source_run(project_root: Path, mesh_id: str) -> dict[str, Any]:
     study = load_study(project_root)
+    base_mesh_id = _base_mesh_id(mesh_id)
     candidates = [
-        row for row in study["run_matrix"]["runs"] if row["mesh_id"] == mesh_id
+        row
+        for row in study["run_matrix"]["runs"]
+        if row["mesh_id"] == base_mesh_id
+        and mesh_angle_id(
+            study,
+            base_mesh_id,
+            float(row.get("alpha_deg", 0.0)),
+        ) == mesh_id
     ]
     if not candidates:
         raise RuntimeError(f"No run-matrix entry exists for {mesh_id}")
@@ -1098,7 +1191,7 @@ def _select_source_run(project_root: Path, mesh_id: str) -> dict[str, Any]:
 
 def prepare_base(project_root: Path, mesh_id: str, *, overwrite: bool = False) -> dict[str, Any]:
     """Prepare one coherent mesh/physics/case package without running OpenFOAM."""
-    from ramair_2d_validation_study import prepare_checkpoint, prepare_run
+    from ramair_2d_validation_study import prepare_checkpoint
 
     project_root = Path(project_root).resolve()
     row = _select_source_run(project_root, mesh_id)
@@ -1110,8 +1203,9 @@ def prepare_base(project_root: Path, mesh_id: str, *, overwrite: bool = False) -
         / str(row["mesh_level"])
         / str(row["run_id"])
     )
-    if not (run_root / "case/system/controlDict").is_file():
-        prepare_run(project_root, str(row["run_id"]))
+    # A RANS base is built from the mesh and a dry canonical template.  If the
+    # target-angle URANS case does not exist yet, prepare_checkpoint can use a
+    # same-mesh sibling template and rewrites every angle-sensitive dictionary.
     manifest = prepare_checkpoint(project_root, mesh_id, overwrite=overwrite)
     study = load_study(project_root)
     mesh = _mesh(study, mesh_id)
@@ -1252,6 +1346,31 @@ def _run_command(command: list[str], cwd: Path) -> tuple[int, float]:
     started = time.monotonic()
     completed = subprocess.run(command, cwd=str(cwd))
     return int(completed.returncode), time.monotonic() - started
+
+
+def _observed_solver_wall_time_s(case: Path) -> float:
+    """Recover solver-active time from unique logs after an owner crash."""
+    pattern = re.compile(r"ExecutionTime\s*=\s*([0-9.eE+\-]+)\s*s")
+    candidates = [case / "log.foamRun", case / "PyFoamRunner.foamRun.logfile"]
+    candidates.extend((case / "steadyInitialization/history").glob("run_*/**/log.foamRun"))
+    candidates.extend((case / "steadyInitialization/history").glob("run_*/**/PyFoamRunner.foamRun.logfile"))
+    seen: set[str] = set()
+    total = 0.0
+    for path in candidates:
+        if not path.is_file():
+            continue
+        try:
+            raw = path.read_bytes()
+        except OSError:
+            continue
+        digest = hashlib.sha256(raw).hexdigest()
+        if digest in seen:
+            continue
+        seen.add(digest)
+        matches = pattern.findall(raw.decode("utf-8", errors="replace"))
+        if matches:
+            total += max(float(value) for value in matches)
+    return total
 
 
 def _normalized_field_hash(path: Path) -> str:
@@ -2063,6 +2182,12 @@ def _execute_base_unlocked(
         ),
         original_resolved_run_config=str(resolved_run_path),
     )
+    if run and existing_iteration > 0:
+        manifest["total_wall_time"] = max(
+            float(manifest.get("total_wall_time") or 0.0),
+            _observed_solver_wall_time_s(case),
+        )
+        manifest["wall_time_recovered_from_solver_logs"] = True
     write_json_atomic(checkpoint / "checkpoint_manifest.json", manifest)
     _register_base_execution(project_root, manifest, activate=True)
     if not run:
@@ -2579,6 +2704,7 @@ def _execute_queue_unlocked(
                 "TIMEOUT_PARTIAL": "PAUSED_TIMEOUT",
                 "PREMATURE_NORMAL_EXIT": "PAUSED_PREMATURE_NORMAL_EXIT",
             }.get(exit_reason, "PAUSED_PARTIAL")
+            stop_action = _queue_stop_action(project_root)
             state.update(
                 status=queue_status,
                 current_mesh_id=mesh_id,
@@ -2589,6 +2715,10 @@ def _execute_queue_unlocked(
                 updated_at=utc_stamp(),
             )
             write_json_atomic(state_path, state)
+            if exit_reason == "USER_STOPPED_PARTIAL" and stop_action == "pause_current_continue":
+                state["items"][mesh_id]["queue_action"] = "PAUSED_AND_SKIPPED_BY_USER"
+                _queue_stop_marker(project_root).unlink(missing_ok=True)
+                continue
             return state
     if run:
         state.update(status="COMPLETED", finished_at=utc_stamp())
@@ -2673,6 +2803,126 @@ def execute_queue(
     except BaseException as exc:
         lease.release(state="FAILED", error=str(exc))
         raise
+
+
+def execute_selection_queue(
+    project_root: Path,
+    case_specs: list[str],
+    *,
+    run: bool,
+    continue_on_nonfatal_failure: bool = True,
+) -> dict[str, Any]:
+    """Run an ordered RANS selection with durable resume and stop semantics."""
+    project_root = Path(project_root).resolve()
+    active = active_workspace_root(project_root)
+    state_path = active / "rans_selection_queue_state.json"
+    study = load_study(project_root)
+    ordered: list[dict[str, Any]] = []
+    for order, case_spec in enumerate(case_specs, start=1):
+        base_mesh_id, alpha_text = str(case_spec).rsplit(":", 1)
+        alpha_deg = float(alpha_text)
+        ordered.append({
+            "order": order,
+            "requested_case": str(case_spec),
+            "mesh_id": mesh_angle_id(study, base_mesh_id, alpha_deg),
+            "base_mesh_id": base_mesh_id,
+            "alpha_deg": alpha_deg,
+        })
+    previous = read_json(state_path, {}) or {}
+    same_order = [row["requested_case"] for row in ordered] == list(previous.get("order") or [])
+    prior_cases = {
+        str(row.get("requested_case")): row for row in previous.get("cases", [])
+    } if same_order else {}
+    state = {
+        "schema_version": 2,
+        "queue_id": previous.get("queue_id") if same_order else f"rans_selection_{utc_stamp().replace(':', '').replace('-', '')}",
+        "status": "RUNNING" if run else "PREPARED",
+        "order": [row["requested_case"] for row in ordered],
+        "cases": [],
+        "current_index": 0,
+        "total": len(ordered),
+        "resume_policy": "SKIP_COMPLETED_RESUME_FIRST_PARTIAL",
+        "updated_at": utc_stamp(),
+    }
+    if run:
+        _queue_stop_marker(project_root).unlink(missing_ok=True)
+    write_json_atomic(state_path, state)
+    first_pending_index: int | None = None
+    for index, requested in enumerate(ordered):
+        mesh_id = str(requested["mesh_id"])
+        status = checkpoint_status(project_root, mesh_id)
+        item = {**requested, **prior_cases.get(str(requested["requested_case"]), {})}
+        item.update(status)
+        state.update(
+            current_index=index,
+            current_mesh_id=mesh_id,
+            current_queue_position=index + 1,
+            current_target_iteration=target_for_iteration(
+                int(status.get("iterations_completed") or 0),
+                initial=RANS_INITIAL_TARGET,
+                extension=RANS_EXTENSION_BLOCK,
+                maximum=RANS_MAXIMUM_TARGET,
+            ),
+            updated_at=utc_stamp(),
+        )
+        if str(status.get("status")) in READY_STATUSES or int(status.get("iterations_completed") or 0) >= RANS_MAXIMUM_TARGET:
+            item["queue_action"] = "SKIPPED_COMPLETED"
+            state["cases"].append(item)
+            state["current_index"] = index + 1
+            write_json_atomic(state_path, state)
+            continue
+        if not run:
+            item["queue_action"] = "PREPARED"
+            state["cases"].append(item)
+            if first_pending_index is None:
+                first_pending_index = index
+            continue
+        write_json_atomic(state_path, state)
+        try:
+            result = execute_base(
+                project_root, mesh_id, run=True, overwrite=False,
+                consume_previous_stop_marker=False,
+            )
+        except Exception as exc:
+            result = {"mesh_id": mesh_id, "status": "RANS_BASE_FAILED", "message": str(exc)}
+        item.update(result)
+        state["cases"].append(item)
+        state["current_index"] = index + 1
+        state["updated_at"] = utc_stamp()
+        write_json_atomic(state_path, state)
+        if str(result.get("status")) == "RANS_PARTIAL":
+            action = _queue_stop_action(project_root)
+            if action == "pause_current_continue":
+                item["queue_action"] = "PAUSED_AND_SKIPPED_BY_USER"
+                _queue_stop_marker(project_root).unlink(missing_ok=True)
+                write_json_atomic(state_path, state)
+                continue
+            state.update(status="PAUSED_BY_USER", current_index=index)
+            write_json_atomic(state_path, state)
+            return state
+        if str(result.get("status")) in {"RANS_BASE_FAILED", "RANS_BASE_DIVERGED"} and not continue_on_nonfatal_failure:
+            state["status"] = "STOPPED_ON_FAILURE"
+            write_json_atomic(state_path, state)
+            return state
+    state["status"] = "COMPLETED" if run else "PREPARED"
+    state["current_index"] = (
+        len(ordered)
+        if run or first_pending_index is None
+        else first_pending_index
+    )
+    if not run and first_pending_index is not None:
+        pending = state["cases"][first_pending_index]
+        state["current_mesh_id"] = pending["mesh_id"]
+        state["current_queue_position"] = first_pending_index + 1
+        state["current_target_iteration"] = target_for_iteration(
+            int(pending.get("iterations_completed") or 0),
+            initial=RANS_INITIAL_TARGET,
+            extension=RANS_EXTENSION_BLOCK,
+            maximum=RANS_MAXIMUM_TARGET,
+        )
+    state["updated_at"] = utc_stamp()
+    write_json_atomic(state_path, state)
+    return state
 
 
 def checkpoint_table(project_root: Path) -> list[dict[str, Any]]:

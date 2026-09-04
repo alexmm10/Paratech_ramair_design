@@ -69,6 +69,17 @@ def test_illegal_review_transition_is_rejected(tmp_path: Path) -> None:
         transition_execution_state(tmp_path, "APPROVED")
 
 
+def test_completed_solver_segment_can_enter_the_next_urans_phase(tmp_path: Path) -> None:
+    transition_execution_state(tmp_path, "PREPARED", idempotency_key="phase-a")
+    transition_execution_state(tmp_path, "RUNNING", idempotency_key="phase-a")
+    transition_execution_state(tmp_path, "COMPLETED", idempotency_key="phase-a")
+    next_phase = transition_execution_state(
+        tmp_path, "RUNNING", idempotency_key="phase-b", phase="B"
+    )
+    assert next_phase["state"] == "RUNNING"
+    assert next_phase["phase"] == "B"
+
+
 def test_stale_running_record_becomes_recoverable_with_checkpoint(tmp_path: Path) -> None:
     (tmp_path / "1.25").mkdir()
     (tmp_path / ".ramair_solver_process.json").write_text(

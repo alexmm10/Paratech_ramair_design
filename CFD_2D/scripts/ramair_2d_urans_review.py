@@ -210,6 +210,89 @@ def _select_analysis_window(
     return "E", fallback_start, None, int(len(selected))
 
 
+def _maximum_normal_thickness(points: pd.DataFrame) -> tuple[float, float] | None:
+    """Return maximum thickness normal to the interpolated mean camber line."""
+    x_name = next((name for name in ("x_m", "x") if name in points.columns), None)
+    z_name = next((name for name in ("z_m", "y_m", "z", "y") if name in points.columns), None)
+    if x_name is None or z_name is None:
+        return None
+    x = pd.to_numeric(points[x_name], errors="coerce").to_numpy(dtype=float)
+    z = pd.to_numeric(points[z_name], errors="coerce").to_numpy(dtype=float)
+    finite = np.isfinite(x) & np.isfinite(z)
+    x, z = x[finite], z[finite]
+    if len(x) < 12:
+        return None
+    le = int(np.argmin(x))
+    branches = [(x[: le + 1], z[: le + 1]), (x[le:], z[le:])]
+
+    def collapse(branch_x: np.ndarray, branch_z: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        order = np.argsort(branch_x)
+        frame = pd.DataFrame({"x": branch_x[order], "z": branch_z[order]})
+        grouped = frame.groupby("x", sort=True, as_index=False)["z"].mean()
+        return grouped["x"].to_numpy(), grouped["z"].to_numpy()
+
+    branch_a = collapse(*branches[0])
+    branch_b = collapse(*branches[1])
+    x_min = max(float(branch_a[0].min()), float(branch_b[0].min()))
+    x_max = min(float(branch_a[0].max()), float(branch_b[0].max()))
+    if not x_max > x_min:
+        return None
+    grid = np.linspace(x_min, x_max, 801)
+    za = np.interp(grid, *branch_a)
+    zb = np.interp(grid, *branch_b)
+    upper, lower = (za, zb) if float(np.nanmean(za - zb)) >= 0.0 else (zb, za)
+    mean = 0.5 * (upper + lower)
+    slope = np.gradient(mean, grid)
+
+    def upper_at(value: float) -> float:
+        return float(np.interp(value, grid, upper))
+
+    def lower_at(value: float) -> float:
+        return float(np.interp(value, grid, lower))
+
+    def crossing(x0: float, z0: float, nx: float, nz: float, surface: Any) -> float | None:
+        limit = min(
+            (x_max - x0) / nx if nx > 1.0e-14 else math.inf,
+            (x_min - x0) / nx if nx < -1.0e-14 else math.inf,
+        )
+        limit = min(abs(float(limit)), x_max - x_min) if math.isfinite(limit) else x_max - x_min
+        if limit <= 0.0:
+            return None
+        def residual(distance: float) -> float:
+            xx = x0 + nx * distance
+            return z0 + nz * distance - surface(xx)
+        left, right = 0.0, limit * 0.999999
+        f_left, f_right = residual(left), residual(right)
+        if f_left == 0.0:
+            return 0.0
+        if f_left * f_right > 0.0:
+            return None
+        for _ in range(45):
+            middle = 0.5 * (left + right)
+            f_middle = residual(middle)
+            if f_left * f_middle <= 0.0:
+                right, f_right = middle, f_middle
+            else:
+                left, f_left = middle, f_middle
+        return 0.5 * (left + right)
+
+    best_thickness = 0.0
+    best_x = float(grid[len(grid) // 2])
+    for index in range(2, len(grid) - 2, 2):
+        norm = math.hypot(float(slope[index]), 1.0)
+        nx, nz = -float(slope[index]) / norm, 1.0 / norm
+        positive = crossing(float(grid[index]), float(mean[index]), nx, nz, upper_at)
+        negative = crossing(float(grid[index]), float(mean[index]), -nx, -nz, lower_at)
+        thickness = (
+            positive + negative
+            if positive is not None and negative is not None
+            else float(upper[index] - lower[index]) / norm
+        )
+        if thickness > best_thickness:
+            best_thickness, best_x = thickness, float(grid[index])
+    return (best_thickness, best_x) if best_thickness > 0.0 else None
+
+
 def _profile_thickness_m(metadata: dict[str, Any], chord_m: float) -> tuple[float, str]:
     for container in (metadata, metadata.get("operating_condition") or {}):
         for key in ("airfoil_thickness_m", "maximum_thickness_m", "profile_thickness_m"):
@@ -225,18 +308,13 @@ def _profile_thickness_m(metadata: dict[str, Any], chord_m: float) -> tuple[floa
     if points.is_file():
         try:
             table = pd.read_csv(points)
-            numeric = table.select_dtypes(include=[np.number])
-            vertical_name = next(
-                (name for name in ("z_m", "y_m", "z", "y") if name in table.columns),
-                None,
-            )
-            if vertical_name is not None or numeric.shape[1] >= 2:
-                vertical = pd.to_numeric(
-                    table[vertical_name] if vertical_name is not None else numeric.iloc[:, -1],
-                    errors="coerce",
-                ).dropna()
-                if not vertical.empty and float(vertical.max() - vertical.min()) > 0.0:
-                    return float(vertical.max() - vertical.min()), str(points)
+            result = _maximum_normal_thickness(table)
+            if result is not None:
+                thickness, x_location = result
+                return thickness, (
+                    f"{points}: maximum intrados-extrados distance normal to "
+                    f"mean camber at x={x_location:.8g} m"
+                )
         except (OSError, ValueError, pd.errors.ParserError):
             pass
     # LS(1)-0417 is the fixed Validation Lab profile; 17% is its nominal t/c.

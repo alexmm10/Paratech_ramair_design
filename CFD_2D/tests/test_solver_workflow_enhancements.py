@@ -1615,6 +1615,10 @@ def test_sweep_stop_request_is_written_at_variant_level(tmp_path: Path) -> None:
     payload = json.loads(marker.read_text(encoding="utf-8"))
     assert marker.parent == sweep_root
     assert payload["variant"] == "reference_uncut"
+    assert payload["action"] == "pause_queue"
+    marker = request_openfoam_sweep_stop(command, scope="current")
+    payload = json.loads(marker.read_text(encoding="utf-8"))
+    assert payload["action"] == "pause_current_continue"
 
 
 def test_stationary_only_staged_result_is_not_validation_eligible(tmp_path: Path) -> None:

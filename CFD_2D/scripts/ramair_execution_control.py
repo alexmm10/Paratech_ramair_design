@@ -78,7 +78,16 @@ _ALLOWED_TRANSITIONS = {
     },
     ExecutionState.PAUSED_RECOVERABLE: {ExecutionState.RUNNING, ExecutionState.FAILED, ExecutionState.REJECTED},
     ExecutionState.FAILED: {ExecutionState.PREPARED, ExecutionState.RUNNING, ExecutionState.REJECTED},
-    ExecutionState.COMPLETED: {ExecutionState.REVIEW_REQUIRED, ExecutionState.APPROVED, ExecutionState.REJECTED},
+    # A staged URANS timeline completes one solver subprocess per phase.  The
+    # next phase has a different idempotency key and legitimately returns the
+    # same canonical case to RUNNING; final-case replay protection is enforced
+    # by the canonical manifest/action gate, not this segment lifecycle.
+    ExecutionState.COMPLETED: {
+        ExecutionState.RUNNING,
+        ExecutionState.REVIEW_REQUIRED,
+        ExecutionState.APPROVED,
+        ExecutionState.REJECTED,
+    },
     ExecutionState.REVIEW_REQUIRED: {ExecutionState.APPROVED, ExecutionState.REJECTED, ExecutionState.RUNNING},
     ExecutionState.APPROVED: {ExecutionState.REJECTED},
     ExecutionState.REJECTED: {ExecutionState.PREPARED, ExecutionState.RUNNING},
@@ -362,6 +371,74 @@ def publish_solver_process(
 
 def load_solver_process(case_dir: Path) -> dict[str, Any]:
     return read_json(Path(case_dir).resolve() / PROCESS_RECORD, {}) or {}
+
+
+def discover_live_solver_cases(project_root: Path) -> list[dict[str, Any]]:
+    """Find live OpenFOAM cases even when their Python owner has disappeared.
+
+    Process records are authoritative when their PID identity still matches.
+    The Linux ``/proc`` fallback recovers MPI/foamRun children left behind by a
+    crashed UI worker, while only accepting working directories below the
+    requested project root.
+    """
+    root = Path(project_root).resolve()
+    discovered: dict[Path, dict[str, Any]] = {}
+    for record_path in root.rglob(PROCESS_RECORD):
+        record = read_json(record_path, {}) or {}
+        case_dir = record_path.parent.resolve()
+        pid = int(record.get("pid") or 0)
+        token = str(record.get("pid_start_token") or "") or None
+        if pid_is_alive(pid, token):
+            discovered[case_dir] = {
+                **record,
+                "case_dir": str(case_dir),
+                "pid": pid,
+                "live": True,
+                "discovery_source": "solver_process_record",
+            }
+    if os.name != "nt" and Path("/proc").is_dir():
+        command_markers = ("foamrun", "simplefoam", "pimplefoam", "mpirun", "mpiexec")
+        for process_dir in Path("/proc").glob("[0-9]*"):
+            try:
+                pid = int(process_dir.name)
+                command = (process_dir / "cmdline").read_bytes().replace(b"\0", b" ").decode(
+                    "utf-8", errors="replace"
+                ).lower()
+                if not any(marker in command for marker in command_markers):
+                    continue
+                cwd = (process_dir / "cwd").resolve()
+                cwd.relative_to(root)
+            except (OSError, ValueError):
+                continue
+            case_dir = cwd
+            while case_dir != root and not (case_dir / "system/controlDict").is_file():
+                case_dir = case_dir.parent
+            if not (case_dir / "system/controlDict").is_file():
+                continue
+            existing = discovered.get(case_dir, {})
+            existing_pid = int(existing.get("pid") or 0)
+            # Prefer the recorded owner. For an orphan, retain the smallest PID
+            # in the process group so a later forced stop targets the full tree.
+            if existing_pid and existing.get("discovery_source") == "solver_process_record":
+                continue
+            chosen_pid = min(value for value in (existing_pid, pid) if value > 0)
+            discovered[case_dir] = {
+                **existing,
+                "case_dir": str(case_dir),
+                "pid": chosen_pid,
+                "process_group_id": process_group_id(chosen_pid),
+                "pid_start_token": process_start_token(chosen_pid),
+                "status": "RUNNING",
+                "live": True,
+                "discovery_source": "linux_proc_openfoam_child",
+                "command": command.strip(),
+                "updated_unix": time.time(),
+            }
+    return sorted(
+        discovered.values(),
+        key=lambda row: float(row.get("updated_unix") or 0.0),
+        reverse=True,
+    )
 
 
 def signal_solver_process(case_dir: Path, sig: int = signal.SIGINT) -> dict[str, Any]:

@@ -267,7 +267,7 @@ def render_closed_experimental_mesh(
             boundary["te_segment_early_start_enabled"] = st.toggle(
                 "Adelantar el inicio del segmento TE",
                 value=bool(boundary.get("te_segment_early_start_enabled", False)),
-                disabled=(not automatic or tangential_method == "bump_split_progression"),
+                disabled=not automatic,
                 help=(
                     "Agrupa con el cap redondeado la aproximación de intradós/extradós situada "
                     "por detrás del x/c elegido. Solo modifica la segmentación para Bump."
@@ -275,7 +275,6 @@ def render_closed_experimental_mesh(
                 key="closed-exp-te-early-enabled",
             )
             if tangential_method == "bump_split_progression":
-                boundary["te_segment_early_start_enabled"] = False
                 boundary["split_progression_midpoint_x_chord"] = st.number_input(
                     "Punto de división de cuerpos [x/c]", 0.20, 0.80,
                     float(boundary.get("split_progression_midpoint_x_chord", 0.50)),
@@ -288,6 +287,22 @@ def render_closed_experimental_mesh(
                     float(boundary.get("te_segment_start_x_over_c", 0.98)),
                     format="%.4f", key="closed-exp-te-start-xc",
                     help="0.98 incluye en la ley Bump del TE todo el contorno con x/c >= 0.98.",
+                )
+            boundary["leading_segment_extension_enabled"] = st.toggle(
+                "Extender el segmento LE sobre la pared",
+                value=bool(boundary.get("leading_segment_extension_enabled", False)),
+                help=(
+                    "Reserva una aproximación suave a ambos lados del LE. Es independiente "
+                    "del segmento TE y no modifica las coordenadas del perfil."
+                ),
+                key="closed-exp-le-extension-enabled",
+            )
+            if boundary["leading_segment_extension_enabled"]:
+                boundary["leading_segment_end_x_over_c"] = st.number_input(
+                    "Fin del segmento LE [x/c]", 0.005, 0.30,
+                    float(boundary.get("leading_segment_end_x_over_c", 0.05)),
+                    format="%.4f", key="closed-exp-le-end-xc",
+                    help="Longitud de pared reservada para la transición de tamaño desde el LE.",
                 )
             divisions = dict(boundary.get("segment_divisions") or {})
             division_cols = st.columns(4)
@@ -552,7 +567,8 @@ def render_closed_experimental_mesh(
             external["interface_tangential_factor"] = cols[1].number_input(
                 "Factor primer triángulo", 0.02, 10.0,
                 float(external.get("interface_tangential_factor", 0.70)),
-                disabled=external["automatic_extend_enabled"], key="closed-exp-interface-factor",
+                key="closed-exp-interface-factor",
+                help="Sigue activo con Extend y gobierna la transición inmediata fuera de la última capa prismática.",
             )
             external["radial_growth_rate"] = cols[2].number_input(
                 "Crecimiento radial", 0.005, 0.50, float(external.get("radial_growth_rate", 0.13)),

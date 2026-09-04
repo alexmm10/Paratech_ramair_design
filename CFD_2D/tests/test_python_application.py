@@ -658,6 +658,8 @@ def test_checkmesh_paraview_script_applies_readers_and_frames_problem_sets(tmp_p
     assert "view.CameraFocalPoint" in text
     assert "view.CameraParallelScale" in text
     assert "SaveScreenshot" in text
+    assert "checkMesh_problem_viewer.ready.json" in text
+    assert '"problem_sets_loaded": len(problem_sources)' in text
     compile(text, str(script), "exec")
     vtk_only = _write_checkmesh_paraview_script(
         tmp_path / "checkMesh_problem_viewer_vtk_only.py",

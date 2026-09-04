@@ -469,13 +469,7 @@ def default_study_config() -> dict[str, Any]:
             "analysis_retained_states": 40,
         },
         "postprocess": {
-            "static_scale_mode": "exact",
-            "animation_scale_mode": "global_exact",
-            "robust_percentiles": [1.0, 99.0],
-            "manual_scales": {
-                "Cp": [-3.0, 1.5],
-                "U": [0.0, 1.5],
-            },
+            "rendering_policy": "automatic_per_product",
         },
         "acceptance_thresholds": {
             "mean_CL_percent": 1.0,

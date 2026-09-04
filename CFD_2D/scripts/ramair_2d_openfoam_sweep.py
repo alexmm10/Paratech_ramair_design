@@ -433,11 +433,25 @@ def main() -> int:
         )
         write_json_atomic(status_path, report)
         if stop_marker.exists():
+            request = read_json(stop_marker, {}) or {}
+            action = str(request.get("action") or "pause_queue")
+            if action == "pause_current_continue":
+                row["queue_action"] = "CURRENT_CASE_SAVED_AND_SKIPPED"
+                stop_marker.unlink(missing_ok=True)
+                report.update(
+                    rows=rows,
+                    active_alpha_deg=None,
+                    active_case=None,
+                    active_phase="current_case_saved_continuing_queue",
+                    updated_at=time.strftime("%Y-%m-%d %H:%M:%S"),
+                )
+                write_json_atomic(status_path, report)
+                continue
             stopped_by_user = True
             report.update(
                 active_alpha_deg=None,
                 active_case=None,
-                active_phase="stopped_after_active_angle",
+                active_phase="queue_paused_after_active_angle",
                 updated_at=time.strftime("%Y-%m-%d %H:%M:%S"),
             )
             write_json_atomic(status_path, report)

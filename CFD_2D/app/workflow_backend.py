@@ -28,6 +28,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 from openfoam_environment import sourced_openfoam_environment  # noqa: E402
 from ramair_execution_control import (  # noqa: E402
+    discover_live_solver_cases as _discover_live_solver_cases,
     pid_is_alive as _pid_is_alive,
     process_group_id as _process_group_id,
     process_start_token as _process_start_token,
@@ -1116,8 +1117,14 @@ def interrupt_openfoam_case(case_dir: Path) -> dict[str, Any]:
     }
 
 
-def request_openfoam_sweep_stop(command: list[str]) -> Path:
-    """Stop a sweep after the active angle has written its latest state."""
+def request_openfoam_sweep_stop(
+    command: list[str],
+    *,
+    scope: str = "queue",
+) -> Path:
+    """Stop the active angle, then continue or pause its sweep."""
+    if scope not in {"current", "queue"}:
+        raise ValueError("scope must be current or queue")
     try:
         root_index = command.index("--case-root")
         variant_index = command.index("--variant")
@@ -1136,6 +1143,11 @@ def request_openfoam_sweep_stop(command: list[str]) -> Path:
                 "requested_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "variant": variant,
                 "sweep_root": str(sweep_root),
+                "action": (
+                    "pause_current_continue"
+                    if scope == "current"
+                    else "pause_queue"
+                ),
             },
             indent=2,
         )
@@ -1143,44 +1155,111 @@ def request_openfoam_sweep_stop(command: list[str]) -> Path:
         encoding="utf-8",
     )
     temporary.replace(marker)
+    status = read_json(sweep_root / "alpha_sweep_status.json", {}) or {}
+    active_case = Path(str(status.get("active_case") or ""))
+    if active_case.is_dir() and (active_case / "system/controlDict").is_file():
+        request_openfoam_clean_stop(active_case, "writeNow")
     return marker
 
 
 def request_validation_rans_stop(
     project_root: Path,
-    command: list[str],
+    command: list[str] | None = None,
+    *,
+    scope: str = "queue",
 ) -> dict[str, Any]:
     """Request a resumable stop for a validation RANS base or queue."""
+    if scope not in {"current", "queue"}:
+        raise ValueError("scope must be current or queue")
     project_root = Path(project_root).resolve()
     active = _validation_active_workspace_root(project_root)
     active.mkdir(parents=True, exist_ok=True)
     mesh_id: str | None = None
+    command = list(command or [])
     try:
         index = command.index("--mesh-id")
         mesh_id = str(command[index + 1])
     except (ValueError, IndexError):
-        queue = read_json(active / "rans_queue_state.json", {}) or {}
-        mesh_id = str(queue.get("current_mesh_id") or "") or None
+        for state_name in ("rans_selection_queue_state.json", "rans_queue_state.json"):
+            queue = read_json(active / state_name, {}) or {}
+            mesh_id = str(queue.get("current_mesh_id") or "") or None
+            if mesh_id:
+                break
+    live_cases = _discover_live_solver_cases(active)
+    live_case = Path(str(live_cases[0]["case_dir"])) if live_cases else None
+    if live_case is not None:
+        try:
+            relative = live_case.relative_to(active / "checkpoints")
+            if len(relative.parts) >= 2 and relative.parts[1] == "case":
+                mesh_id = relative.parts[0]
+        except ValueError:
+            pass
     marker = active / ".rans_queue_stop_request.json"
     _write_validation_json_atomic(
         marker,
         {
             "requested_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "mesh_id": mesh_id,
+            "action": "pause_current_continue" if scope == "current" else "pause_queue",
             "policy": "writeNow_then_preserve_for_resume",
         },
     )
-    case_dir = active / "checkpoints" / str(mesh_id) / "case" if mesh_id else None
+    case_dir = live_case or (
+        active / "checkpoints" / str(mesh_id) / "case" if mesh_id else None
+    )
     backup: Path | None = None
     if case_dir is not None and (case_dir / "system/controlDict").is_file():
         backup = request_openfoam_clean_stop(case_dir, "writeNow")
     return {
         "status": "STOP_REQUESTED",
         "mesh_id": mesh_id,
+        "scope": scope,
+        "case_dir": str(case_dir) if case_dir else None,
         "queue_marker": str(marker),
         "control_dict_backup": str(backup) if backup else None,
         "data_policy": "Preserve all written fields and scalar histories for resume",
     }
+
+
+def request_validation_urans_stop(
+    project_root: Path,
+    *,
+    scope: str = "queue",
+) -> dict[str, Any]:
+    """Pause a canonical URANS case and optionally continue its queue."""
+    if scope not in {"current", "queue"}:
+        raise ValueError("scope must be current or queue")
+    project_root = Path(project_root).resolve()
+    active = _validation_active_workspace_root(project_root)
+    live_cases = _discover_live_solver_cases(active)
+    case_dir = Path(str(live_cases[0]["case_dir"])) if live_cases else validation_runtime_case(project_root)
+    marker = active / ".urans_queue_control_request.json"
+    _write_validation_json_atomic(
+        marker,
+        {
+            "requested_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "action": "pause_current_continue" if scope == "current" else "pause_queue",
+            "case_dir": str(case_dir) if case_dir else None,
+            "policy": "writeNow_then_preserve_for_resume",
+        },
+    )
+    backup = None
+    if case_dir is not None and (case_dir / "system/controlDict").is_file():
+        backup = request_openfoam_clean_stop(case_dir, "writeNow")
+    return {
+        "status": "STOP_REQUESTED",
+        "scope": scope,
+        "case_dir": str(case_dir) if case_dir else None,
+        "queue_marker": str(marker),
+        "control_dict_backup": str(backup) if backup else None,
+        "data_policy": "Preserve fields, scalar histories and stage journal for resume",
+    }
+
+
+def validation_live_solver_cases(project_root: Path) -> list[dict[str, Any]]:
+    """Expose verified solver ownership to the non-technical UI."""
+    active = _validation_active_workspace_root(Path(project_root).resolve())
+    return _discover_live_solver_cases(active)
 
 
 def validation_runtime_case(project_root: Path) -> Path | None:
@@ -1893,31 +1972,12 @@ def save_validation_study_config(
     if int(urans.get("monitor_refresh_seconds", 30)) not in {15, 30, 60}:
         raise ValueError("Monitor refresh must be 15, 30 or 60 seconds")
     postprocess = dict(config.get("postprocess") or {})
-    supported_scales = {"exact", "robust", "manual"}
-    static_scale = str(
-        postprocess.get("static_scale_mode") or "exact"
-    ).removeprefix("global_")
-    animation_scale = str(
-        postprocess.get("animation_scale_mode") or "global_exact"
-    ).removeprefix("global_")
-    if static_scale not in supported_scales:
-        raise ValueError("Unsupported static postprocess scale mode")
-    if animation_scale not in supported_scales:
-        raise ValueError("Unsupported animation postprocess scale mode")
-    percentiles = list(
-        postprocess.get("robust_percentiles") or [1.0, 99.0]
-    )
-    if (
-        len(percentiles) != 2
-        or not 0.0 <= float(percentiles[0]) < float(percentiles[1]) <= 100.0
+    for obsolete in (
+        "static_scale_mode", "animation_scale_mode", "robust_percentiles", "manual_scales",
     ):
-        raise ValueError("Invalid robust postprocess percentile interval")
-    for name, bounds in dict(
-        postprocess.get("manual_scales") or {}
-    ).items():
-        values = list(bounds or [])
-        if len(values) != 2 or float(values[0]) >= float(values[1]):
-            raise ValueError(f"Invalid manual postprocess scale for {name}")
+        postprocess.pop(obsolete, None)
+    postprocess["rendering_policy"] = "automatic_per_product"
+    config["postprocess"] = postprocess
     if safety.get("dry_run_default") is not True:
         raise ValueError("The validation laboratory must remain dry-run by default")
     path = _validation_active_workspace_root(Path(project_root)) / "study_config.json"
@@ -2620,6 +2680,7 @@ def _write_checkmesh_paraview_script(
     quality_names: list[str] = []
     quality_tokens = {
         "interpolation": "FAIL_low_face_interpolation_weight",
+        "lowweight": "FAIL_low_face_interpolation_weight",
         "volumeratio": "FAIL_low_cell_volume_ratio",
         "volume_ratio": "FAIL_low_cell_volume_ratio",
         "skew": "FAIL_high_skewness",
@@ -2628,6 +2689,7 @@ def _write_checkmesh_paraview_script(
         "determinant": "FAIL_low_cell_determinant",
         "shortedge": "INFO_short_edges",
         "facearea": "FAIL_face_area_ratio",
+        "lowvolratio": "FAIL_low_cell_volume_ratio",
     }
     for index, path in enumerate(vtk_files, start=1):
         compact = re.sub(r"[^a-z0-9]+", "", path.stem.lower())
@@ -2645,6 +2707,7 @@ def _write_checkmesh_paraview_script(
     if not focus_indices:
         focus_indices = list(range(len(vtk_files)))
     screenshot = convert(script_path.with_name("checkMesh_problem_view.png"))
+    ready_marker = convert(script_path.with_name("checkMesh_problem_viewer.ready.json"))
     palette = [
         [0.84, 0.15, 0.16],
         [0.96, 0.55, 0.10],
@@ -2667,6 +2730,7 @@ vtk_paths = {json.dumps(vtk_values)}
 quality_names = {json.dumps(quality_names)}
 focus_indices = {json.dumps(focus_indices)}
 palette = {json.dumps(palette)}
+ready_marker = {repr(ready_marker)}
 base = None
 base_display = None
 
@@ -2762,6 +2826,14 @@ try:
     SaveScreenshot({json.dumps(screenshot)}, view, ImageResolution=[1600, 1000])
 except Exception:
     pass
+with open(ready_marker, "w", encoding="utf-8") as handle:
+    import json as _json
+    _json.dump({{
+        "status": "READY",
+        "base_mesh_loaded": base is not None,
+        "problem_sets_loaded": len(problem_sources),
+        "problem_set_names": quality_names,
+    }}, handle, indent=2)
 '''
     script_path.write_text(script, encoding="utf-8")
     return script_path
@@ -3213,6 +3285,8 @@ def open_checkmesh_problem_viewer(project_root: Path, variant: str | Path) -> in
         vtk_files,
         windows_paths=windows_executable,
     )
+    ready_marker = mesh_root / "checkMesh_problem_viewer.ready.json"
+    ready_marker.unlink(missing_ok=True)
     script_argument = _wsl_windows_path(startup_script) if windows_executable else str(startup_script.resolve())
     # Ignore stale ParaView user/session state. This prevents crash-recovery or
     # copy-mode dialogs from replacing the scripted readers and emptying the view.
@@ -3251,6 +3325,34 @@ def open_checkmesh_problem_viewer(project_root: Path, variant: str | Path) -> in
         env=environment,
         start_new_session=True,
     )
+    # A fast startup failure should be reported by the UI instead of claiming
+    # that an empty/copy-mode ParaView window was opened successfully.  The
+    # generated script writes the marker only after every VTK reader renders.
+    deadline = time.monotonic() + 30.0
+    while time.monotonic() < deadline and not ready_marker.is_file():
+        if process.poll() is not None:
+            log.close()
+            tail = ""
+            try:
+                tail = "\n".join(log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-30:])
+            except OSError:
+                pass
+            raise RuntimeError(
+                "ParaView closed before loading the checkMesh problem sets.\n" + tail
+            )
+        time.sleep(0.1)
+    if not ready_marker.is_file():
+        try:
+            if os.name != "nt":
+                os.killpg(int(process.pid), signal.SIGTERM)
+            else:
+                process.terminate()
+        except (ProcessLookupError, PermissionError):
+            process.terminate()
+        log.close()
+        raise TimeoutError(
+            "ParaView did not confirm that the checkMesh problem sets were loaded within 30 s"
+        )
     _register_project_viewer(
         project_root,
         int(process.pid),

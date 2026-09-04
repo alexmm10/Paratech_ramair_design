@@ -25,7 +25,11 @@ from boundary_layer_estimates import (
     first_cell_height_from_yplus,
     turbulent_flat_plate_delta99,
 )
-from ramair_2d_bump_matching import bump_cell_sizes, match_four_segment_bumps
+from ramair_2d_bump_matching import (
+    bump_cell_sizes,
+    feasible_automatic_divisions,
+    match_four_segment_bumps,
+)
 from ramair_2d_split_progression import (
     automatic_split_progression,
     evaluate_manual_split_progression,
@@ -108,6 +112,8 @@ def default_closed_config() -> dict[str, Any]:
             "te_transition_extension_chord": 0.0,
             "te_segment_early_start_enabled": False,
             "te_segment_start_x_over_c": 0.98,
+            "leading_segment_extension_enabled": False,
+            "leading_segment_end_x_over_c": 0.05,
             "te_geometry_points": 35,
         },
         "external_volume": {
@@ -208,6 +214,19 @@ def load_closed_geometry(root: Path, config: dict[str, Any]) -> dict[str, Any]:
     upper_limit = find_limit(peak, -1)
     lower_limit = find_limit(peak, 1)
     lower_local = lower_limit - (len(upper) - 1)
+    if bool(config["boundary_layer"].get("leading_segment_extension_enabled", False)):
+        end_x = chord * min(0.30, max(0.005, float(
+            config["boundary_layer"].get("leading_segment_end_x_over_c", 0.05)
+        )))
+        upper_limit = min(
+            len(upper) - 3,
+            max(2, int(np.argmin(np.abs(upper[:, 0] - end_x)))),
+        )
+        lower_local = min(
+            len(lower) - 3,
+            max(2, int(np.argmin(np.abs(lower[:, 0] - end_x)))),
+        )
+        lower_limit = (len(upper) - 1) + lower_local
     if not (2 <= upper_limit < len(upper) - 2 and 2 <= lower_local < len(lower) - 2):
         raise ValueError("Curvature-based LE segmentation did not produce valid branch limits")
     te_extension = max(0.0, float(
@@ -323,6 +342,8 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
     gmsh.option.setNumber("Mesh.Optimize", 1)
     gmsh.option.setNumber("Mesh.RecombinationAlgorithm", 1)
     gmsh.option.setNumber("Mesh.RecombineAll", 0)
+    gmsh.option.setNumber("Geometry.Tolerance", 1.0e-12)
+    gmsh.option.setNumber("Geometry.ToleranceBoolean", 1.0e-12)
     gmsh.logger.start()
     try:
         gmsh.model.add(EXPERIMENT_ID)
@@ -349,9 +370,10 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
         split_report: dict[str, Any] | None = None
         split_geometry: dict[str, Any] | None = None
         if method == "bump_split_progression":
-            midpoint_x = chord * float(config["boundary_layer"].get(
+            split_x = float(config["boundary_layer"].get(
                 "split_progression_midpoint_x_chord", 0.50
             ))
+            midpoint_x = chord * min(0.999, max(0.20, split_x))
             upper_te, upper_le_mid, upper_split = split_polyline_at_x(
                 geometry["upper_body"], midpoint_x
             )
@@ -398,18 +420,31 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
             "lower": float(np.linalg.norm(np.diff(geometry["lower_body"], axis=0), axis=1).sum()),
         }
         if automatic_bump:
+            requested_divisions = dict(
+                config["boundary_layer"].get("segment_divisions") or {}
+            )
+            selected_divisions, division_warnings = feasible_automatic_divisions(
+                base_lengths,
+                {name: int(value) for name, value in requested_divisions.items()},
+            )
+            config["boundary_layer"]["segment_divisions"] = selected_divisions
             automatic_report = match_four_segment_bumps(
                 base_lengths,
-                {
-                    name: int(value)
-                    for name, value in dict(config["boundary_layer"].get("segment_divisions") or {}).items()
-                },
+                selected_divisions,
                 chord=chord,
                 maximum_growth_ratio=float(config["boundary_layer"].get("bump_maximum_growth_ratio", 1.10)),
                 maximum_size_percent_chord=float(
                     config["boundary_layer"].get("bump_maximum_size_percent_chord", 1.00)
                 ),
             )
+            automatic_report["requested_divisions"] = requested_divisions
+            automatic_report["automatic_division_adjustments"] = division_warnings
+            automatic_report["warnings"] = [
+                *division_warnings,
+                *list(automatic_report.get("warnings") or []),
+            ]
+            if automatic_report["warnings"]:
+                automatic_report["status"] = "WARNING"
         if method == "bump_split_progression":
             body_divisions = dict(config["boundary_layer"].get("segment_divisions") or {})
             curved_divisions = {
@@ -455,8 +490,6 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
                         "bump_maximum_size_percent_chord", 0.50
                     )),
                 )
-                if split_report["blocks_generation"]:
-                    raise ValueError("; ".join(split_report["warnings"]))
             else:
                 manual_split = dict(config["boundary_layer"].get(
                     "manual_split_progression") or {})
@@ -599,6 +632,7 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
             gmsh.model.mesh.field.setNumber(boundary, "NbLayers", int(layer["layers"]))
         else:
             gmsh.model.mesh.field.setNumber(boundary, "Ratio", float(layer["growth_rate"]))
+            gmsh.model.mesh.field.setNumber(boundary, "NbLayers", int(layer["layers"]))
         gmsh.model.mesh.field.setNumber(boundary, "Quads", 1)
         gmsh.model.mesh.field.setAsBoundaryLayer(boundary)
 
@@ -671,12 +705,30 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
             gmsh.model.mesh.field.setString(
                 size_law, "F", f"Min({far_size:.16g}, {interface_size:.16g} + {growth:.16g}*F{distance})",
             )
+            if bool(external.get("extend_interface_guard_enabled", True)):
+                guard = add_smooth_interface_guard(
+                    gmsh,
+                    surfaces=[fluid_surface],
+                    curves=curves,
+                    size_at_interface=interface_size,
+                    size_far=far_size,
+                    boundary_layer_thickness=float(layer["total_thickness_m"]),
+                    transition_distance=chord * float(external.get(
+                        "extend_interface_transition_chord", 0.10
+                    )),
+                )
+                combined = gmsh.model.mesh.field.add("Min")
+                gmsh.model.mesh.field.setNumbers(combined, "FieldsList", [size_law, guard])
+                size_law = combined
             external_size_report = {
                 "type": "linear_distance_capped",
                 "interface_size_chord": interface_size / chord,
                 "tangential_reference_chord": tangential_reference / chord,
                 "farfield_size_chord": far_size / chord,
                 "maximum_local_growth_fraction": growth,
+                "interface_guard_enabled": bool(
+                    external.get("extend_interface_guard_enabled", True)
+                ),
             }
         gmsh.model.mesh.field.setAsBackgroundMesh(size_law)
         generation_started = time.perf_counter()

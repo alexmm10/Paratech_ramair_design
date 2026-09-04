@@ -805,6 +805,7 @@ def prepare_steady_stage_results(
     robust_percentiles: tuple[float, float],
     manual_scales: dict[str, tuple[float, float]],
     average_tail_samples: int,
+    alpha_deg: float,
 ) -> dict[str, Any]:
     """Expose the latest SIMPLE stage separately from physical URANS time."""
     stage_dir = out_dir / "RANS"
@@ -818,8 +819,6 @@ def prepare_steady_stage_results(
         return report
     copied: list[str] = []
     for name in (
-        "aerodynamic_efficiency_steady.csv",
-        "aerodynamic_efficiency_steady.png",
         "steady_transition_report.json",
         "stage_transfer_report.json",
     ):
@@ -828,11 +827,19 @@ def prepare_steady_stage_results(
             target = stage_dir / name
             shutil.copy2(source, target)
             copied.append(str(target))
-    paraview_case = (
-        archive / "paraview_case"
-        if (archive / "paraview_case" / "system" / "controlDict").is_file()
-        else archive
-    )
+    if (
+        str(simulation_mode).upper() == "RANS"
+        and (case_dir / "system" / "controlDict").is_file()
+    ):
+        # Scalar histories can live in a lightweight steadyInitialization
+        # archive, while volume fields remain in the canonical checkpoint.
+        paraview_case = case_dir
+    else:
+        paraview_case = (
+            archive / "paraview_case"
+            if (archive / "paraview_case" / "system" / "controlDict").is_file()
+            else archive
+        )
     records, force_sources = read_force_coefficient_history(archive, include_processor0=True)
     force_summary: dict[str, Any] = {"status": "NOT_AVAILABLE"}
     if records:
@@ -849,25 +856,27 @@ def prepare_steady_stage_results(
         force_window.to_csv(stage_dir / "forceCoeffs_RANS_averaging_window.csv", index=False)
         mean.to_csv(stage_dir / "forceCoeffs_RANS_mean.csv", index=False)
         std.to_csv(stage_dir / "forceCoeffs_RANS_std.csv", index=False)
+        plotted_history = force_history.loc[force_history["Time"] >= 500.0].copy()
+        if plotted_history.empty:
+            plotted_history = force_history
+        plotted_window = force_window.loc[
+            force_window["Time"] >= float(plotted_history["Time"].min())
+        ].copy()
         plot_force_coeffs(
-            force_history,
+            plotted_history,
             mean,
             stage_dir / "Cl_Cd_Cm_history.png",
-            average_window=force_window,
+            average_window=plotted_window,
             x_label="SIMPLE iteration",
-            title="RANS coefficients: complete iteration history and final averaging window",
-        )
-        shutil.copy2(
-            stage_dir / "Cl_Cd_Cm_history.png",
-            stage_dir / "forceCoeffs_RANS_history.png",
+            title="RANS coefficients from iteration 500 and final averaging window",
         )
         efficiency = write_aerodynamic_efficiency_products(
-            force_history,
+            plotted_history,
             stage_dir / "aerodynamic_efficiency.csv",
             stage_dir / "aerodynamic_efficiency.png",
             x_label="SIMPLE iteration",
-            title="RANS aerodynamic efficiency: complete history and averaging window",
-            average_window=force_window,
+            title="RANS aerodynamic efficiency from iteration 500",
+            average_window=plotted_window,
         )
         rans_residuals, _, rans_solver_meta = parse_solver_log(archive)
         if paraview_case != archive:
@@ -908,6 +917,12 @@ def prepare_steady_stage_results(
         (stage_dir / "RANS_force_summary.json").write_text(
             json.dumps(force_summary, indent=2) + "\n", encoding="utf-8"
         )
+    for obsolete in (
+        "aerodynamic_efficiency_steady.csv",
+        "aerodynamic_efficiency_steady.png",
+        "forceCoeffs_RANS_history.png",
+    ):
+        (stage_dir / obsolete).unlink(missing_ok=True)
     rans_field_exports: dict[str, Any] = {"status": "DISABLED"}
     rans_wall_analysis: dict[str, Any] = {"status": "DISABLED"}
     if paraview_case.is_dir() and (run_openfoam_tools or wall_profile_analysis):
@@ -954,6 +969,7 @@ def prepare_steady_stage_results(
             robust_percentiles=robust_percentiles,
             manual_scales=manual_scales,
             include_animations=include_paraview_animations,
+            alpha_deg_override=alpha_deg,
         )
         if automatic_paraview_products and (paraview_case / "system" / "controlDict").is_file()
         else {
@@ -1260,6 +1276,7 @@ def postprocess(
                     robust_percentiles=robust_percentiles,
                     manual_scales=manual_scales,
                     include_animations=True,
+                    alpha_deg_override=alpha,
                 )
         if str(simulation_mode).upper() == "URANS":
             animation_reports["URANS"] = generate_automatic_paraview_products(
@@ -1274,6 +1291,7 @@ def postprocess(
                 manual_scales=manual_scales,
                 time_range_s=paraview_time_range_s,
                 include_animations=True,
+                alpha_deg_override=alpha,
             )
         report = {
             "schema_version": 1,
@@ -1357,7 +1375,7 @@ def postprocess(
         )
         stage_timings["openfoam_field_exports_s"] = time.monotonic() - stage_started
         wall_analysis: dict[str, Any] = {"status": "DISABLED"}
-        if wall_profile_analysis:
+        if wall_profile_analysis and str(simulation_mode).upper() != "RANS":
             stage_started = time.monotonic()
             try:
                 wall_analysis = analyze_wall_boundary_layer(
@@ -1376,6 +1394,18 @@ def postprocess(
             except Exception as exc:
                 wall_analysis = {"status": "ERROR", "error": f"{type(exc).__name__}: {exc}"}
             stage_timings["wall_profile_analysis_s"] = time.monotonic() - stage_started
+        elif str(simulation_mode).upper() == "RANS":
+            # RANS wall products are generated once in the dedicated RANS folder.
+            for duplicate in (
+                "boundary_layer_thickness.png",
+                "separation_transition_overlay.png",
+                "skin_friction_coefficient.png",
+                "wall_Cp.png",
+                "wall_normal_velocity.png",
+                "wall_shear_stress.png",
+                "wall_yPlus.png",
+            ):
+                (out_dir / duplicate).unlink(missing_ok=True)
         field_inventory = derived_field_inventory(
             case_dir,
             out_dir,
@@ -1420,6 +1450,7 @@ def postprocess(
             robust_percentiles=robust_percentiles,
             manual_scales=manual_scales,
             average_tail_samples=max(1, int(rans_average_tail_samples)),
+            alpha_deg=alpha,
         ) if include_rans_stage else {
             "status": "DISABLED",
             "reason": "RANS products are generated from the dedicated RANS section",
@@ -1439,6 +1470,7 @@ def postprocess(
                 manual_scales=manual_scales,
                 time_range_s=paraview_time_range_s,
                 include_animations=include_paraview_animations,
+                alpha_deg_override=alpha,
             )
             if automatic_paraview_products
             and str(simulation_mode).upper() == "URANS"

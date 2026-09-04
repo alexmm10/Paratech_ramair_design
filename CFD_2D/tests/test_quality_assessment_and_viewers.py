@@ -99,7 +99,7 @@ def test_automatic_products_script_is_bounded_and_uses_direct_openfoam_reader(tm
     assert 'pressure_surface_display' not in text
     assert "streamlines.SeedType.Resolution = 100" in text
     assert 'registrationName="RotatedFreestreamStreamlines"' in text
-    assert 'streamline_display.LineWidth = 0.6' in text
+    assert 'streamline_display.LineWidth = 1.15' in text
     assert "set_streamline_visibility" in text
     assert "streamline_display.Visibility" in text
     assert '"Velocity_contours_%s_final.png"' in text

@@ -449,9 +449,9 @@ try:
     view.UseColorPaletteForBackground = 0
 except Exception:
     pass
-view.Background = [0.94, 0.95, 0.96]
+view.Background = [0.91, 0.92, 0.93]
 try:
-    view.Background2 = [0.94, 0.95, 0.96]
+    view.Background2 = [0.91, 0.92, 0.93]
 except Exception:
     pass
 try:
@@ -786,7 +786,7 @@ def show_airfoil_overlay(latest):
         ColorBy(overlay, None)
         overlay.DiffuseColor = [0.08, 0.08, 0.08]
         overlay.AmbientColor = [0.08, 0.08, 0.08]
-        overlay.LineWidth = 2.5
+        overlay.LineWidth = 2.8
         wall_overlay.update({{
             "reader": reader, "transform": transformed,
             "feature_edges": overlay_source,
@@ -980,7 +980,7 @@ if selected_times:
     streamline_display = Show(streamline_tube, view)
     try:
         streamline_display.Representation = "Wireframe"
-        streamline_display.LineWidth = 0.6
+        streamline_display.LineWidth = 1.15
         ColorBy(streamline_display, ("POINTS", "U", "Magnitude"))
         streamline_display.SetScalarBarVisibility(view, False)
         streamline_display.Opacity = 0.9
@@ -1063,8 +1063,9 @@ if selected_times:
         view.CameraFocalPoint = [aft_x, aft_y, seed_z]
         view.CameraPosition = [aft_x, aft_y, seed_z + 5.0 * max(chord_m, 1.0e-6)]
         view.CameraViewUp = [0.0, 1.0, 0.0]
-        velocity_lut = GetColorTransferFunction("U")
-        velocity_lut.RescaleTransferFunction(0.0, max(1.15 * velocity_m_s, 1.0e-6))
+        velocity_field = color_velocity(display, instantaneous=True)
+        velocity_lut = GetColorTransferFunction(str(velocity_field["name"]))
+        velocity_lut.RescaleTransferFunction(0.0, max(1.05 * velocity_m_s, 1.0e-6))
         view.CameraParallelScale = max(0.11 * chord_m, 1.0e-6)
         set_title("|U| and mesh: aft boundary layer", latest)
         Render(view)
@@ -1109,8 +1110,8 @@ if selected_times:
                 velocity_range = (0.0, max(1.15 * velocity_m_s, 1.0e-6))
             velocity_contours.Isosurfaces = [
                 velocity_range[0]
-                + (velocity_range[1] - velocity_range[0]) * i / 41.0
-                for i in range(1, 41)
+                + (velocity_range[1] - velocity_range[0]) * i / 21.0
+                for i in range(1, 21)
             ]
             velocity_contours.UpdatePipeline(time=latest)
             velocity_contour_front = Transform(
@@ -1125,7 +1126,7 @@ if selected_times:
             ColorBy(contour_display, ("POINTS", "UMagnitude"))
             velocity_contour_lut = GetColorTransferFunction("UMagnitude")
             velocity_contour_lut.RescaleTransferFunction(*velocity_range)
-            contour_display.LineWidth = 1.5
+            contour_display.LineWidth = 2.0
             contour_display.Opacity = 0.95
             contour_display.SetScalarBarVisibility(view, True)
             style_scalar_bar(velocity_contour_lut, "|U| [m/s]")
@@ -1178,8 +1179,8 @@ if selected_times:
                 )
                 pressure_contours.ContourBy = ["POINTS", pressure_name]
                 pressure_contours.Isosurfaces = [
-                    pressure_range[0] + (pressure_range[1] - pressure_range[0]) * i / 41.0
-                    for i in range(1, 41)
+                    pressure_range[0] + (pressure_range[1] - pressure_range[0]) * i / 21.0
+                    for i in range(1, 21)
                 ]
                 pressure_contours.UpdatePipeline(time=latest)
                 pressure_contour_front = Transform(
@@ -1194,7 +1195,7 @@ if selected_times:
                 ColorBy(pressure_display, ("POINTS", pressure_name))
                 pressure_lut = GetColorTransferFunction(pressure_name)
                 pressure_lut.RescaleTransferFunction(*pressure_range)
-                pressure_display.LineWidth = 1.5
+                pressure_display.LineWidth = 2.0
                 pressure_display.SetScalarBarVisibility(view, True)
                 style_scalar_bar(pressure_lut, "%s contours" % pressure_name)
                 show_airfoil_overlay(latest)
@@ -1265,7 +1266,7 @@ if selected_times:
                     )
                     vorticity_contours.ContourBy = ["POINTS", "vorticityMagnitude"]
                     vorticity_contours.Isosurfaces = [
-                        display_upper * (i + 1) / 40.0 for i in range(40)
+                        display_upper * (i + 1) / 20.0 for i in range(20)
                     ]
                     vorticity_contours.UpdatePipeline(time=latest)
                     vorticity_contour_front = Transform(
@@ -1291,7 +1292,7 @@ if selected_times:
                     vorticity_contour_lut.RescaleTransferFunction(
                         0.0, display_upper
                     )
-                    vorticity_contour_display.LineWidth = 1.5
+                    vorticity_contour_display.LineWidth = 2.0
                     vorticity_contour_display.SetScalarBarVisibility(view, True)
                     style_scalar_bar(
                         vorticity_contour_lut, "|vorticity| [1/s]"
@@ -1725,6 +1726,7 @@ def generate_automatic_paraview_products(
     manual_scales: dict[str, tuple[float, float]] | None = None,
     time_range_s: tuple[float, float] | None = None,
     include_animations: bool = True,
+    alpha_deg_override: float | None = None,
 ) -> dict[str, Any]:
     """Render the final diagnostic set and, optionally, bounded animations."""
     activate_openfoam_environment()
@@ -1745,7 +1747,11 @@ def generate_automatic_paraview_products(
     except (TypeError, ValueError):
         velocity = 1.0
     try:
-        alpha_deg = float(inputs.get("alpha_deg", 0.0))
+        alpha_deg = float(
+            alpha_deg_override
+            if alpha_deg_override is not None
+            else inputs.get("alpha_deg", 0.0)
+        )
     except (TypeError, ValueError):
         alpha_deg = 0.0
     try:
