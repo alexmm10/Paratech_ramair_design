@@ -344,12 +344,23 @@ def main() -> int:
             break
         prior = read_json(case_dir / "run_status.json", {}) or {}
         prior_status = str(prior.get("status", "")).upper()
-        if args.skip_completed and prior_status in {"RUN_COMPLETED", "CONVERGED_STATISTICALLY"}:
+        staged_prior = read_json(case_dir / "staged_run_status.json", {}) or {}
+        staged_prior_status = str(staged_prior.get("status", "")).upper()
+        pending_path = case_dir / "steadyInitialization" / "pending_stage.json"
+        staged_campaign_complete = (
+            staged_prior_status == "TRANSIENT_STAGE_FINISHED"
+            and staged_prior.get("production_complete") is True
+        )
+        case_complete = (
+            staged_campaign_complete
+            if args.steady_initialization
+            else prior_status in {"RUN_COMPLETED", "CONVERGED_STATISTICALLY"}
+        )
+        if args.skip_completed and case_complete and not pending_path.is_file():
             rows.append({"alpha_deg": alpha, "status": "SKIPPED_ALREADY_COMPLETE", "case_dir": str(case_dir)})
             report.update(rows=rows, active_alpha_deg=None, active_case=None, active_phase="skipped_complete", updated_at=time.strftime("%Y-%m-%d %H:%M:%S"))
             write_json_atomic(status_path, report)
             continue
-        pending_path = case_dir / "steadyInitialization" / "pending_stage.json"
         pending_steady = (
             read_json(pending_path, {})
             if args.resume_existing and pending_path.is_file()

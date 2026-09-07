@@ -94,7 +94,7 @@ def test_cummings_package_sets_topology_specific_production_duration() -> None:
     config["temporal_packages"]["active"] = "cummings_closed_low_cost"
     condition = dict(config["operating_condition"])
     condition["tc_s"] = 0.02
-    for topology, expected in (("closed", 100.0), ("open", 200.0)):
+    for topology, expected in (("closed", 100.0), ("open", 100.0)):
         effective, package = _plan_config_for_topology(config, topology)
         plan = _stage_plan(dt_s=0.0001, condition=condition, config=effective)
         assert package == "cummings_closed_low_cost"

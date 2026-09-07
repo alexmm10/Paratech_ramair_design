@@ -894,7 +894,8 @@ def test_mesh_page_owns_one_unique_case_library_form() -> None:
     mapping = app_text[app_text.index("library_stage_by_page = {") :]
     assert '"Malla": "mesh"' not in mapping
     assert app_text.count('case_library_panel(\n        "mesh",') == 1
-    assert '@st.fragment(run_every="30s")\ndef solver_live_monitor_panel' in app_text
+    assert 'def solver_live_monitor_panel()' in app_text
+    assert 'st.fragment(_solver_live_monitor_panel, run_every=refresh)()' in app_text
 
 
 def test_workcase_loading_is_explicit_and_sidebar_is_read_only() -> None:

@@ -7,10 +7,31 @@ import pytest
 from ramair_2d_parallel import (
     configure_decompose_dictionary,
     decompose_load_balance,
+    detected_solver_stage,
+    performance_profile_key,
     processor_directory_audit,
     recommended_core_count,
     reconstruction_command,
 )
+
+
+def test_performance_profile_key_tracks_rans_vs_urans(tmp_path: Path) -> None:
+    (tmp_path / "system").mkdir()
+    poly = tmp_path / "constant/polyMesh"
+    poly.mkdir(parents=True)
+    for name in ("points", "faces", "owner", "neighbour", "boundary"):
+        (poly / name).write_text(name, encoding="ascii")
+    schemes = tmp_path / "system/fvSchemes"
+    schemes.write_text("ddtSchemes { default steadyState; }\n", encoding="ascii")
+    rans_key = performance_profile_key(
+        tmp_path, solver_module="incompressibleFluid"
+    )
+    assert detected_solver_stage(tmp_path) == "RANS"
+    schemes.write_text("ddtSchemes { default backward; }\n", encoding="ascii")
+    assert detected_solver_stage(tmp_path) == "URANS"
+    assert performance_profile_key(
+        tmp_path, solver_module="incompressibleFluid"
+    ) != rans_key
 
 
 @pytest.mark.parametrize(

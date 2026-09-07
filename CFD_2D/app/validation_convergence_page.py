@@ -161,6 +161,31 @@ def _status_badge(status: str) -> str:
     return f"FAIL - {status}"
 
 
+def _cummings_dt_assignment(rows: list[dict[str, Any]]) -> list[str]:
+    """Select the two descending Cummings time steps assigned to each mesh."""
+    dt_ladder = sorted(
+        {float(row.get("dt_star") or 0.0) for row in rows},
+        reverse=True,
+    )
+    dt_pairs = {
+        "coarse": dt_ladder[0:2],
+        "medium": dt_ladder[2:4],
+        "fine": dt_ladder[4:6],
+    }
+    selected: list[str] = []
+    for level in MESH_LEVELS:
+        for target_dt in dt_pairs[level]:
+            match = next((
+                row for row in rows
+                if str(row.get("mesh_level")) == level
+                and abs(float(row.get("dt_star") or 0.0) - target_dt)
+                <= max(1.0e-15, abs(target_dt) * 1.0e-9)
+            ), None)
+            if match is not None:
+                selected.append(str(match["run_id"]))
+    return selected
+
+
 def _json_panel(path: Path, title: str, *, inline: bool = False) -> None:
     def render() -> None:
         if not path.is_file():
@@ -651,19 +676,29 @@ def _monitor_charts(
     )
     performance = snapshot.get("performance") or {}
     if performance.get("status") == "MEASURED":
-        st.dataframe(
-            [{
-                "origen": "Medido en este equipo y esta ejecucion",
-                "muestras": performance.get("samples"),
-                "mediana [s/paso]": performance.get("median_s_per_step"),
-                "p25 [s/paso]": performance.get("p25_s_per_step"),
-                "p75 [s/paso]": performance.get("p75_s_per_step"),
-                "media [s/paso]": performance.get("mean_s_per_step"),
-                "desviacion [s/paso]": performance.get("stdev_s_per_step"),
-            }],
-            hide_index=True,
-            width="stretch",
-        )
+        with st.expander("Rendimiento computacional", expanded=False):
+            st.dataframe(
+                [{
+                    "origen": "Medido en este equipo y esta ejecucion",
+                    "ranks": snapshot.get("n_cores"),
+                    "celdas/rank": performance.get("cells_per_rank"),
+                    "muestras": performance.get("samples"),
+                    "mediana [s/paso]": performance.get("median_s_per_step"),
+                    "P95 [s/paso]": performance.get("p95_s_per_step"),
+                    "pasos/s": performance.get("steps_per_second"),
+                    "cell-steps/s": performance.get("cell_steps_per_second"),
+                    "core-s/paso": performance.get("core_seconds_per_step"),
+                    "s/t*": performance.get("wall_seconds_per_convective_time"),
+                }],
+                hide_index=True,
+                width="stretch",
+            )
+            linear_rows = list(snapshot.get("linear_solver_performance") or [])
+            if linear_rows:
+                st.caption("Coste de los solvers lineales obtenido del log incremental.")
+                st.dataframe(linear_rows, hide_index=True, width="stretch")
+            for warning in snapshot.get("performance_warnings") or []:
+                st.warning(str(warning))
 
 
 def _render_live_monitor(
@@ -702,6 +737,14 @@ def _render_live_monitor(
                 topology=str(mesh.get("topology")),
                 mesh_level=str(mesh.get("level")),
                 cell_count=int(mesh.get("cell_count") or 0),
+                n_cores=(
+                    int(row["n_cores"])
+                    if row.get("n_cores") is not None else None
+                ),
+                alpha_deg=(
+                    float(row["alpha_deg"])
+                    if row.get("alpha_deg") is not None else None
+                ),
                 stage=str(row.get("stage") or ""),
                 tc_s=tc_s,
                 steps_planned=int(row.get("steps_planned") or 0) or None,
@@ -1976,7 +2019,7 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
                     {"Efecto esperado": "Estela y armónicos", "Intervalo St": "1-10", "Uso": "Control espectral; confirmar con PSD"},
                 ]
                 dt_ladder = [0.02, 0.01, 0.005, 0.0025, 0.00125, 0.000625]
-                production_star = float(campaign.get("low_frequency_extension_time_star", 200.0))
+                production_star = float(campaign.get("low_frequency_extension_time_star", 100.0))
             st.dataframe(effect_rows, hide_index=True, width="stretch")
             minimum_cycles = int((config.get("frequency_analysis") or {}).get("minimum_cycles", 10))
             st.dataframe(
@@ -2229,21 +2272,9 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
                 )
                 for row in queue_rows_available
             }
-            level_order = {"coarse": 0, "medium": 1, "fine": 2}
             default_queue: list[str] = []
             if str(package).startswith("cummings_"):
-                ordered_rows = sorted(
-                    queue_rows_available,
-                    key=lambda row: (
-                        level_order.get(str(row.get("mesh_level")), 99),
-                        -float(row.get("dt_star") or 0.0),
-                    ),
-                )
-                for level in ("coarse", "medium", "fine"):
-                    level_rows = [
-                        row for row in ordered_rows if str(row.get("mesh_level")) == level
-                    ]
-                    default_queue.extend(str(row["run_id"]) for row in level_rows[:2])
+                default_queue = _cummings_dt_assignment(queue_rows_available)
             queue_selection = st.multiselect(
                 "Casos de la cola",
                 list(queue_labels),
@@ -2769,6 +2800,10 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
                     topology=str(row.get("topology") or ""),
                     mesh_level=str(row.get("mesh_level") or ""),
                     cell_count=int(mesh.get("cell_count") or 0),
+                    alpha_deg=(
+                        float(row["alpha_deg"])
+                        if row.get("alpha_deg") is not None else None
+                    ),
                     stage=str(row.get("stage") or ""),
                     tc_s=float(condition["tc_s"]),
                     steps_planned=None,

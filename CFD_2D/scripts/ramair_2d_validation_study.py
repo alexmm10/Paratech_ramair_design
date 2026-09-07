@@ -366,7 +366,7 @@ def _plan_config_for_topology(
     if active_package.startswith("cummings_"):
         validation = plan_config["validation_study"]
         urans = dict(validation.get("urans") or {})
-        urans["sampling_time_star"] = 100.0 if topology == "closed" else 200.0
+        urans["sampling_time_star"] = 100.0
         urans["temporal_package"] = active_package
         if topology == "open":
             # The open-cavity meshes contain much smaller cells at both lips.
@@ -446,6 +446,9 @@ def _stage_plan(
                 "duration_mode": duration_mode,
                 "configured_duration": duration,
                 "sampling": False,
+                "adjust_time_step": True,
+                "maxCo": 50.0,
+                "maxDeltaT_s": stage_dt,
             })
             cursor_decimal += duration_decimal
             cursor_s = float(cursor_decimal)
@@ -471,6 +474,9 @@ def _stage_plan(
                 "duration_tc": duration,
                 "end_tc": cursor_tc + duration,
                 "sampling": False,
+                "adjust_time_step": True,
+                "maxCo": 50.0,
+                "maxDeltaT_s": dt_s * factor,
             })
             cursor_tc += duration
         for stage in stages:

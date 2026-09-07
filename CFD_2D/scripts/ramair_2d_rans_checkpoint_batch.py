@@ -773,7 +773,11 @@ def checkpoint_status(project_root: Path, mesh_id: str) -> dict[str, Any]:
         if source_identity.get("status") == "READY":
             checkpoint_poly.mkdir(parents=True, exist_ok=True)
             for name in POLYMESH_FILES:
-                shutil.copy2(source_poly / name, checkpoint_poly / name)
+                source = source_poly / name
+                destination = checkpoint_poly / name
+                if destination.exists() and source.samefile(destination):
+                    continue
+                shutil.copy2(source, destination)
             compatibility_warnings.append(
                 "CHECKPOINT_POLYMESH_RESTORED_FROM_FIELD_COUNT_AND_PATCH_VERIFIED_SOURCE_CASE"
             )

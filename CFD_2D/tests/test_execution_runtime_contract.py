@@ -17,6 +17,7 @@ from ramair_execution_control import (  # noqa: E402
     ExecutionState,
     load_execution_state,
     normalize_execution_state,
+    publish_solver_process,
     reconcile_solver_record,
     transition_execution_state,
 )
@@ -25,6 +26,7 @@ from ramair_monitor_core import (  # noqa: E402
     parse_openfoam_lines,
     scalar_signal_inventory,
 )
+from ramair_2d_validation_live_monitor import build_monitor_snapshot  # noqa: E402
 
 
 def test_legacy_states_map_to_eight_state_contract() -> None:
@@ -80,6 +82,19 @@ def test_completed_solver_segment_can_enter_the_next_urans_phase(tmp_path: Path)
     assert next_phase["phase"] == "B"
 
 
+def test_staged_solver_segment_does_not_complete_parent_lifecycle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transition_execution_state(tmp_path, "PREPARED", idempotency_key="campaign")
+    transition_execution_state(tmp_path, "RUNNING", idempotency_key="campaign")
+    monkeypatch.setenv("RAMAIR_SUPPRESS_CANONICAL_LIFECYCLE", "1")
+
+    publish_solver_process(tmp_path, status="COMPLETED", returncode=0)
+
+    assert load_execution_state(tmp_path)["state"] == "RUNNING"
+    assert json.loads((tmp_path / ".ramair_solver_process.json").read_text())["status"] == "COMPLETED"
+
+
 def test_stale_running_record_becomes_recoverable_with_checkpoint(tmp_path: Path) -> None:
     (tmp_path / "1.25").mkdir()
     (tmp_path / ".ramair_solver_process.json").write_text(
@@ -107,6 +122,7 @@ def test_shared_monitor_parses_continuous_scalar_signals(tmp_path: Path) -> None
     assert parsed["deltaT_history"] == [{"iteration": 0.1, "deltaT": 0.002}]
     assert parsed["courant"][0]["max"] == 12.5
     assert parsed["residuals"][0]["field"] == "U.x"
+    assert parsed["residuals"][0]["linear_solver"] == "smoothSolver"
     assert parsed["continuity"][0]["global"] == -2e-7
 
     log = tmp_path / "log.foamRun"
@@ -118,6 +134,54 @@ def test_shared_monitor_parses_continuous_scalar_signals(tmp_path: Path) -> None
     second = accumulator.update(log)
     assert first["courant"][0]["max"] == 12.5
     assert second["residuals"]["Ux"][-1][1] == 0.1
+
+
+def test_live_monitor_reports_angle_and_low_overhead_performance_metrics(tmp_path: Path) -> None:
+    case = tmp_path / "case"
+    case.mkdir()
+    (case / "parallel_execution_plan.json").write_text(
+        json.dumps({"effective_ranks": 2}), encoding="utf-8",
+    )
+    rows = []
+    for index in range(5):
+        rows.extend([
+            f"Time = {index * 0.001:g}",
+            "GAMG: Solving for p, Initial residual = 0.1, Final residual = 1e-6, No Iterations 4",
+            f"ExecutionTime = {index + 1}.0 s  ClockTime = {index + 1} s",
+        ])
+    (case / "log.foamRun").write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+    snapshot = build_monitor_snapshot(
+        case,
+        mode="URANS",
+        run_id="example",
+        topology="closed",
+        mesh_level="coarse",
+        cell_count=200_000,
+        alpha_deg=8.0,
+        stage="C",
+        tc_s=0.02,
+    )
+
+    assert "alpha=8 deg" in snapshot["title"]
+    assert snapshot["performance"]["p95_s_per_step"] == pytest.approx(1.0)
+    assert snapshot["performance"]["cells_per_rank"] == pytest.approx(100_000.0)
+    assert snapshot["linear_solver_performance"][0]["solver"] == "GAMG"
+
+
+def test_solver_benchmark_requires_real_solver_steps(tmp_path: Path) -> None:
+    import ramair_2d_solver_benchmark_report as report
+
+    scenario = tmp_path / "current_2cores_native"
+    scenario.mkdir()
+    (scenario / "run_status.json").write_text(
+        '{"status":"STOPPED_FORCED_PARTIAL","solver_started":false}\n',
+        encoding="utf-8",
+    )
+    row = report.scenario_record(tmp_path, scenario)
+    assert row is not None
+    assert row["benchmark_valid"] is False
+    assert row["invalid_reason"] == "solver_not_started"
 
 
 def test_scalar_inventory_keeps_function_object_histories_outside_volume_times(tmp_path: Path) -> None:

@@ -10,7 +10,7 @@ ROOT="${RAMAIR_PROJECT_ROOT:-$HOME/ramair_cfd/DESIGN_APP}"
 BASE="${RAMAIR_BENCHMARK_CASE:-$ROOT/CFD_2D/openfoam_cases/reference_uncut/alpha_p4p000}"
 OUTPUT="${RAMAIR_BENCHMARK_OUTPUT:-/tmp/ramair_mpi_rank_fixed}"
 RANKS="${RAMAIR_BENCHMARK_RANKS:-1 2 4 8}"
-STOP_MIN="${RAMAIR_BENCHMARK_STOP_MIN:-0.1}"
+STOP_MIN="${RAMAIR_BENCHMARK_STOP_MIN:-2.0}"
 
 case "$OUTPUT" in
   /tmp/ramair_mpi_rank_*) ;;
@@ -45,7 +45,9 @@ for ranks in $RANKS; do
   mkdir -p "$case_dir"
   cp -a "$BASE/0" "$case_dir/"
   cp -a "$BASE/system" "$case_dir/"
-  cp -al "$BASE/constant" "$case_dir/"
+  # Every fixture owns its mesh. renumberMesh may rewrite polyMesh and must
+  # never be able to mutate the validated source through hard links.
+  cp -a "$BASE/constant" "$case_dir/"
   foamDictionary "$case_dir/system/controlDict" -entry startFrom -set startTime >/dev/null
   foamDictionary "$case_dir/system/controlDict" -entry startTime -set "$start_time" >/dev/null
   foamDictionary "$case_dir/system/controlDict" -entry endTime -set 1000 >/dev/null

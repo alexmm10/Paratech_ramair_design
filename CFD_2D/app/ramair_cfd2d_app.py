@@ -2640,8 +2640,7 @@ def selected_job() -> Job | None:
     return MANAGER.poll(job)
 
 
-@st.fragment(run_every="2s")
-def sidebar_job_status() -> None:
+def _sidebar_job_status() -> None:
     touch_application_heartbeat(ROOT)
     job = selected_job()
     if job:
@@ -2649,6 +2648,12 @@ def sidebar_job_status() -> None:
         st.write(f"Estado: **{job.status}**")
     else:
         st.caption("Sin tareas ejecutadas en esta sesion.")
+
+
+def sidebar_job_status() -> None:
+    job = selected_job()
+    refresh = "2s" if job is not None and job.status == "RUNNING" else None
+    st.fragment(_sidebar_job_status, run_every=refresh)()
 
 
 def suggested_library_case_name(variant_name: str, alpha_value: float) -> str:
@@ -2843,8 +2848,7 @@ def case_library_panel(stage: str, variant_name: str, alpha_value: float, select
                 st.caption("Este caso todavia no contiene paquetes de esta etapa.")
 
 
-@st.fragment(run_every="2s")
-def job_console() -> None:
+def _job_console() -> None:
     job = selected_job()
     st.subheader("Ejecucion activa y logs")
     if job is None:
@@ -2870,13 +2874,12 @@ def job_console() -> None:
             st.session_state["_pending_configuration_reload"] = action
         elif job.status == "COMPLETED" and isinstance(action, dict) and action.get("kind") == "select_case":
             st.session_state["_preferred_library_case_after_restore"] = action.get("case")
-        # A full rerun from an auto-fragment invalidates the other queued
-        # fragment IDs and makes Streamlit log "fragment ... does not exist
-        # anymore". Both fragments observe the persisted terminal state on
-        # their next independent tick, so no full-app rerun is needed here.
     st.caption(command_text(job.command))
     st.code(tail_file(Path(job.log_path), 180) or "Esperando salida...", language="text")
-    st.caption("Estado y log actualizados cada 2 segundos.")
+    if job.status == "RUNNING":
+        st.caption("Estado y log actualizados cada 2 segundos mientras la tarea esta activa.")
+    else:
+        st.caption("Estado final persistido; no hay actualizacion periodica en reposo.")
     action_cols = st.columns([1, 6])
     if job.status == "RUNNING" and not job.stop_requested_at and action_cols[0].button("Solicitar parada", key="stop-job"):
         validation_rans_stages = {
@@ -2945,8 +2948,13 @@ def job_console() -> None:
             st.warning("Se envio SIGINT al grupo real del solver y MPI.")
 
 
-@st.fragment(run_every="30s")
-def solver_live_monitor_panel() -> None:
+def job_console() -> None:
+    job = selected_job()
+    refresh = "2s" if job is not None and job.status == "RUNNING" else None
+    st.fragment(_job_console, run_every=refresh)()
+
+
+def _solver_live_monitor_panel() -> None:
     job = selected_job()
     if job is None or job.stage not in {"solver", "solver_sweep", "steady_extend", "steady_start_transient"}:
         return
@@ -2969,6 +2977,18 @@ def solver_live_monitor_panel() -> None:
         )
     elif job.status == "RUNNING":
         st.info("El monitor integrado se iniciara cuando PyFoam cree el log del solver.")
+
+
+def solver_live_monitor_panel() -> None:
+    job = selected_job()
+    refresh = (
+        "30s"
+        if job is not None
+        and job.status == "RUNNING"
+        and job.stage in {"solver", "solver_sweep", "steady_extend", "steady_start_transient"}
+        else None
+    )
+    st.fragment(_solver_live_monitor_panel, run_every=refresh)()
 
 
 def show_json_report(path: Path, title: str) -> None:
@@ -4096,6 +4116,7 @@ if active_page == "Ejecucion" and workflow_case_ready:
     st.info(TAB_INTROS["Ejecucion"])
     solver_cfg = load_config(ROOT, "solver")
     execution_cfg = workflow.get("execution", {})
+    cdir = case_directory(ROOT, variant, alpha)
     st.subheader("OpenFOAM")
     with st.form("runner-form"):
         configured_mode = str(execution_cfg.get("execution_mode", "single"))
@@ -4501,7 +4522,6 @@ if active_page == "Ejecucion" and workflow_case_ready:
                     "--case", str(cdir),
                     "--stage", "URANS",
                     "--maximum-ranks", str(int(n_cores)),
-                    "--ranks", "4", "6", "8",
                     "--steps", "30",
                     "--planned-steps", "10000",
                 ],

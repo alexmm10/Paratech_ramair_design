@@ -406,7 +406,7 @@ def default_study_config() -> dict[str, Any]:
                     },
                 ],
                 "settling_time_star": 10.0,
-                "sampling_time_star": 200.0,
+                "sampling_time_star": 100.0,
                 "outer_corrector_residual_control": {
                     "enabled": True,
                     "p": {"tolerance": 1.0e-4, "relTol": 0.0},
@@ -521,7 +521,7 @@ def default_study_config() -> dict[str, Any]:
                 ],
                 "default_strategy": "progressive_medium_first",
                 "screening_time_star": 100.0,
-                "low_frequency_extension_time_star": 200.0,
+                "low_frequency_extension_time_star": 100.0,
                 "geometry_fixed": True,
                 "rans_diagnostics_first": True,
             },

@@ -136,7 +136,7 @@ def methodology_contract(topology: str) -> dict[str, Any]:
         "dt_star_ladder": list(OPEN_DT_STAR),
         "screening_collection_time_star": 100.0,
         "final_collection_time_star": 100.0,
-        "low_frequency_extension_time_star": 200.0,
+        "low_frequency_extension_time_star": 100.0,
         "settling_detection": [
             "Cl",
             "Cd",

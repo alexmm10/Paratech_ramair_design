@@ -19,7 +19,7 @@ from ramair_2d_parallel import (
     configure_decompose_dictionary,
     decompose_load_balance,
     linux_parallel_preflight,
-    parallel_profile_key,
+    performance_profile_key,
     practical_rank_candidates,
     select_benchmark_winner,
     store_parallel_profile,
@@ -114,12 +114,13 @@ def tune(args: argparse.Namespace) -> dict[str, Any]:
     )
     candidates = sorted({
         int(value) for value in candidates
-        if 1 < int(value) <= min(physical, int(args.maximum_ranks))
+        if 1 <= int(value) <= min(physical, int(args.maximum_ranks))
     })
     if not candidates:
         raise RuntimeError("No parallel candidate fits the physical-core limit")
-    signature = json.dumps({"solver_command": args.solver_command, "stage": args.stage}, sort_keys=True)
-    key = parallel_profile_key(case, solver=args.solver_command, stage=args.stage, numerical_signature=signature)
+    module_match = re.search(r"(?:-solver\s+)(\S+)", args.solver_command)
+    solver_module = module_match.group(1) if module_match else "incompressibleFluid"
+    key = performance_profile_key(case, solver_module=solver_module)
     project_root = next((parent for parent in case.parents if (parent / "CFD_2D").is_dir()), case)
     cache = args.cache or project_root / "CFD_2D/app_state/parallel_execution_profiles.json"
     results: list[dict[str, Any]] = []
@@ -162,14 +163,22 @@ def tune(args: argparse.Namespace) -> dict[str, Any]:
                             "reason": "renumber_or_mesh_recheck_failed",
                         })
                         continue
-                configure_decompose_dictionary(
-                    pilot / "system/decomposeParDict", ranks, method=args.method
-                )
-                decompose_rc, decompose_log, decompose_s = _run(
-                    ["decomposePar", "-force"], pilot, args.timeout_s,
-                )
-                (pilot / "log.decomposePar").write_text(decompose_log, encoding="utf-8")
-                balance = decompose_load_balance(pilot / "log.decomposePar")
+                if ranks > 1:
+                    configure_decompose_dictionary(
+                        pilot / "system/decomposeParDict", ranks, method=args.method
+                    )
+                    decompose_rc, decompose_log, decompose_s = _run(
+                        ["decomposePar", "-force"], pilot, args.timeout_s,
+                    )
+                    (pilot / "log.decomposePar").write_text(decompose_log, encoding="utf-8")
+                    balance = decompose_load_balance(pilot / "log.decomposePar")
+                else:
+                    decompose_rc, decompose_s = 0, 0.0
+                    balance = {
+                        "status": "SERIAL",
+                        "maximum_deviation_percent": 0.0,
+                        "processor_faces": 0,
+                    }
                 row: dict[str, Any] = {
                     "ranks": ranks, "method": args.method,
                     "renumber": renumbered,
@@ -187,15 +196,22 @@ def tune(args: argparse.Namespace) -> dict[str, Any]:
                     )
                     results.append(row)
                     continue
-                command = [
-                    "mpirun", "--map-by", "core", "--bind-to", "core", "--report-bindings",
-                    "-np", str(ranks), *args.solver_command.split(), "-parallel",
-                ]
+                command = (
+                    [*args.solver_command.split()]
+                    if ranks == 1
+                    else [
+                        "mpirun", "--map-by", "core", "--bind-to", "core", "--report-bindings",
+                        "-np", str(ranks), *args.solver_command.split(), "-parallel",
+                    ]
+                )
                 solver_rc, solver_log, solver_s = _run(command, pilot, args.timeout_s)
                 (pilot / "log.parallelPilot").write_text(solver_log, encoding="utf-8")
-                reconstruct_rc, _, reconstruct_s = _run(
-                    ["reconstructPar", "-latestTime"], pilot, args.timeout_s,
-                )
+                if ranks > 1:
+                    reconstruct_rc, _, reconstruct_s = _run(
+                        ["reconstructPar", "-latestTime"], pilot, args.timeout_s,
+                    )
+                else:
+                    reconstruct_rc, reconstruct_s = 0, 0.0
                 seconds_per_step, measured_steps, timing_source = _sustained_step_timing(
                     solver_log,
                     warmup_steps=args.warmup_steps,
@@ -215,6 +231,8 @@ def tune(args: argparse.Namespace) -> dict[str, Any]:
                     timing_source=timing_source,
                     reconstruct_time_s=reconstruct_s,
                     projected_wall_time_s=projected,
+                    core_seconds_per_step=seconds_per_step * ranks,
+                    cell_steps_per_second=cells / seconds_per_step,
                     rejected=bool(solver_rc or reconstruct_rc),
                 )
                 results.append(row)

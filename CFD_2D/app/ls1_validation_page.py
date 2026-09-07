@@ -308,6 +308,7 @@ def _validation_execution_monitor(root: Path, refresh_seconds: int) -> None:
             else:
                 st.info("Este caso todavía no tiene una etapa RANS archivada.")
         quality = _read_json(root / f"CFD_2D/meshes/{VARIANT}/mesh_quality_report.json")
+        alpha = _alpha_from_dir(case.name)
         snapshot = validation_monitor_snapshot(
             monitor_case,
             mode=mode,
@@ -315,6 +316,8 @@ def _validation_execution_monitor(root: Path, refresh_seconds: int) -> None:
             topology="closed",
             mesh_level="validation",
             cell_count=int(quality.get("checkMesh_cell_count") or quality.get("cell_count") or 0),
+            n_cores=_selected_core_count(case, status, staged_status),
+            alpha_deg=alpha,
             stage=phase,
             tc_s=tc_s,
             target_delta_t=float(case_config.get("maxDeltaT_s") or case_config.get("deltaT_s") or 0.0),
@@ -326,7 +329,6 @@ def _validation_execution_monitor(root: Path, refresh_seconds: int) -> None:
                 or 0.0
             ),
         )
-        alpha = _alpha_from_dir(case.name)
         courant_rows = list(snapshot.get("courant") or [])
         observed_co = max(
             [float(row.get("maxCo") or row.get("maximum") or row.get("max") or 0.0) for row in courant_rows]
@@ -969,6 +971,16 @@ def render_ls1_validation(root: Path, start_job: StartJob) -> None:
     with execution_tab:
         prepared_alphas = sorted(set(alpha_values + [float(selected_case_alpha)]))
         alpha = st.selectbox("Ángulo a ejecutar", prepared_alphas, key="ls1-validation-run-alpha")
+        run_case = case_directory(root, VARIANT, alpha)
+        run_status = _read_json(run_case / "run_status.json") or {}
+        staged_status = _read_json(run_case / "staged_run_status.json") or {}
+        pending_steady_path = run_case / "steadyInitialization/pending_stage.json"
+        pending_steady = _read_json(pending_steady_path) or {}
+        existing_incomplete = (
+            _latest_physical_time(run_case) > 0.0
+            and _effective_validation_status(run_status, staged_status)
+            != "TRANSIENT_STAGE_FINISHED"
+        )
         cols = st.columns(4)
         cores = cols[0].number_input("Procesos", min_value=1, max_value=16, value=8)
         case_timeout_h = cols[1].number_input(
@@ -986,7 +998,20 @@ def render_ls1_validation(root: Path, start_job: StartJob) -> None:
                 "finitos, la cola inicia URANS desde el último estado."
             ),
         )
-        resume = cols[3].checkbox("Continuar desde último estado", value=False)
+        resume = cols[3].checkbox(
+            "Continuar desde último estado",
+            value=bool(existing_incomplete and not pending_steady),
+            disabled=bool(pending_steady),
+            help=(
+                "Se activa automáticamente para un URANS incompleto. Si existe un checkpoint "
+                "RANS pendiente, la aplicación lo amplía primero hasta 15.000 iteraciones."
+            ),
+        )
+        if pending_steady:
+            st.info(
+                "Checkpoint RANS pendiente detectado: la ejecución continuará SIMPLE desde "
+                f"la iteración {float(pending_steady.get('latest_iteration') or 0):g} y después iniciará URANS."
+            )
         timeout = 60.0 * float(case_timeout_h)
         parallel_cols = st.columns(2)
         parallel_mode = parallel_cols[0].radio(
@@ -1030,6 +1055,14 @@ def render_ls1_validation(root: Path, start_job: StartJob) -> None:
                     steady_force_fluctuation_tolerance_percent=float(rans_fluct_tol),
                     continue_transient_after_steady_timeout=True, resume=resume,
                     resume_additional_time_star=None,
+                    steady_decision="extend" if pending_steady else "auto",
+                    steady_additional_iterations=max(
+                        1,
+                        int(round(
+                            float((pending_steady.get("transition") or {}).get("maximum_iterations") or 15000)
+                            - float(pending_steady.get("latest_iteration") or 0)
+                        )),
+                    ),
                     transient_phase_plan=phase_path,
                     automatic_core_selection=automatic_core_selection,
                     renumber_before_decompose=renumber_before_decompose,

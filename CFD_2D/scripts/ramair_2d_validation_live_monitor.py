@@ -100,7 +100,39 @@ def _read_log_increment(log: Path, cache: dict[str, Any]) -> tuple[list[str], in
     return data.decode("utf-8", errors="ignore").splitlines(), new_offset
 
 
-def _performance(execution: list[dict[str, Any]]) -> dict[str, Any]:
+def _percentile(values: list[float], fraction: float) -> float:
+    ordered = sorted(values)
+    return ordered[min(len(ordered) - 1, int(math.ceil(fraction * len(ordered)) - 1))]
+
+
+def _linear_solver_performance(residuals: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in residuals:
+        grouped.setdefault(str(row.get("equation") or "unknown"), []).append(row)
+    result = []
+    for equation, rows in sorted(grouped.items()):
+        iterations = [float(row.get("n_iterations") or 0.0) for row in rows]
+        result.append({
+            "equation": equation,
+            "solver": str(rows[-1].get("linear_solver") or "unknown"),
+            "samples": len(rows),
+            "mean_iterations": statistics.fmean(iterations),
+            "p95_iterations": _percentile(iterations, 0.95),
+            "max_iterations": max(iterations),
+            "latest_initial_residual": rows[-1].get("initial_residual"),
+            "latest_final_residual": rows[-1].get("final_residual"),
+        })
+    return result
+
+
+def _performance(
+    execution: list[dict[str, Any]],
+    *,
+    cell_count: int = 0,
+    ranks: int = 1,
+    physical_time_s: float | None = None,
+    tc_s: float | None = None,
+) -> dict[str, Any]:
     if len(execution) < 3:
         return {"status": "WAITING_FOR_STABLE_STEPS"}
     deltas = [
@@ -113,14 +145,20 @@ def _performance(execution: list[dict[str, Any]]) -> dict[str, Any]:
     if not stable:
         return {"status": "WAITING_FOR_STABLE_STEPS"}
     ordered = sorted(stable)
-    return {
+    median = float(statistics.median(stable))
+    result = {
         "status": "MEASURED",
         "samples": len(stable),
-        "median_s_per_step": statistics.median(stable),
+        "median_s_per_step": median,
         "p25_s_per_step": ordered[int(0.25 * (len(ordered) - 1))],
         "p75_s_per_step": ordered[int(0.75 * (len(ordered) - 1))],
+        "p95_s_per_step": _percentile(stable, 0.95),
         "mean_s_per_step": statistics.fmean(stable),
         "stdev_s_per_step": statistics.pstdev(stable),
+        "steps_per_second": 1.0 / median if median > 0.0 else None,
+        "cells_per_rank": float(cell_count) / max(1, int(ranks)) if cell_count else None,
+        "cell_steps_per_second": float(cell_count) / median if cell_count and median > 0.0 else None,
+        "core_seconds_per_step": median * max(1, int(ranks)),
         "exclusions": [
             "first step",
             "decomposition",
@@ -129,6 +167,14 @@ def _performance(execution: list[dict[str, Any]]) -> dict[str, Any]:
             "stage transitions",
         ],
     }
+    wall_span = float(execution[-1]["clock_s"]) - float(execution[0]["clock_s"])
+    if physical_time_s is not None and wall_span > 0.0:
+        initial_physical = float(execution[0].get("iteration") or 0.0)
+        advanced = max(0.0, float(physical_time_s) - initial_physical)
+        result["physical_seconds_per_wall_second"] = advanced / wall_span
+        if tc_s and tc_s > 0.0 and advanced > 0.0:
+            result["wall_seconds_per_convective_time"] = wall_span / (advanced / tc_s)
+    return result
 
 
 def _force_snapshot(case: Path, max_points: int) -> tuple[list[dict[str, float]], list[str]]:
@@ -237,6 +283,8 @@ def build_monitor_snapshot(
     topology: str,
     mesh_level: str,
     cell_count: int,
+    n_cores: int | None = None,
+    alpha_deg: float | None = None,
     stage: str = "",
     tc_s: float | None = None,
     steps_planned: int | None = None,
@@ -270,6 +318,7 @@ def build_monitor_snapshot(
     forces, force_sources = _force_snapshot(case, max_points)
     current = recent.get("current_iteration")
     delta_t = recent.get("deltaT")
+    alpha_text = f"| alpha={float(alpha_deg):g} deg " if alpha_deg is not None else ""
     if mode == "RANS":
         queue = (
             f" | Base-state queue {queue_position}/{queue_total}"
@@ -278,6 +327,7 @@ def build_monitor_snapshot(
         )
         title = (
             f"{topology.title()} | {mesh_level.title()} | {int(cell_count):,} cells "
+            f"{alpha_text}"
             f"| RANS/SIMPLE | Iteration {int(current or 0):,}{queue}"
         )
     else:
@@ -289,6 +339,7 @@ def build_monitor_snapshot(
         )
         title = (
             f"{topology.title()} | {mesh_level.title()} | URANS/PIMPLE "
+            f"{alpha_text}"
             f"| target dt={float(target_display or 0):.6g} s "
             f"| phase dt={float(phase_display or 0):.6g} s "
             f"| Stage {stage or 'A-E'}"
@@ -304,7 +355,30 @@ def build_monitor_snapshot(
         elapsed += float(case_manifest.get("total_wall_time") or 0.0)
     steps_done = int(recent.get("steps_total") or len(recent.get("iterations") or []))
     remaining = None
-    performance = _performance(list(recent.get("execution") or []))
+    physical_time = float(current or 0.0) if mode == "URANS" else None
+    parallel_plan = read_json(case / "parallel_execution_plan.json", {}) or {}
+    effective_ranks = (
+        n_cores
+        or parallel_plan.get("effective_ranks")
+        or parallel_plan.get("recommended_ranks")
+        or parallel_plan.get("requested_ranks")
+        or 1
+    )
+    performance = _performance(
+        list(recent.get("execution") or []),
+        cell_count=int(cell_count),
+        ranks=int(effective_ranks),
+        physical_time_s=physical_time,
+        tc_s=tc_s,
+    )
+    linear_solver_stats = _linear_solver_performance(list(recent.get("residuals") or []))
+    performance_warnings = []
+    pressure_rows = [row for row in linear_solver_stats if str(row["equation"]).lower() == "p"]
+    if pressure_rows and float(pressure_rows[0]["p95_iterations"]) >= 50.0:
+        performance_warnings.append("PRESSURE_LINEAR_ITERATIONS_HIGH")
+    cells_per_rank = performance.get("cells_per_rank")
+    if cells_per_rank is not None and float(cells_per_rank) < 50_000.0:
+        performance_warnings.append("MPI_OVERHEAD_RISK_LOW_CELLS_PER_RANK")
     if (
         steps_planned
         and steps_done
@@ -313,13 +387,6 @@ def build_monitor_snapshot(
         remaining = max(0, int(steps_planned) - steps_done) * float(
             performance["median_s_per_step"]
         )
-    physical_time = float(current or 0.0) if mode == "URANS" else None
-    parallel_plan = read_json(case / "parallel_execution_plan.json", {}) or {}
-    effective_ranks = (
-        parallel_plan.get("effective_ranks")
-        or parallel_plan.get("recommended_ranks")
-        or parallel_plan.get("requested_ranks")
-    )
     snapshot = {
         "schema_version": 1,
         "status": (
@@ -332,6 +399,7 @@ def build_monitor_snapshot(
         "mode": mode,
         "topology": topology,
         "mesh_level": mesh_level,
+        "alpha_deg": float(alpha_deg) if alpha_deg is not None else None,
         "cell_count": int(cell_count),
         "n_cores": int(effective_ranks) if effective_ranks is not None else None,
         "stage": stage,
@@ -361,6 +429,8 @@ def build_monitor_snapshot(
             "steady_transition", {}
         ),
         "performance": performance,
+        "linear_solver_performance": linear_solver_stats,
+        "performance_warnings": performance_warnings,
         "source_log": str(log) if log else None,
         "heartbeat_at": case_manifest.get("updated_at"),
         "terminal_reason": case_manifest.get("terminal_reason"),
@@ -442,6 +512,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--topology", choices=["closed", "open"], required=True)
     parser.add_argument("--mesh-level", choices=["coarse", "medium", "fine"], required=True)
     parser.add_argument("--cell-count", type=int, required=True)
+    parser.add_argument("--n-cores", type=int)
+    parser.add_argument("--alpha-deg", type=float)
     parser.add_argument("--stage", default="")
     parser.add_argument("--tc-s", type=float)
     parser.add_argument("--steps-planned", type=int)
@@ -457,6 +529,8 @@ def main() -> int:
         topology=args.topology,
         mesh_level=args.mesh_level,
         cell_count=args.cell_count,
+        n_cores=args.n_cores,
+        alpha_deg=args.alpha_deg,
         stage=args.stage,
         tc_s=args.tc_s,
         steps_planned=args.steps_planned,

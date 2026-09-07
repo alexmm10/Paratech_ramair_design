@@ -349,23 +349,24 @@ def publish_solver_process(
     if status != "RUNNING":
         payload["finished_at"] = payload["updated_at"]
     written = write_json_atomic(path, payload)
-    try:
-        canonical = normalize_execution_state(status)
-        transition_execution_state(
-            case_dir,
-            canonical,
-            phase=str(previous.get("phase") or "SOLVER"),
-            idempotency_key=execution_idempotency_key(case_dir, command or payload.get("command")),
-            reason=outcome or str(status),
-            pid=effective_pid,
-            returncode=returncode,
-            evidence=restart_evidence(case_dir) if canonical != ExecutionState.RUNNING else {},
-            force=canonical == ExecutionState.RUNNING and bool(load_execution_state(case_dir)),
-        )
-    except (OSError, RuntimeError, ValueError):
-        # The legacy process record remains authoritative for older packages.
-        # Lifecycle publication must never mask the real solver outcome.
-        pass
+    if os.environ.get("RAMAIR_SUPPRESS_CANONICAL_LIFECYCLE") != "1":
+        try:
+            canonical = normalize_execution_state(status)
+            transition_execution_state(
+                case_dir,
+                canonical,
+                phase=str(previous.get("phase") or "SOLVER"),
+                idempotency_key=execution_idempotency_key(case_dir, command or payload.get("command")),
+                reason=outcome or str(status),
+                pid=effective_pid,
+                returncode=returncode,
+                evidence=restart_evidence(case_dir) if canonical != ExecutionState.RUNNING else {},
+                force=canonical == ExecutionState.RUNNING and bool(load_execution_state(case_dir)),
+            )
+        except (OSError, RuntimeError, ValueError):
+            # The legacy process record remains authoritative for older packages.
+            # Lifecycle publication must never mask the real solver outcome.
+            pass
     return written
 
 

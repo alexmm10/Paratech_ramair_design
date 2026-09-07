@@ -10,8 +10,10 @@ from typing import Any, Iterable
 
 
 RESIDUAL_RE = re.compile(
-    r"Solving for\s+([^,]+),\s+Initial residual\s*=\s*([0-9.eE+-]+),"
-    r"(?:\s*Final residual\s*=\s*([0-9.eE+-]+),)?\s*No Iterations\s+(\d+)"
+    r"(?:(?P<solver>[A-Za-z0-9_<>.-]+):\s+)?Solving for\s+(?P<field>[^,]+),"
+    r"\s+Initial residual\s*=\s*(?P<initial>[0-9.eE+-]+),"
+    r"(?:\s*Final residual\s*=\s*(?P<final>[0-9.eE+-]+),)?"
+    r"\s*No Iterations\s+(?P<iterations>\d+)"
 )
 TIME_RE = re.compile(r"^\s*Time\s*=\s*([0-9.eE+-]+)\s*s?\s*$")
 DELTA_T_RE = re.compile(r"^\s*deltaT\s*=\s*([0-9.eE+-]+)")
@@ -75,10 +77,10 @@ def parse_openfoam_lines(
             continue
         match = RESIDUAL_RE.search(line)
         if match:
-            initial = _finite(match.group(2))
-            final = _finite(match.group(3))
+            initial = _finite(match.group("initial"))
+            final = _finite(match.group("final"))
             if initial is not None:
-                raw_field = match.group(1).strip()
+                raw_field = match.group("field").strip()
                 field = normalized_field_name(raw_field)
                 residuals.append(
                     {
@@ -90,7 +92,8 @@ def parse_openfoam_lines(
                         "value": initial,
                         "initial_residual": initial,
                         "final_residual": final,
-                        "n_iterations": int(match.group(4)),
+                        "n_iterations": int(match.group("iterations")),
+                        "linear_solver": match.group("solver") or "unknown",
                     }
                 )
         match = COURANT_RE.search(line)

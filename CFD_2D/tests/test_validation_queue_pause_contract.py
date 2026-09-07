@@ -14,6 +14,9 @@ import ramair_2d_urans_matrix_manager as urans_queue  # noqa: E402
 from ramair_2d_study_registry import write_json_atomic  # noqa: E402
 
 
+SWEEP = SCRIPTS / "ramair_2d_openfoam_sweep.py"
+
+
 def test_rans_selection_queue_skips_completed_and_can_pause_current_then_continue(
     tmp_path: Path, monkeypatch,
 ) -> None:
@@ -107,3 +110,9 @@ def test_urans_queue_pause_current_continues_but_pause_queue_retains_index(
     assert calls == ["case-a"]
     assert result["runs"][0]["result"] == "PAUSED_AND_SKIPPED_BY_USER"
     assert result["runs"][1]["result"] == "SKIPPED_COMPLETED"
+
+
+def test_staged_validation_is_not_skipped_from_inner_runner_status_only() -> None:
+    text = SWEEP.read_text(encoding="utf-8")
+    assert 'staged_prior_status == "TRANSIENT_STAGE_FINISHED"' in text
+    assert "if args.skip_completed and case_complete and not pending_path.is_file()" in text

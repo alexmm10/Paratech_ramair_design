@@ -19,6 +19,7 @@ sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(APP))
 
 import ramair_2d_urans_matrix_manager as queue_manager  # noqa: E402
+from validation_convergence_page import _cummings_dt_assignment  # noqa: E402
 from ramair_2d_execution_registry import (  # noqa: E402
     execution_title,
     load_registry,
@@ -48,6 +49,7 @@ from ramair_2d_urans_cases import (  # noqa: E402
     write_case_manifest,
 )
 from ramair_2d_urans_review import review_run  # noqa: E402
+from ramair_2d_validation_study import _stage_plan  # noqa: E402
 from ramair_2d_validation_report import _rans_scalar_change_records  # noqa: E402
 from ramair_2d_validation_schema9_migration import apply, preview  # noqa: E402
 from ramair_2d_validation_staged_runner import (  # noqa: E402
@@ -64,6 +66,45 @@ from ramair_scientific_plot_style import save_scientific_figure  # noqa: E402
 from wall_separation_analysis import _ordered_cp_branches  # noqa: E402
 from openfoam_wall_analysis import _load_case_definition_json  # noqa: E402
 from workflow_backend import BACKEND_API_VERSION  # noqa: E402
+
+
+def test_cummings_queue_assigns_two_time_steps_per_mesh_level() -> None:
+    ladder = [0.02, 0.01, 0.005, 0.0025, 0.00125, 0.000625]
+    rows = [
+        {
+            "run_id": f"{level}-{dt:g}",
+            "mesh_level": level,
+            "dt_star": dt,
+        }
+        for level in ("coarse", "medium", "fine")
+        for dt in ladder
+    ]
+
+    assert _cummings_dt_assignment(rows) == [
+        "coarse-0.02",
+        "coarse-0.01",
+        "medium-0.005",
+        "medium-0.0025",
+        "fine-0.00125",
+        "fine-0.000625",
+    ]
+
+
+def test_urans_startup_phases_cap_courant_without_adapting_production() -> None:
+    config = default_study_config()
+    condition = dict(config["operating_condition"])
+    plan = _stage_plan(
+        dt_s=0.0001,
+        condition=condition,
+        config=config,
+    )
+
+    for stage in plan["stages"][:3]:
+        assert stage["adjust_time_step"] is True
+        assert stage["maxCo"] == pytest.approx(50.0)
+        assert stage["maxDeltaT_s"] == pytest.approx(stage["dt_s"])
+    for stage in plan["stages"][3:]:
+        assert stage.get("adjust_time_step", False) is False
 
 
 def row(level: str = "coarse", dt: float = 2.5e-4) -> dict[str, object]:
@@ -330,8 +371,49 @@ def test_stage_configuration_and_backward_history(tmp_path: Path) -> None:
     applied = configure_stage(case, stage, start_mode="CONTINUE_STAGE", preserve_temporal_history=True)
     assert applied["retains_temporal_history"] is True
     assert "startFrom latestTime;" in (case / "system/controlDict").read_text()
+    assert "timePrecision 12;" in (case / "system/controlDict").read_text()
     write_time(case, 0.01); write_time(case, 0.02); write_time(case, 0.03)
     assert _history_evidence(case, 0.01)["valid"] is True
+
+
+def test_adaptive_stage_adds_missing_courant_entries_to_legacy_case(tmp_path: Path) -> None:
+    case = tmp_path / "case"
+    (case / "system").mkdir(parents=True)
+    (case / "system/controlDict").write_text(
+        "startFrom startTime;\nstartTime 0;\nstopAt endTime;\nendTime 1;\n"
+        "deltaT 1;\nadjustTimeStep no;\nwriteControl timeStep;\nwriteInterval 1;\n",
+        encoding="utf-8",
+    )
+    (case / "system/fvSchemes").write_text(
+        "ddtSchemes\n{\n default Euler;\n}\n", encoding="utf-8",
+    )
+    stage = {
+        "stage": "C", "scheme": "Euler", "dt_s": 0.01,
+        "start_s": 0.0, "end_s": 0.03, "steps": 3,
+        "adjust_time_step": True, "maxCo": 50.0, "maxDeltaT_s": 0.01,
+    }
+
+    applied = configure_stage(case, stage, start_mode="CONTINUE_STAGE")
+    control = (case / "system/controlDict").read_text()
+
+    assert applied["adjust_time_step"] is True
+    assert "adjustTimeStep yes;" in control
+    assert "maxCo 50;" in control
+    assert "maxDeltaT 0.01;" in control
+
+
+def test_backward_history_accepts_legacy_time_directory_precision(tmp_path: Path) -> None:
+    case = tmp_path / "case"
+    (case / "system").mkdir(parents=True)
+    (case / "system/controlDict").write_text("timePrecision 6;\n", encoding="utf-8")
+    write_time(case, 0.396047)
+    write_time(case, 0.396109)
+    write_time(case, 0.396172)
+
+    evidence = _history_evidence(case, 6.25e-5)
+
+    assert evidence["valid"] is True
+    assert evidence["tolerance_s"] >= 1.0e-6
 
 
 def test_parallel_run_script_always_defines_reconstruction_command(tmp_path: Path) -> None:

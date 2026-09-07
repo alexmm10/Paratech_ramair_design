@@ -66,6 +66,13 @@ def _replace_entry(text: str, name: str, value: str) -> str:
     return re.sub(pattern, rf"\g<1>{value};", text, count=1)
 
 
+def _replace_or_append_entry(text: str, name: str, value: str) -> str:
+    pattern = rf"(?m)^(\s*{re.escape(name)}\s+)[^;]+;"
+    if re.search(pattern, text):
+        return re.sub(pattern, rf"\g<1>{value};", text, count=1)
+    return text.rstrip() + f"\n{name} {value};\n"
+
+
 def _latest_time_index(case: Path) -> tuple[Decimal, int] | None:
     """Read OpenFOAM's persisted global time index from the latest state."""
     candidates: list[tuple[Decimal, Path]] = []
@@ -153,11 +160,17 @@ def configure_stage(
     control = _replace_entry(control, "stopAt", "endTime")
     control = _replace_entry(control, "endTime", format(intended_end, ".12g"))
     control = _replace_entry(control, "deltaT", f"{float(stage['dt_s']):.12g}")
+    if re.search(r"(?m)^\s*timePrecision\s+\d+\s*;", control):
+        control = _replace_entry(control, "timePrecision", "12")
+    else:
+        control += "\n// Preserve exact phase boundaries and restart history.\ntimePrecision 12;\n"
     adaptive = bool(stage.get("adjust_time_step", False))
     control = _replace_entry(control, "adjustTimeStep", "yes" if adaptive else "no")
     if adaptive:
-        control = _replace_entry(control, "maxCo", f"{float(stage.get('maxCo', 50.0)):.12g}")
-        control = _replace_entry(
+        control = _replace_or_append_entry(
+            control, "maxCo", f"{float(stage.get('maxCo', 50.0)):.12g}",
+        )
+        control = _replace_or_append_entry(
             control, "maxDeltaT", f"{float(stage.get('maxDeltaT_s', stage['dt_s'])):.12g}",
         )
         control = _replace_entry(control, "writeControl", "adjustableRunTime")
@@ -296,6 +309,16 @@ def _phase_complete(row: dict[str, Any]) -> bool:
     )
 
 
+def _time_directory_tolerance(case: Path, target_dt_s: float) -> float:
+    """Match OpenFOAM time names at the precision configured for the case."""
+    control = case / "system/controlDict"
+    text = control.read_text(encoding="utf-8", errors="ignore") if control.is_file() else ""
+    match = re.search(r"(?m)^\s*timePrecision\s+(\d+)\s*;", text)
+    precision = int(match.group(1)) if match else 8
+    naming_error = 1.1 * 10.0 ** (-max(1, precision))
+    return max(1.0e-12, abs(float(target_dt_s)) * 1.0e-6, naming_error)
+
+
 def _history_evidence(case: Path, target_dt_s: float) -> dict[str, Any]:
     base_history = complete_time_history(case)
     available = list(base_history.get("times_s") or [])
@@ -315,7 +338,7 @@ def _history_evidence(case: Path, target_dt_s: float) -> dict[str, Any]:
         selected[index + 1] - selected[index]
         for index in range(len(selected) - 1)
     ]
-    tolerance = max(1.0e-12, abs(float(target_dt_s)) * 1.0e-6)
+    tolerance = _time_directory_tolerance(case, target_dt_s)
     return {
         "valid": bool(
             len(selected) == 3
@@ -344,7 +367,9 @@ def _run_phase_command(
     log_offset: int,
 ) -> tuple[int, dict[str, Any]]:
     """Run one phase while publishing the effective solver PID and heartbeat."""
-    process = subprocess.Popen(command, cwd=str(case))
+    environment = os.environ.copy()
+    environment["RAMAIR_SUPPRESS_CANONICAL_LIFECYCLE"] = "1"
+    process = subprocess.Popen(command, cwd=str(case), env=environment)
     last_status: dict[str, Any] = {}
     while process.poll() is None:
         last_status = read_json(case / "run_status.json", {}) or last_status
@@ -800,7 +825,8 @@ def _resume_cursor(
         if _phase_complete(previous):
             continue
         current = float(restart["time_s"])
-        if current <= float(stage["end_s"]) + 1.0e-12:
+        tolerance = _time_directory_tolerance(case, float(stage.get("dt_s") or 0.0))
+        if current <= float(stage["end_s"]) + tolerance:
             return index, RESUME_EXISTING
         raise RuntimeError(
             f"RESUME_CURSOR_INCONSISTENT: restart t={current} exceeds phase "
@@ -1297,7 +1323,9 @@ def execute(
             setup_failed = bool(event.get("setup_error"))
             target_reached = bool(
                 output_checkpoint["valid"]
-                and float(output_checkpoint["time_s"]) + 1.0e-12 >= float(stage["end_s"])
+                and float(output_checkpoint["time_s"]) + _time_directory_tolerance(
+                    case, float(stage.get("dt_s") or 0.0)
+                ) >= float(stage["end_s"])
             )
             terminal_reason = (
                 "SETUP_FAILED" if setup_failed

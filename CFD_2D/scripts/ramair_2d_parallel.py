@@ -146,6 +146,30 @@ def parallel_profile_key(
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
 
+def detected_solver_stage(case: Path) -> str:
+    """Classify a case from the active ddt scheme for reusable tuning keys."""
+    schemes = Path(case) / "system" / "fvSchemes"
+    text = schemes.read_text(encoding="utf-8", errors="ignore") if schemes.is_file() else ""
+    return "RANS" if re.search(
+        r"ddtSchemes\s*\{\s*default\s+steadyState\s*;", text, re.DOTALL
+    ) else "URANS"
+
+
+def performance_profile_key(case: Path, *, solver_module: str) -> str:
+    """Return the shared tuner/runner identity for one numerical execution mode."""
+    command = f"foamRun -solver {str(solver_module).strip()}"
+    stage = detected_solver_stage(case)
+    signature = json.dumps(
+        {"solver_command": command, "stage": stage}, sort_keys=True
+    )
+    return parallel_profile_key(
+        case,
+        solver=command,
+        stage=stage,
+        numerical_signature=signature,
+    )
+
+
 def load_parallel_profile(cache_path: Path, key: str) -> dict[str, Any] | None:
     try:
         cache = json.loads(Path(cache_path).read_text(encoding="utf-8"))

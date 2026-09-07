@@ -113,13 +113,14 @@ def test_postprocess_command_separates_fast_products_from_animations() -> None:
     assert "--export-vtk" not in animations
 
 
-def test_auto_fragment_does_not_request_a_full_rerun_on_job_completion() -> None:
+def test_job_console_refresh_is_active_only_while_a_job_runs() -> None:
     source = (APP_DIR / "ramair_cfd2d_app.py").read_text(encoding="utf-8")
     job_console = source.split("def job_console()", 1)[1].split(
         "def solver_live_monitor_panel()", 1
     )[0]
     assert "st.rerun()" not in job_console
-    assert "does not exist" in job_console
+    assert 'job.status == "RUNNING" else None' in job_console
+    assert "st.fragment(_job_console, run_every=refresh)()" in job_console
 
 
 def test_project_root_and_stage_commands_use_existing_scripts() -> None:
@@ -741,3 +742,16 @@ def test_pyfoam_worker_records_real_log_and_process_return_code() -> None:
     text = (APP_DIR / "pyfoam_solver_runner.py").read_text(encoding="utf-8")
     assert "runner.logName()" in text
     assert 'getattr(runner.run, "getReturnCode", None)' in text
+
+
+def test_execution_page_resolves_its_case_directory() -> None:
+    app = (APP_DIR / "ramair_cfd2d_app.py").read_text(encoding="utf-8")
+    execution_page = app.split(
+        'if active_page == "Ejecucion" and workflow_case_ready:', 1
+    )[1].split('if active_page == "Postproceso" and workflow_case_ready:', 1)[0]
+
+    assignment = "cdir = case_directory(ROOT, variant, alpha)"
+    assert assignment in execution_page
+    assert execution_page.index(assignment) < execution_page.index(
+        'cdir / "parallel_execution_plan.json"'
+    )

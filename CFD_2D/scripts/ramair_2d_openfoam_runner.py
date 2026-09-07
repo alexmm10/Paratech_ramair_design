@@ -32,7 +32,7 @@ from ramair_2d_parallel import (
     decompose_load_balance,
     linux_parallel_preflight,
     load_parallel_profile,
-    parallel_profile_key,
+    performance_profile_key,
     practical_rank_candidates,
     processor_directory_audit,
     recommended_core_count,
@@ -1133,13 +1133,7 @@ def run_case(
         available_slots=mpi_slots,
         requested_maximum=requested_n_cores,
     )
-    numerical_signature = hashlib.sha256(
-        json.dumps(case_cfg.get("solver_configuration", case_cfg), sort_keys=True, default=str).encode("utf-8")
-    ).hexdigest()
-    profile_key = parallel_profile_key(
-        cdir, solver=solver, stage=str(case_cfg.get("stage") or "OPENFOAM"),
-        numerical_signature=numerical_signature,
-    )
+    profile_key = performance_profile_key(cdir, solver_module=solver_module)
     project_root = next(
         (parent for parent in (cdir, *cdir.parents) if (parent / "CFD_2D").is_dir()),
         cdir,

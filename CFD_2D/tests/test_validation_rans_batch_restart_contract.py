@@ -209,8 +209,9 @@ def test_residual_parser_keeps_raw_solves_and_full_columns() -> None:
         "value": 1.0e-3,
         "initial_residual": 1.0e-3,
         "final_residual": 2.0e-6,
-        "n_iterations": 2,
-    }
+            "n_iterations": 2,
+            "linear_solver": "smoothSolver",
+        }
 
 
 def test_validation_lab_has_final_horizontal_navigation_and_no_tabs() -> None:
