@@ -132,9 +132,22 @@ from ls1_validation_page import (  # noqa: E402
     _alpha_from_dir,
     _effective_validation_status,
     _phase_at_convective_time,
+    _selected_core_count,
     _validation_monitor_mode,
     validation_phase_plan,
 )
+
+
+def test_validation_monitor_prefers_effective_automatic_rank_count(tmp_path: Path) -> None:
+    (tmp_path / "parallel_execution_plan.json").write_text(
+        json.dumps({"recommended_ranks": 2, "requested_maximum_ranks": 8}),
+        encoding="utf-8",
+    )
+    assert _selected_core_count(
+        tmp_path,
+        {},
+        {"transient_command": ["runner", "--n-cores", "8"]},
+    ) == 2
 
 
 def test_boundary_layer_estimates_use_geometric_stack_and_flat_plate_delta99() -> None:

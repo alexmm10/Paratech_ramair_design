@@ -175,7 +175,10 @@ def _selected_core_count(
     """Resolve the effective MPI rank count from durable execution evidence."""
     plan = _read_json(case / "parallel_execution_plan.json")
     for source in (plan, status, staged_status):
-        for key in ("effective_ranks", "n_cores", "selected_n_cores", "mpi_ranks"):
+        for key in (
+            "effective_ranks", "recommended_ranks", "n_cores",
+            "selected_n_cores", "mpi_ranks",
+        ):
             value = source.get(key)
             try:
                 if value is not None and int(value) > 0:
