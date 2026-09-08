@@ -1391,6 +1391,8 @@ def postprocess_command(
     paraview_maximum_frames: int = 24,
     paraview_time_range_s: tuple[float, float] | None = None,
     rans_average_tail_samples: int = 500,
+    simulation_mode: str = "AUTO",
+    include_rans_stage: bool = True,
 ) -> list[str]:
     command = python_command(
         project_root,
@@ -1402,6 +1404,7 @@ def postprocess_command(
         "--openfoam-postprocess-timeout-s", max(30, int(timeout_s)),
         "--velocity-profile-sample-points", max(10, int(velocity_profile_sample_points)),
         "--rans-average-tail-samples", max(1, int(rans_average_tail_samples)),
+        "--simulation-mode", str(simulation_mode).upper(),
     )
     if velocity_profile_stations:
         command += ["--velocity-profile-stations", *[str(float(value)) for value in velocity_profile_stations]]
@@ -1433,6 +1436,8 @@ def postprocess_command(
         command.append("--paraview-animations-only")
     if not wall_profile_analysis:
         command.append("--no-wall-profile-analysis")
+    if not include_rans_stage:
+        command.append("--no-include-rans-stage")
     return command
 
 

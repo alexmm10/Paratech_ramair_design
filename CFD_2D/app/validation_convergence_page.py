@@ -12,6 +12,7 @@ import streamlit as st
 
 from ramair_2d_mesh_numerics import automatic_non_orthogonal_controls
 from ramair_2d_parallel import recommended_core_count
+from performance_report_page import render_performance_report
 
 from validation_plotting import (
     close_figures,
@@ -3405,8 +3406,8 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
 
 
 def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
-    validation_tab, open_closed_tab, convergence_tab = st.tabs(
-        ["Validación", "Comparación abierto-cerrado", "Convergencia"]
+    validation_tab, open_closed_tab, convergence_tab, performance_tab = st.tabs(
+        ["Validación", "Comparación abierto-cerrado", "Convergencia", "Rendimiento"]
     )
     with validation_tab:
         render_ls1_validation(root, start_job)
@@ -3488,3 +3489,5 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
                         "--existing-action", "archive",
                     ],
                 )
+    with performance_tab:
+        render_performance_report(root)

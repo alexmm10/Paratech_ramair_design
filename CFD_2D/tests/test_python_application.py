@@ -75,6 +75,7 @@ def test_postprocess_command_propagates_optional_urans_time_interval() -> None:
     )
     index = command.index("--paraview-time-range-s")
     assert command[index + 1:index + 3] == ["0.2", "0.8"]
+    assert command[command.index("--simulation-mode") + 1] == "AUTO"
 
 
 def test_postprocess_command_separates_fast_products_from_animations() -> None:
@@ -461,6 +462,22 @@ def test_portable_installer_and_layout_are_relative() -> None:
     assert (ROOT / "Documents and Manuals/Application/INSTALL_NEW_DEVICE.md").is_file()
     assert (ROOT / "START_RAMAIR_CFD2D_APP.bat").is_file()
     assert (ROOT / "INSTALL_AND_START_RAMAIR_CFD2D_APP.bat").is_file()
+
+
+def test_open_closed_campaign_has_independent_full_validation_controls() -> None:
+    page = (ROOT / "CFD_2D/app/open_closed_validation_page.py").read_text(encoding="utf-8")
+    assert '_ensure_independent_configuration(closed_config, config_root)' in page
+    assert 'range(-10, 21, 2)' in page
+    assert 'st.tabs(["RANS / SIMPLE", "URANS / PIMPLE"])' in page
+    assert 'simulation_mode=mode' in page
+    assert 'solver_config_path=solver_path' in page
+    assert 'automatic_core_selection=automatic_cores' in page
+
+
+def test_curated_performance_report_is_deployed_without_replacing_runtime_reports() -> None:
+    launcher = (ROOT / "run_ramair_cfd2d_app.py").read_text(encoding="utf-8")
+    assert 'CFD_2D/reports/OPENFOAM_PERFORMANCE_AUDIT_20260907.md' in launcher
+    assert '"CFD_2D/reports"' in launcher
 
 
 def test_standalone_catia_windows_package_contract() -> None:

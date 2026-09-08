@@ -101,6 +101,9 @@ def test_cummings_package_sets_topology_specific_production_duration() -> None:
         assert plan["stages"][-1]["duration_tc"] == pytest.approx(expected)
         if topology == "open":
             assert [row["dt_factor"] for row in plan["stages"][:3]] == [0.02, 0.05, 0.10]
+            assert [row["maxCo"] for row in plan["stages"][:3]] == [5.0, 5.0, 5.0]
+        else:
+            assert [row["maxCo"] for row in plan["stages"][:3]] == [50.0, 50.0, 50.0]
 
 
 def test_partial_urans_review_writes_frequency_and_moving_statistics(tmp_path: Path) -> None:

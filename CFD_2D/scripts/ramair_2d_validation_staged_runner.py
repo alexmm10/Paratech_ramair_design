@@ -16,7 +16,7 @@ import shutil
 import subprocess
 import sys
 import time
-from decimal import Decimal
+from decimal import ROUND_CEILING, Decimal
 from pathlib import Path
 from typing import Any
 
@@ -188,14 +188,30 @@ def configure_stage(
         )
     effective_write_interval_s: float | None = None
     if adaptive:
-        requested_write = float(stage.get("write_interval_s", stage["dt_s"]))
-        phase_duration = max(
-            float(delta_t),
-            float(intended_end) - float(stage.get("start_s", 0.0)),
-        )
-        requested_write = min(requested_write, phase_duration)
         if preserve_temporal_history:
+            requested_write = float(stage.get("write_interval_s", stage["dt_s"]))
             requested_write = min(requested_write, float(delta_t) * write_interval)
+            # adjustableRunTime schedules against absolute time. Choose a
+            # nearby interval that divides the absolute phase target exactly;
+            # this retains dense history for backward while guaranteeing the
+            # final checkpoint when earlier ramps contain fractional dt counts.
+            requested_decimal = Decimal(str(requested_write))
+            alignment_intervals = max(
+                3,
+                int(
+                    (intended_end / requested_decimal).to_integral_value(
+                        rounding=ROUND_CEILING,
+                    )
+                ),
+            )
+            requested_write = float(intended_end / Decimal(alignment_intervals))
+        else:
+            # adjustableRunTime schedules writes on absolute multiples from
+            # time zero.  Using the phase duration here misses every phase
+            # after A (for example B wrote at duration_B instead of end_B).
+            # The absolute phase end is itself a scheduling multiple and
+            # therefore guarantees a restart checkpoint at the boundary.
+            requested_write = float(intended_end)
         effective_write_interval_s = max(float(delta_t) * 1.0e-6, requested_write)
         control = _replace_entry(
             control, "writeInterval", f"{effective_write_interval_s:.12g}",
@@ -521,6 +537,13 @@ def _bootstrap_backward_history(
             "output_checkpoint": ramp_output,
             "returncode": int(ramp_returncode),
             "wall_seconds": time.monotonic() - ramp_started,
+            "requested_target_dt_s": float(delta_t),
+            "last_adaptive_dt_s": ramp_status.get("deltaT"),
+            "recommended_max_fixed_dt_s": (
+                0.8 * float(ramp_status["deltaT"])
+                if ramp_status.get("deltaT") is not None
+                else None
+            ),
             "terminal_reason": (
                 "OPEN_EULER_RAMP_READY" if ramp_complete else "OPEN_EULER_RAMP_FAILED"
             ),
@@ -530,9 +553,14 @@ def _bootstrap_backward_history(
         journal["updated_at"] = utc_stamp()
         write_json_atomic(run_root / "stage_journal.json", journal)
         if not ramp_complete:
-            raise RuntimeError(
-                "OPEN_EULER_RAMP_FAILED: the target time step is not stable at the open lip"
-            )
+            return {
+                "complete": False,
+                "partial": bool(ramp_output.get("valid")),
+                "checkpoint": ramp_output,
+                "history": {},
+                "returncode": int(ramp_returncode),
+                "row": ramp_row,
+            }
         start = Decimal(str(ramp_output["time_s"]))
         checkpoint = ramp_output
 

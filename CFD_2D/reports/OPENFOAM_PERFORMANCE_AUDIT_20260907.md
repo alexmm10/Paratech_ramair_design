@@ -117,6 +117,15 @@ I/O, but the OpenCFD-v2512 MPI-IO backend is not available; collated versus
 uncollated needs a separate repeated storage benchmark before changing the
 default. See the Foundation [parallel-I/O guide](https://openfoam.org/guides/parallel-io/).
 
+The open-medium alpha=8 pilot also established a numerical feasibility limit,
+not a performance preference. Even the smallest original low-cost Cummings
+target (`1.22444e-5 s`) forced the adaptive lip-cell ramp down to about
+`3.02e-7 s` to hold `Co` near 10. Fixed-dt open runs now pause recoverably and
+report the achieved stable ceiling instead of entering `backward` with an
+incompatible target. The open validation default uses `maxCo=5`; changing the
+fixed convergence ladder requires either improving the limiting lip cells or
+explicitly accepting the much smaller timestep and its cost.
+
 ## Solver bottleneck
 
 For the strong-scaling URANS fixture, pressure required about 4.1-4.3 linear
@@ -166,6 +175,29 @@ not present in this installation.
 - Treat sustained timestep collapse, increasing pressure iteration P95,
   fewer than 50k cells/rank, high memory use and repeated decomposition as
   actionable performance warnings.
+
+## Typical task cost observed on this host
+
+These are measured operating ranges, not fixed estimates. URANS cost changes
+with angle, Courant response and the number of pressure iterations.
+
+| Task | Representative evidence | Typical cost/resource use | Main limiter |
+|---|---|---|---|
+| Validation URANS, closed 215k cells, balanced 2 ranks | real alpha=-2/4 histories, 800 samples | median 3-8 s/step; 6-16 core-s/step; about 108k cells/rank | pressure GAMG and angle-dependent nonlinear work |
+| Validation URANS, closed 215k cells, latency run 8 ranks | real alpha=12 history, 533 samples | median 2 s/step but 16 core-s/step; only 27k cells/rank | MPI efficiency; faster case, poorer campaign throughput |
+| Convergence URANS, closed coarse 204k cells, 2 ranks | phase-D history, 168 samples | median 6 s/step; P95 8 s/step; 12 core-s/step | five PIMPLE outer correctors and pressure solves |
+| Convergence URANS, closed fine 618k cells, 8 ranks | bounded production segment | about 4 s/step and 77k cells/rank | memory bandwidth plus pressure; exact optimum still needs 4/6/8 repeat test |
+| Fast validation postprocess | alpha=4 and alpha=12 stage timings | 63-68 s total; wall analysis 6 s, RANS products 24-27 s, final URANS images 17-25 s | ParaView startup/rendering, not coefficient parsing |
+| Lightweight live monitor | 50 repeated parser updates | median 63 ms, P95 78 ms; about 0.21% of one core at 30 s refresh | negligible compared with solver variability |
+| One parallel decomposition | Scotch on 204k cells | about 10.3 s | fixed startup/I/O cost; avoid repeating it for short continuations |
+| One retained open-medium field snapshot | storage model, 303k cells | about 37.5 MB compressed; 24 retained states about 0.90 GB | field I/O and storage, not scalar histories |
+
+The historical cached recommendation of six ranks for the 215k-cell validation
+mesh came from only four measured steps and is now rejected automatically.
+Without a representative compatible profile, balanced automatic mode selects
+2 ranks for about 215k cells, 3 for about 303k and 6 for about 618k. This
+matches the measured 100k-cells/rank operating region and leaves the user free
+to select manual ranks for a latency-critical single case.
 
 ## Evidence locations
 

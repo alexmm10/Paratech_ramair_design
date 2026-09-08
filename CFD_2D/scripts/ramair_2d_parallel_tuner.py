@@ -189,10 +189,15 @@ def tune(args: argparse.Namespace) -> dict[str, Any]:
                     "cells_per_rank": cells / ranks, "load_balance": balance,
                 }
                 imbalance = float(balance.get("maximum_deviation_percent", 0.0) or 0.0)
-                if decompose_rc or imbalance > 20.0:
+                parsed_ranks = len(balance.get("cells_by_rank") or []) if ranks > 1 else 1
+                if decompose_rc or imbalance > 20.0 or parsed_ranks != ranks:
                     row.update(
                         rejected=True,
-                        reason="decomposition_failed_or_imbalance_gt_20pct",
+                        reason=(
+                            "decomposition_rank_count_mismatch"
+                            if parsed_ranks != ranks
+                            else "decomposition_failed_or_imbalance_gt_20pct"
+                        ),
                     )
                     results.append(row)
                     continue

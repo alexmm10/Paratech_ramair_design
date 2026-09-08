@@ -1019,6 +1019,8 @@ def mirror_urans_stage_results(out_dir: Path, case_dir: Path) -> dict[str, Any]:
         "wall_yplus_vs_xc.png",
         "wall_cp_vs_xc.csv",
         "wall_cp_vs_xc.png",
+        "wall_cp_internal_minus_external.csv",
+        "wall_cp_internal_minus_external.png",
         "wall_normal_velocity_profiles.csv",
         "wall_normal_velocity_profiles.png",
         "boundary_layer_thickness_comparison.csv",
@@ -1710,6 +1712,7 @@ def postprocess(
         "- `written_field_inventory.csv`: availability of U, p, Cp, Co, turbulence, yPlus, wallShearStress, vorticity and Q at each saved time.\n"
         "- `wall_yplus_vs_xc.csv/png`: first-cell wall y+ versus x/c, separated into upper/lower surfaces.\n"
         "- `wall_cp_vs_xc.csv/png`: OpenFOAM Cp on upper/lower wall faces versus x/c.\n"
+        "- `wall_cp_internal_minus_external.csv/png`: open-airfoil Cp_internal-Cp_external on intrados/extrados, interpolated only on their common measured x/c support.\n"
         "- `wall_shear_stress_vs_xc.csv/png`: raw and filtered tangential wall shear ordered by face connectivity.\n"
         "- `skin_friction_coefficient_vs_xc.csv/png`: kinematic Cf and branch identity.\n"
         "- `separation_events.json/csv` and `separation_overlay_cp_cf.png`: persistent separation/reattachment events with confidence and exclusions.\n"

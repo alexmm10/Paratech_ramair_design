@@ -176,7 +176,28 @@ def load_parallel_profile(cache_path: Path, key: str) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError):
         return None
     value = dict(cache.get("profiles", {})).get(str(key))
-    return dict(value) if isinstance(value, dict) else None
+    if not isinstance(value, dict):
+        return None
+    profile = dict(value)
+    winner = profile.get("winner")
+    if not isinstance(winner, dict):
+        return None
+    try:
+        measured_steps = int(winner.get("measured_steps") or 0)
+        seconds_per_step = float(winner.get("seconds_per_step") or 0.0)
+        ranks = int(profile.get("ranks") or winner.get("ranks") or 0)
+    except (TypeError, ValueError):
+        return None
+    # Very short historical probes were dominated by start-up and generated
+    # misleading profiles (for example six ranks from only four time steps).
+    if (
+        measured_steps < 5
+        or seconds_per_step <= 0.0
+        or ranks <= 0
+        or bool(winner.get("rejected"))
+    ):
+        return None
+    return profile
 
 
 def store_parallel_profile(cache_path: Path, key: str, profile: dict[str, Any]) -> None:
@@ -255,7 +276,7 @@ def recommended_core_count(
         minimum_ranks = max(1, math.ceil(cells / max(1, maximum_cells_per_core)))
         target_ranks = max(1, int(round(cells / max(1, target_cells_per_core))))
         ranks = min(cap, max(minimum_ranks, target_ranks))
-        reason = "nearest_100k_cells_per_rank_bounded_50k_to_200k"
+        reason = "measured_balanced_policy_nearest_100k_cells_per_rank_bounded_50k_to_200k"
     cells_per_rank = (float(cell_count) / ranks) if cell_count else None
     return {
         "selection_mode": "automatic",

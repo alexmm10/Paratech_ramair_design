@@ -12,6 +12,7 @@ from ramair_2d_parallel import (
     processor_directory_audit,
     recommended_core_count,
     reconstruction_command,
+    load_parallel_profile,
 )
 
 
@@ -99,3 +100,20 @@ Processor 1
     report = decompose_load_balance(log)
     assert report["cells_by_rank"] == [100, 102]
     assert report["mean_cells"] == pytest.approx(101.0)
+
+
+def test_cached_profile_requires_a_representative_solver_window(tmp_path: Path) -> None:
+    import json
+
+    cache = tmp_path / "profiles.json"
+    cache.write_text(json.dumps({"profiles": {"key": {
+        "ranks": 6,
+        "winner": {"ranks": 6, "measured_steps": 4, "seconds_per_step": 2.5},
+    }}}), encoding="utf-8")
+    assert load_parallel_profile(cache, "key") is None
+
+    cache.write_text(json.dumps({"profiles": {"key": {
+        "ranks": 2,
+        "winner": {"ranks": 2, "measured_steps": 30, "seconds_per_step": 2.1},
+    }}}), encoding="utf-8")
+    assert load_parallel_profile(cache, "key")["ranks"] == 2

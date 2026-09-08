@@ -49,7 +49,10 @@ from ramair_2d_urans_cases import (  # noqa: E402
     write_case_manifest,
 )
 from ramair_2d_urans_review import review_run  # noqa: E402
-from ramair_2d_validation_study import _stage_plan  # noqa: E402
+from ramair_2d_validation_study import (  # noqa: E402
+    _stage_plan,
+    normalize_rans_checkpoint_for_transient,
+)
 from ramair_2d_validation_report import _rans_scalar_change_records  # noqa: E402
 from ramair_2d_validation_schema9_migration import apply, preview  # noqa: E402
 from ramair_2d_validation_staged_runner import (  # noqa: E402
@@ -136,6 +139,22 @@ def write_exact_time(
         f"value {exact};\nindex {index};\ndeltaT 6.25e-05;\n",
         encoding="utf-8",
     )
+
+
+def test_rans_checkpoint_is_normalized_before_transient_start(tmp_path: Path) -> None:
+    zero = tmp_path / "0"
+    (zero / "uniform").mkdir(parents=True)
+    for field in ("U", "p", "nuTilda", "nut", "phi", "Cp"):
+        (zero / field).write_text(field, encoding="utf-8")
+    (zero / "uniform/time").write_text("value 20000;\nindex 20000;\n")
+
+    report = normalize_rans_checkpoint_for_transient(zero)
+
+    assert report["status"] == "NORMALIZED_FOR_TRANSIENT"
+    assert not (zero / "uniform").exists()
+    assert not (zero / "phi").exists()
+    assert not (zero / "Cp").exists()
+    assert all((zero / name).is_file() for name in ("U", "p", "nuTilda", "nut"))
 
 
 def mesh_registry() -> dict[str, object]:
@@ -430,6 +449,34 @@ def test_adaptive_history_writes_each_nominal_step_for_reconstruction(tmp_path: 
     assert "writeInterval 0.001;" in control
 
 
+def test_adaptive_history_interval_divides_a_fractional_absolute_target(tmp_path: Path) -> None:
+    case = tmp_path / "case"
+    (case / "system").mkdir(parents=True)
+    (case / "system/controlDict").write_text(
+        "startFrom startTime;\nstartTime 0;\nstopAt endTime;\nendTime 1;\n"
+        "deltaT 1;\nadjustTimeStep no;\nwriteControl timeStep;\nwriteInterval 1;\n",
+        encoding="utf-8",
+    )
+    (case / "system/fvSchemes").write_text(
+        "ddtSchemes\n{\n default Euler;\n}\n", encoding="utf-8",
+    )
+    stage = {
+        "stage": "C", "scheme": "Euler", "dt_s": 0.001,
+        "start_s": 0.00175, "end_s": 0.00825, "steps": 7,
+        "adjust_time_step": True, "maxCo": 5.0,
+        "write_interval_s": 0.001,
+    }
+
+    applied = configure_stage(
+        case, stage, start_mode="CONTINUE_STAGE", preserve_temporal_history=True,
+    )
+
+    assert applied["write_interval_s"] == pytest.approx(0.00825 / 9.0)
+    assert "writeInterval 0.000916666666667;" in (
+        case / "system/controlDict"
+    ).read_text(encoding="utf-8")
+
+
 def test_short_adaptive_stage_always_writes_a_restart_checkpoint(tmp_path: Path) -> None:
     case = tmp_path / "case"
     (case / "system").mkdir(parents=True)
@@ -452,6 +499,32 @@ def test_short_adaptive_stage_always_writes_a_restart_checkpoint(tmp_path: Path)
 
     assert applied["write_interval_s"] == pytest.approx(0.005)
     assert "writeInterval 0.005;" in (case / "system/controlDict").read_text()
+
+
+def test_adaptive_continuation_writes_at_absolute_phase_boundary(tmp_path: Path) -> None:
+    case = tmp_path / "case"
+    (case / "system").mkdir(parents=True)
+    (case / "system/controlDict").write_text(
+        "startFrom startTime;\nstartTime 0;\nstopAt endTime;\nendTime 1;\n"
+        "deltaT 1;\nadjustTimeStep no;\nwriteControl timeStep;\nwriteInterval 1;\n",
+        encoding="utf-8",
+    )
+    (case / "system/fvSchemes").write_text(
+        "ddtSchemes\n{\n default Euler;\n}\n", encoding="utf-8",
+    )
+    write_exact_time(case, "0.005", "0.005", index=25)
+    stage = {
+        "stage": "B", "scheme": "Euler", "dt_s": 0.001,
+        "start_s": 0.005, "end_s": 0.030, "steps": 25,
+        "adjust_time_step": True, "maxCo": 5.0,
+        "write_interval_s": 0.025,
+    }
+
+    applied = configure_stage(case, stage, start_mode="CONTINUE_STAGE")
+    control = (case / "system/controlDict").read_text(encoding="utf-8")
+
+    assert applied["write_interval_s"] == pytest.approx(0.030)
+    assert "writeInterval 0.03;" in control
 
 
 def test_backward_history_accepts_legacy_time_directory_precision(tmp_path: Path) -> None:

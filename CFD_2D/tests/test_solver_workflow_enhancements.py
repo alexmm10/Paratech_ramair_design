@@ -35,6 +35,7 @@ from openfoam_wall_analysis import (  # noqa: E402
     load_wall_cp,
     load_wall_yplus,
     read_legacy_vtk_wall,
+    write_internal_external_cp_difference,
 )
 from paraview_case_viewer import write_paraview_case_script  # noqa: E402
 from pyfoam_solver_runner import (  # noqa: E402
@@ -381,6 +382,30 @@ def test_open_wall_loader_preserves_external_internal_patch_role(tmp_path: Path)
         )
     data, _ = load_wall_yplus(tmp_path, 1.0)
     assert set(data["wall_side"]) == {"external", "internal"}
+
+
+def test_open_cp_difference_uses_internal_minus_external_without_extrapolation(
+    tmp_path: Path,
+) -> None:
+    import pandas as pd
+
+    data = pd.DataFrame({
+        "surface": ["upper"] * 6 + ["lower"] * 6,
+        "wall_side": (["internal"] * 3 + ["external"] * 3) * 2,
+        "x_over_c": [0.1, 0.5, 0.9, 0.2, 0.5, 0.8] * 2,
+        "Cp": [0.5, 0.4, 0.3, -0.4, -0.3, -0.2, 0.8, 0.7, 0.6, 0.2, 0.1, 0.0],
+    })
+    csv = tmp_path / "delta_cp.csv"
+    figure = tmp_path / "delta_cp.png"
+
+    report = write_internal_external_cp_difference(data, csv, figure)
+
+    assert report["status"] == "PROCESSED"
+    result = pd.read_csv(csv)
+    assert result["x_over_c"].between(0.2, 0.8).all()
+    upper = result[(result["surface"] == "upper") & (result["x_over_c"] == 0.5)]
+    assert upper.iloc[0]["delta_Cp_internal_minus_external"] == pytest.approx(0.7)
+    assert figure.is_file()
 
 
 def test_writer_creates_separate_simple_templates(tmp_path: Path) -> None:

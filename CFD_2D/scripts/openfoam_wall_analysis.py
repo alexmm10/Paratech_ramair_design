@@ -537,6 +537,100 @@ def plot_cp_distribution(data: pd.DataFrame, output: Path, diagnostic_status: st
     )
 
 
+def write_internal_external_cp_difference(
+    data: pd.DataFrame,
+    csv_output: Path,
+    figure_output: Path,
+) -> dict[str, Any]:
+    """Compare open-airfoil internal and external Cp without extrapolation."""
+    required = {"x_over_c", "Cp", "surface", "wall_side"}
+    if not required.issubset(data.columns):
+        return {"status": "NOT_APPLICABLE", "reason": "wall_side_columns_missing"}
+    rows: list[pd.DataFrame] = []
+    for surface in ("upper", "lower"):
+        branches: dict[str, pd.DataFrame] = {}
+        for side in ("internal", "external"):
+            branch = data[
+                (data["surface"] == surface) & (data["wall_side"] == side)
+            ][["x_over_c", "Cp"]].dropna()
+            branch = branch.groupby("x_over_c", as_index=False)["Cp"].mean().sort_values("x_over_c")
+            if len(branch) >= 2:
+                branches[side] = branch
+        if set(branches) != {"internal", "external"}:
+            continue
+        internal = branches["internal"]
+        external = branches["external"]
+        lower = max(float(internal["x_over_c"].min()), float(external["x_over_c"].min()))
+        upper = min(float(internal["x_over_c"].max()), float(external["x_over_c"].max()))
+        if upper <= lower:
+            continue
+        grid = np.unique(np.concatenate([
+            internal.loc[internal["x_over_c"].between(lower, upper), "x_over_c"].to_numpy(float),
+            external.loc[external["x_over_c"].between(lower, upper), "x_over_c"].to_numpy(float),
+        ]))
+        if grid.size < 2:
+            continue
+        cp_internal = np.interp(grid, internal["x_over_c"], internal["Cp"])
+        cp_external = np.interp(grid, external["x_over_c"], external["Cp"])
+        rows.append(pd.DataFrame({
+            "surface": surface,
+            "x_over_c": grid,
+            "Cp_internal": cp_internal,
+            "Cp_external": cp_external,
+            "delta_Cp_internal_minus_external": cp_internal - cp_external,
+        }))
+    if not rows:
+        return {
+            "status": "NOT_APPLICABLE",
+            "reason": "separate_internal_external_branches_not_available",
+        }
+    result = pd.concat(rows, ignore_index=True)
+    csv_output.parent.mkdir(parents=True, exist_ok=True)
+    result.to_csv(csv_output, index=False)
+
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(9.2, 4.8))
+    for surface, color, label in (
+        ("upper", "#0068a8", "Extrados"),
+        ("lower", "#c2410c", "Intrados"),
+    ):
+        subset = result[result["surface"] == surface]
+        if not subset.empty:
+            ax.plot(
+                subset["x_over_c"],
+                subset["delta_Cp_internal_minus_external"],
+                color=color,
+                linewidth=1.35,
+                label=label,
+            )
+    ax.axhline(0.0, color="0.35", linewidth=0.8, linestyle="--")
+    ax.set_xlabel(r"Chordwise position, $x/c$ [-]")
+    ax.set_ylabel(r"$\Delta C_p=C_{p,internal}-C_{p,external}$ [-]")
+    ax.set_title("Open-airfoil pressure differential")
+    ax.grid(True, linewidth=0.35, alpha=0.7)
+    ax.legend()
+    fig.tight_layout()
+    save_scientific_figure(
+        fig,
+        figure_output,
+        data=result,
+        metadata={
+            "source": "OpenFOAM Cp on explicit internal and external wall patches",
+            "interpolation": "linear inside common measured x/c overlap only; no extrapolation",
+            "sign_convention": "Cp_internal - Cp_external",
+        },
+    )
+    return {
+        "status": "PROCESSED",
+        "rows": len(result),
+        "surfaces": sorted(result["surface"].unique().tolist()),
+        "csv": str(csv_output),
+        "figure": str(figure_output),
+        "sign_convention": "Cp_internal - Cp_external",
+    }
+
+
 def plot_yplus_distribution(data: pd.DataFrame, target_y_plus: float, output: Path) -> None:
     import matplotlib.pyplot as plt
 
@@ -1054,6 +1148,11 @@ def analyze_wall_boundary_layer(
             output_dir / "wall_cp_vs_xc.png",
             diagnostic_status=str(cp_diagnostics["status"]),
         )
+        pressure_difference = write_internal_external_cp_difference(
+            cp_data,
+            output_dir / "wall_cp_internal_minus_external.csv",
+            output_dir / "wall_cp_internal_minus_external.png",
+        )
         report.update(
             cp_status=(
                 "PROCESSED_NONPHYSICAL_DIAGNOSTIC"
@@ -1063,6 +1162,7 @@ def analyze_wall_boundary_layer(
             cp_sources=cp_sources,
             cp_rows=len(cp_data),
             cp_diagnostics=cp_diagnostics,
+            internal_external_cp_difference=pressure_difference,
         )
     except Exception as exc:
         report["cp_status"] = "NOT_AVAILABLE"

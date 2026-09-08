@@ -204,6 +204,45 @@ def _checkpoint_root(project_root: Path, mesh_id: str) -> Path:
     return active_workspace_root(project_root) / "checkpoints" / mesh_id
 
 
+def normalize_rans_checkpoint_for_transient(zero: Path) -> dict[str, Any]:
+    """Convert an iteration-indexed SIMPLE state into a clean URANS time zero."""
+    zero = Path(zero)
+    removed: list[str] = []
+    uniform = zero / "uniform"
+    if uniform.exists():
+        shutil.rmtree(uniform)
+        removed.append("uniform/")
+    # phi is READ_IF_PRESENT by OpenFOAM.  A flux copied from a stationary
+    # checkpoint can retain an obsolete face ordering after mesh operations;
+    # omitting it makes incompressibleFluid rebuild phi consistently from U.
+    for name in (
+        "phi", "phi.gz", "Co", "Co.gz", "Cp", "Cp.gz", "Q", "Q.gz",
+        "vorticity", "vorticity.gz", "wallShearStress", "wallShearStress.gz",
+        "yPlus", "yPlus.gz",
+    ):
+        path = zero / name
+        if path.is_file():
+            path.unlink()
+            removed.append(name)
+    required = [name for name in ("U", "p", "nuTilda") if not (
+        (zero / name).is_file() or (zero / f"{name}.gz").is_file()
+    )]
+    if required:
+        raise RuntimeError(
+            "RANS checkpoint is missing required transient seed fields: "
+            + ", ".join(required)
+        )
+    return {
+        "schema_version": 1,
+        "status": "NORMALIZED_FOR_TRANSIENT",
+        "source_semantics": "SIMPLE iteration index",
+        "target_semantics": "URANS physical time zero",
+        "preserved_fields": ["U", "p", "nuTilda", "nut"],
+        "removed": removed,
+        "phi_initialization": "recomputed_by_incompressibleFluid_from_U",
+    }
+
+
 def _copy_case_inputs(source: Path, destination: Path) -> None:
     """Copy mutable case inputs while sharing only the immutable polyMesh."""
     if destination.exists():
@@ -380,6 +419,11 @@ def _plan_config_for_topology(
                 stage["stability_basis"] = "open_lip_minimum_cell_courant_startup"
             urans["startup_stages"] = startup
             urans["startup_profile"] = "open_cavity_conservative_0p02_0p05_0p10"
+            urans["startup_max_co"] = 5.0
+            urans["startup_stability_note"] = (
+                "Measured open-medium lip cells became unstable after Co exceeded 10; "
+                "A-C remain adaptive with Co<=5 while production preserves the selected fixed dt."
+            )
         validation["urans"] = urans
     return plan_config, active_package
 
@@ -447,7 +491,7 @@ def _stage_plan(
                 "configured_duration": duration,
                 "sampling": False,
                 "adjust_time_step": True,
-                "maxCo": 50.0,
+                "maxCo": float(urans.get("startup_max_co", 50.0)),
                 "maxDeltaT_s": stage_dt,
             })
             cursor_decimal += duration_decimal
@@ -876,6 +920,8 @@ def prepare_run(
     write_system(case, cfg, patches)
     shutil.rmtree(case / "0")
     shutil.copytree(checkpoint_zero, case / "0")
+    checkpoint_normalization = normalize_rans_checkpoint_for_transient(case / "0")
+    write_json_atomic(run_root / "checkpoint_transient_normalization.json", checkpoint_normalization)
     copied_mesh_audit = copied_checkpoint_matches(checkpoint_identity, case)
     if copied_mesh_audit["status"] != "MATCH":
         raise RuntimeError(f"{run_id}: copied checkpoint mesh digest mismatch")
@@ -1316,6 +1362,11 @@ def execute_run(
         if zero.exists():
             shutil.rmtree(zero)
         shutil.copytree(restart_zero, zero)
+        checkpoint_normalization = normalize_rans_checkpoint_for_transient(zero)
+        write_json_atomic(
+            run_root / "checkpoint_transient_normalization.json",
+            checkpoint_normalization,
+        )
     urans = study["study_config"]["validation_study"]["urans"]
     command = [
         sys.executable,

@@ -1,5 +1,20 @@
 # CFD 2D Workflow
 
+## Technical context reports
+
+The project-level audit and report-writing context is split into four tracked
+documents so that generated meshes and solver data can remain outside Git:
+
+- `Documents and Manuals/Application/manuals/APPLICATION_WORKFLOW_TECHNICAL_AUDIT_20260908.md`
+- `Documents and Manuals/Application/manuals/EXPERIMENTAL_MESHER_TECHNICAL_AUDIT_20260908.md`
+- `Documents and Manuals/Application/manuals/OPENFOAM_EXECUTION_TECHNICAL_AUDIT_20260908.md`
+- `Documents and Manuals/Application/manuals/PARAVIEW_POSTPROCESS_TECHNICAL_AUDIT_20260908.md`
+
+These documents describe implemented capabilities and engineering decisions;
+runtime evidence remains under `CFD_2D/reports`, `validation_studies`, meshes
+and results and is intentionally excluded from the source backup unless a
+small report is explicitly curated.
+
 ## Validation & Convergence Lab
 
 The isolated laboratory uses registry schema 10 while the general solver

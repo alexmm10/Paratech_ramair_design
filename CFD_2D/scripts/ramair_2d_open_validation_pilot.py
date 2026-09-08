@@ -169,7 +169,7 @@ def prepare_open_validation_pilot(
         ),
         "rans_seed_poly_mesh_digest": checkpoint_digest,
         "time_step_mode": "adaptive",
-        "maxCo": 50.0,
+        "maxCo": 5.0,
     })
     write_json(case_config_path, case_config)
     report = {
@@ -186,7 +186,7 @@ def prepare_open_validation_pilot(
         "rans_iterations": case_config["rans_seed_iteration"],
         "case": str(case),
         "solver_config": str(Path(solver_config).resolve()),
-        "time_step_policy": "validation adaptive dt; maxCo=50; maxDeltaT from phase plan",
+        "time_step_policy": "validation adaptive dt; open-lip maxCo=5; maxDeltaT from phase plan",
         "prepared_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "previous_execution_evidence": str(previous_execution) if previous_execution else None,
     }
@@ -196,7 +196,7 @@ def prepare_open_validation_pilot(
         "purpose": "bounded software and stability pilot; not scientific production",
         "target_deltaT_star": 0.0025,
         "adjust_time_step": True,
-        "maxCo": 50.0,
+        "maxCo": 5.0,
         "max_outer_correctors": 5,
         "outer_residual_control_enabled": True,
         "stages": [
