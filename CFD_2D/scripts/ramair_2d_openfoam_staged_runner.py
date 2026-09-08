@@ -234,6 +234,7 @@ def runner_command(
     live_monitor: bool | None = None,
     include_resume_extension: bool = True,
     potential_foam: bool = False,
+    reconstruction_mode: str = "latest",
 ) -> list[str]:
     runner = Path(__file__).with_name("ramair_2d_openfoam_runner.py")
     command = [
@@ -271,6 +272,8 @@ def runner_command(
         command.append("--resume")
         if include_resume_extension and args.resume_additional_time_star is not None:
             command += ["--resume-additional-time-star", str(float(args.resume_additional_time_star))]
+    if reconstruction_mode != "latest":
+        command += ["--reconstruction-mode", str(reconstruction_mode)]
     if args.stop_when_force_stable and include_transient_convergence:
         command += [
             "--stop-when-force-stable",
@@ -1230,11 +1233,16 @@ def run_transient_phase_plan(
                 "target_end_s": float(stage["end_s"]),
             })
             continue
+        next_phase = stages[index + 1] if index + 1 < len(stages) else {}
+        preserve_history = bool(
+            str(phase.get("scheme") or "").lower() == "backward"
+            or str(next_phase.get("scheme") or "").lower() == "backward"
+        )
         configuration = configure_stage(
             args.case,
             stage,
             start_mode=RESUME_EXISTING if (index > 0 or current_times) else FRESH_FROM_CHECKPOINT,
-            preserve_temporal_history=str(phase["stage"]) in {"A", "B"},
+            preserve_temporal_history=preserve_history,
         )
         command = runner_command(
             args,
@@ -1242,6 +1250,10 @@ def run_transient_phase_plan(
             resume=bool(index > 0 or current_times),
             include_transient_convergence=False,
             include_resume_extension=False,
+            reconstruction_mode=(
+                "history" if preserve_history and bool(stage.get("adjust_time_step", False))
+                else "latest"
+            ),
         )
         completed = subprocess.run(command, cwd=str(args.case), text=True)
         run_status = read_json(args.case / "run_status.json", {}) or {}

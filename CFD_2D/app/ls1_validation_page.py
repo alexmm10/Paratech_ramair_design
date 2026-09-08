@@ -217,7 +217,16 @@ def _raise_json_type(value: Any) -> None:
     raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
-def _validation_execution_monitor(root: Path, refresh_seconds: int) -> None:
+def _validation_execution_monitor(
+    root: Path,
+    refresh_seconds: int,
+    *,
+    variant: str = VARIANT,
+    topology: str = "closed",
+    study_name: str = STUDY_NAME,
+    key_scope: str = "ls1-validation",
+    job_prefixes: tuple[str, ...] = ("ls1_validation_",),
+) -> None:
     """Show live OpenFOAM scalars and retain the raw console as evidence."""
     @st.fragment(run_every=max(2, int(refresh_seconds)))
     def render() -> None:
@@ -225,9 +234,9 @@ def _validation_execution_monitor(root: Path, refresh_seconds: int) -> None:
         jobs = [
             manager.poll(job)
             for job in manager.list_jobs(limit=40)
-            if str(job.stage).startswith("ls1_validation_")
+            if str(job.stage).startswith(job_prefixes)
         ]
-        case_root = root / "CFD_2D/openfoam_cases" / VARIANT
+        case_root = root / "CFD_2D/openfoam_cases" / variant
         case_dirs = sorted(
             [path for path in case_root.glob("alpha_*") if path.is_dir()],
             key=lambda path: (_alpha_from_dir(path.name) is None, _alpha_from_dir(path.name) or 0.0),
@@ -239,7 +248,7 @@ def _validation_execution_monitor(root: Path, refresh_seconds: int) -> None:
         follow_active = st.toggle(
             "Seguir automáticamente la ejecución activa",
             value=True,
-            key="ls1-validation-follow-active-monitor",
+            key=f"{key_scope}-follow-active-monitor",
         )
         active_job = active_jobs[0] if active_jobs else None
         active_case = openfoam_case_from_command(active_job.command) if active_job else None
@@ -252,7 +261,7 @@ def _validation_execution_monitor(root: Path, refresh_seconds: int) -> None:
                 selectable,
                 index=selectable.index(default_case) if default_case in selectable else len(selectable) - 1,
                 format_func=lambda path: f"α={_alpha_from_dir(path.name):g}° | {path.name}",
-                key="ls1-validation-monitor-case",
+                key=f"{key_scope}-monitor-case",
             )
         case = active_case if follow_active and active_case is not None else selected_case
         if case is None:
@@ -279,7 +288,7 @@ def _validation_execution_monitor(root: Path, refresh_seconds: int) -> None:
         requested_delta_t = 0.0
         if mode == "URANS" and not phase:
             phase_plan_path = (
-                root / "CFD_2D/validation_studies" / STUDY_NAME
+                root / "CFD_2D/validation_studies" / study_name
                 / "configurations/validation_phase_plan.json"
             )
             phase_plan = _read_json(phase_plan_path) or validation_phase_plan()
@@ -293,7 +302,7 @@ def _validation_execution_monitor(root: Path, refresh_seconds: int) -> None:
             ["current", "RANS"],
             horizontal=True,
             format_func=lambda value: "Etapa actual / URANS" if value == "current" else "RANS archivado",
-            key=f"ls1-validation-monitor-stage-{case.name}",
+            key=f"{key_scope}-monitor-stage-{case.name}",
         )
         monitor_case = case
         if stage_view == "RANS":
@@ -307,13 +316,13 @@ def _validation_execution_monitor(root: Path, refresh_seconds: int) -> None:
                 phase = "SIMPLE"
             else:
                 st.info("Este caso todavía no tiene una etapa RANS archivada.")
-        quality = _read_json(root / f"CFD_2D/meshes/{VARIANT}/mesh_quality_report.json")
+        quality = _read_json(root / f"CFD_2D/meshes/{variant}/mesh_quality_report.json")
         alpha = _alpha_from_dir(case.name)
         snapshot = validation_monitor_snapshot(
             monitor_case,
             mode=mode,
             run_id=job.job_id if job else case.name,
-            topology="closed",
+            topology=topology,
             mesh_level="validation",
             cell_count=int(quality.get("checkMesh_cell_count") or quality.get("cell_count") or 0),
             n_cores=_selected_core_count(case, status, staged_status),
@@ -388,7 +397,7 @@ def _validation_execution_monitor(root: Path, refresh_seconds: int) -> None:
         if is_queue and stop_cols[0].button(
             "Guardar caso y pasar al siguiente",
             disabled=not controls_enabled,
-            key=f"ls1-validation-skip-current-{case.name}",
+            key=f"{key_scope}-skip-current-{case.name}",
             help="Escribe el estado actual, detiene sólo este ángulo y continúa con el siguiente de la cola.",
         ):
             marker = request_openfoam_sweep_stop(job.command, scope="current")
@@ -397,7 +406,7 @@ def _validation_execution_monitor(root: Path, refresh_seconds: int) -> None:
         if stop_cols[stop_index].button(
             "Pausar toda la cola" if is_queue else "Solicitar parada limpia",
             disabled=not controls_enabled,
-            key=f"ls1-validation-clean-stop-{case.name}",
+            key=f"{key_scope}-clean-stop-{case.name}",
             help="Cambia stopAt a writeNow; OpenFOAM escribe un checkpoint antes de salir.",
         ):
             if is_queue:
@@ -411,7 +420,7 @@ def _validation_execution_monitor(root: Path, refresh_seconds: int) -> None:
         if stop_cols[interrupt_index].button(
             "Interrumpir solver que no responde",
             disabled=not running_evidence,
-            key=f"ls1-validation-interrupt-{case.name}",
+            key=f"{key_scope}-interrupt-{case.name}",
             help="Usar solo después de solicitar writeNow y esperar; envía SIGINT al grupo real del solver.",
         ):
             st.warning(interrupt_openfoam_case(case))
@@ -636,7 +645,18 @@ def render_ls1_validation(root: Path, start_job: StartJob) -> None:
             (validation_root / "validation_relative_differences_Cl.png", "Diferencias relativas de CL"),
             (validation_root / "validation_relative_differences_Cd.png", "Diferencias relativas de CD"),
             (validation_root / "validation_relative_differences_Cl_over_Cd.png", "Diferencias relativas de CL/CD"),
+            (validation_root / "rans_urans/rans_urans_Cl_alpha.png", "CL: promedio RANS frente a RANS+URANS"),
+            (validation_root / "rans_urans/rans_urans_Cd_alpha.png", "CD: promedio RANS frente a RANS+URANS"),
+            (validation_root / "rans_urans/rans_urans_Cm_alpha.png", "Cm: promedio RANS frente a RANS+URANS"),
+            (validation_root / "rans_urans/rans_urans_L_D_alpha.png", "CL/CD: promedio RANS frente a RANS+URANS"),
+            (validation_root / "rans_urans/rans_urans_CD_CL.png", "Polar de arrastre: RANS frente a RANS+URANS"),
+            (validation_root / "rans_urans/rans_urans_err_err2.png", "Normas err y err2: efecto de URANS"),
         ]
+        for coefficient in ("Cl", "Cd", "Cm", "L_D"):
+            figures.extend([
+                (validation_root / f"rans_urans/rans_urans_absolute_{coefficient}.png", f"Cambio absoluto RANS+URANS: {coefficient}"),
+                (validation_root / f"rans_urans/rans_urans_relative_{coefficient}.png", f"Cambio relativo RANS+URANS: {coefficient}"),
+            ])
         columns = st.columns(2)
         for index, (path, caption) in enumerate(figures):
             if path.is_file():

@@ -891,6 +891,16 @@ def test_validation_phase_resume_skips_already_completed_phases(tmp_path: Path) 
     assert sampling["total_time_star"] == pytest.approx(64.0)
 
 
+def test_general_staged_runner_preserves_adaptive_backward_history() -> None:
+    source = (SCRIPTS / "ramair_2d_openfoam_staged_runner.py").read_text(
+        encoding="utf-8"
+    )
+    phase_loop = source.split("def run_transient_phase_plan(", 1)[1]
+    assert 'str(next_phase.get("scheme") or "").lower() == "backward"' in phase_loop
+    assert "preserve_temporal_history=preserve_history" in phase_loop
+    assert '"history" if preserve_history and bool(stage.get("adjust_time_step", False))' in phase_loop
+
+
 def test_validation_case_directory_and_monitor_mode_are_unambiguous() -> None:
     assert _alpha_from_dir("alpha_p12p000") == pytest.approx(12.0)
     assert _alpha_from_dir("alpha_m4p500") == pytest.approx(-4.5)

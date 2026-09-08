@@ -186,9 +186,20 @@ def configure_stage(
             delta_t=delta_t,
             stage_steps=stage_steps,
         )
+    effective_write_interval_s: float | None = None
     if adaptive:
         requested_write = float(stage.get("write_interval_s", stage["dt_s"]))
-        control = _replace_entry(control, "writeInterval", f"{requested_write:.12g}")
+        phase_duration = max(
+            float(delta_t),
+            float(intended_end) - float(stage.get("start_s", 0.0)),
+        )
+        requested_write = min(requested_write, phase_duration)
+        if preserve_temporal_history:
+            requested_write = min(requested_write, float(delta_t) * write_interval)
+        effective_write_interval_s = max(float(delta_t) * 1.0e-6, requested_write)
+        control = _replace_entry(
+            control, "writeInterval", f"{effective_write_interval_s:.12g}",
+        )
     else:
         control = _replace_entry(control, "writeInterval", str(write_interval))
     requested_purge = stage.get("purge_write")
@@ -253,6 +264,7 @@ def configure_stage(
         "decimal_end_s": float(intended_end),
         "start_mode": effective,
         "write_interval_steps": write_interval,
+        "write_interval_s": effective_write_interval_s,
         "boundary_target_time_index": boundary_target_index,
         "retains_temporal_history": preserve_temporal_history,
         "purge_write_latest_states": effective_purge,
@@ -273,6 +285,7 @@ def runner_command(
     run: bool,
     decompose_times: list[float] | None = None,
     reconstruct_times: list[float] | None = None,
+    reconstruction_mode: str = "latest",
     automatic_core_selection: bool = True,
     renumber_before_decompose: bool = True,
 ) -> list[str]:
@@ -296,6 +309,8 @@ def runner_command(
         command += ["--decompose-time", f"{float(value):.12g}"]
     for value in reconstruct_times or ():
         command += ["--reconstruct-time", f"{float(value):.12g}"]
+    if not reconstruct_times:
+        command += ["--reconstruction-mode", str(reconstruction_mode)]
     if run:
         command.append("--run")
     return command
@@ -1243,10 +1258,14 @@ def execute(
                 preserve_temporal_history=preserve_history,
             )
             reconstruct_times = None
+            reconstruction_mode = "latest"
             if preserve_history and int(stage.get("steps") or 0) >= 3:
-                end = Decimal(str(applied["decimal_end_s"]))
-                dt = Decimal(str(stage["dt_s"]))
-                reconstruct_times = [float(end - 2 * dt), float(end - dt), float(end)]
+                if bool(stage.get("adjust_time_step", False)):
+                    reconstruction_mode = "history"
+                else:
+                    end = Decimal(str(applied["decimal_end_s"]))
+                    dt = Decimal(str(stage["dt_s"]))
+                    reconstruct_times = [float(end - 2 * dt), float(end - dt), float(end)]
             log = _log_file(case)
             byte_start = 0
             publish_runtime(
@@ -1282,6 +1301,7 @@ def execute(
                     else None
                 ),
                 reconstruct_times=reconstruct_times,
+                reconstruction_mode=reconstruction_mode,
                 automatic_core_selection=automatic_core_selection,
                 renumber_before_decompose=renumber_before_decompose,
             )

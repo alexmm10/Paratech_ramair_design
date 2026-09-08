@@ -304,6 +304,15 @@ def reconstruction_command(
         return "reconstructPar -latestTime"
     if mode == "all":
         return "reconstructPar"
+    if mode == "new":
+        return "reconstructPar -newTimes"
+    if mode == "history":
+        return (
+            "times=$(find processor0 -mindepth 1 -maxdepth 1 -type d -printf '%f\\n' "
+            "| awk '$0 ~ /^[0-9]+([.][0-9]+)?([eE][-+]?[0-9]+)?$/' "
+            "| sort -g | tail -n 3 | paste -sd, -); "
+            "test -n \"$times\" && reconstructPar -time \"$times\""
+        )
     if mode == "time_range":
         if not time_range or not str(time_range).strip():
             raise ValueError("time_range reconstruction requires a non-empty OpenFOAM time selector")

@@ -67,6 +67,10 @@ def test_decomposition_dictionary_and_processor_count_share_rank_source(tmp_path
 def test_reconstruction_policies_are_explicit() -> None:
     assert reconstruction_command("latest") == "reconstructPar -latestTime"
     assert reconstruction_command("all") == "reconstructPar"
+    assert reconstruction_command("new") == "reconstructPar -newTimes"
+    history = reconstruction_command("history")
+    assert "tail -n 3" in history
+    assert "reconstructPar -time" in history
     assert reconstruction_command("time_range", time_range="0.5:1.0") == (
         "reconstructPar -time '0.5:1.0'"
     )

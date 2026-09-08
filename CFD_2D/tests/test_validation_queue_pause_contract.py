@@ -116,3 +116,9 @@ def test_staged_validation_is_not_skipped_from_inner_runner_status_only() -> Non
     text = SWEEP.read_text(encoding="utf-8")
     assert 'staged_prior_status == "TRANSIENT_STAGE_FINISHED"' in text
     assert "if args.skip_completed and case_complete and not pending_path.is_file()" in text
+
+
+def test_validation_queue_stop_is_checked_before_postprocess() -> None:
+    text = SWEEP.read_text(encoding="utf-8")
+    assert "stop_requested_before_postprocess = stop_marker.exists()" in text
+    assert '"DEFERRED_BY_QUEUE_STOP_REQUEST"' in text

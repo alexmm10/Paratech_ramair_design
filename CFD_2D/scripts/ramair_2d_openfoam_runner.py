@@ -1555,7 +1555,7 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--reconstruction-mode",
-        choices=["latest", "all", "time_range", "fields"],
+        choices=["latest", "all", "new", "history", "time_range", "fields"],
         default="latest",
     )
     p.add_argument("--reconstruction-time-range", default=None)

@@ -402,6 +402,58 @@ def test_adaptive_stage_adds_missing_courant_entries_to_legacy_case(tmp_path: Pa
     assert "maxDeltaT 0.01;" in control
 
 
+def test_adaptive_history_writes_each_nominal_step_for_reconstruction(tmp_path: Path) -> None:
+    case = tmp_path / "case"
+    (case / "system").mkdir(parents=True)
+    (case / "system/controlDict").write_text(
+        "startFrom startTime;\nstartTime 0;\nstopAt endTime;\nendTime 1;\n"
+        "deltaT 1;\nadjustTimeStep no;\nwriteControl timeStep;\nwriteInterval 1;\n",
+        encoding="utf-8",
+    )
+    (case / "system/fvSchemes").write_text(
+        "ddtSchemes\n{\n default Euler;\n}\n", encoding="utf-8",
+    )
+    stage = {
+        "stage": "C", "scheme": "backward", "dt_s": 0.001,
+        "start_s": 0.0, "end_s": 0.003, "steps": 3,
+        "adjust_time_step": True, "maxCo": 50.0,
+        "write_interval_s": 0.02,
+    }
+
+    applied = configure_stage(
+        case, stage, start_mode="CONTINUE_STAGE", preserve_temporal_history=True,
+    )
+    control = (case / "system/controlDict").read_text(encoding="utf-8")
+
+    assert applied["write_interval_s"] == pytest.approx(0.001)
+    assert "writeControl adjustableRunTime;" in control
+    assert "writeInterval 0.001;" in control
+
+
+def test_short_adaptive_stage_always_writes_a_restart_checkpoint(tmp_path: Path) -> None:
+    case = tmp_path / "case"
+    (case / "system").mkdir(parents=True)
+    (case / "system/controlDict").write_text(
+        "startFrom startTime;\nstartTime 0;\nstopAt endTime;\nendTime 1;\n"
+        "deltaT 1;\nadjustTimeStep no;\nwriteControl timeStep;\nwriteInterval 1;\n",
+        encoding="utf-8",
+    )
+    (case / "system/fvSchemes").write_text(
+        "ddtSchemes\n{\n default Euler;\n}\n", encoding="utf-8",
+    )
+    stage = {
+        "stage": "A", "scheme": "Euler", "dt_s": 0.001,
+        "start_s": 0.0, "end_s": 0.005, "steps": 5,
+        "adjust_time_step": True, "maxCo": 50.0,
+        "write_interval_s": 0.1,
+    }
+
+    applied = configure_stage(case, stage, start_mode="FRESH_FROM_CHECKPOINT")
+
+    assert applied["write_interval_s"] == pytest.approx(0.005)
+    assert "writeInterval 0.005;" in (case / "system/controlDict").read_text()
+
+
 def test_backward_history_accepts_legacy_time_directory_precision(tmp_path: Path) -> None:
     case = tmp_path / "case"
     (case / "system").mkdir(parents=True)

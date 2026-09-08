@@ -40,6 +40,7 @@ from workflow_backend import (
     validation_study_snapshot,
 )
 from ls1_validation_page import render_ls1_validation
+from open_closed_validation_page import render_open_closed_validation
 
 
 StartJob = Callable[..., Any]
@@ -3404,9 +3405,13 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
 
 
 def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
-    validation_tab, convergence_tab = st.tabs(["Validación", "Convergencia"])
+    validation_tab, open_closed_tab, convergence_tab = st.tabs(
+        ["Validación", "Comparación abierto-cerrado", "Convergencia"]
+    )
     with validation_tab:
         render_ls1_validation(root, start_job)
+    with open_closed_tab:
+        render_open_closed_validation(root, start_job)
     with convergence_tab:
         render_convergence_lab(root, start_job)
         with st.expander("Paquete portátil de casos de convergencia", expanded=False):

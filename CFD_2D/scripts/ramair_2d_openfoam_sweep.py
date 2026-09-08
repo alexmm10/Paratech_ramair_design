@@ -424,9 +424,16 @@ def main() -> int:
             run_status=run_status,
             staged_run_status=staged_status,
         )
-        if args.postprocess_after_each and positive_times(case_dir):
+        stop_requested_before_postprocess = stop_marker.exists()
+        if (
+            args.postprocess_after_each
+            and positive_times(case_dir)
+            and not stop_requested_before_postprocess
+        ):
             post = subprocess.run(postprocess_command(args, alpha), cwd=str(args.case_root), text=True)
             row["postprocess_returncode"] = post.returncode
+        elif args.postprocess_after_each and stop_requested_before_postprocess:
+            row["postprocess_status"] = "DEFERRED_BY_QUEUE_STOP_REQUEST"
         rows.append(row)
         is_timeout = status in {"TIMEOUT", "TIMEOUT_PARTIAL", "CASE_TIMEOUT_PARTIAL"}
         is_error = completed.returncode != 0 or status in {

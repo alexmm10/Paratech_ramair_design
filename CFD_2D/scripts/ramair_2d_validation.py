@@ -83,6 +83,10 @@ def _result_record(mean_path: Path, case_config_path: Path) -> tuple[dict[str, A
     summary_status = str(summary.get("status", "UNKNOWN")).upper()
     run_status = summary.get("run_status") or {}
     solver_status = str(run_status.get("status", "")).upper()
+    if solver_status in {"RUN_DIVERGED", "NUMERICAL_DIVERGENCE", "SOLVER_FAILED"}:
+        return None, f"diverged_solver_result: {solver_status}"
+    if max(abs(cl), abs(cd), abs(cm)) > 100.0:
+        return None, "physically_unbounded_coefficients"
     case_dir = case_config_path.parent
     staged_status = read_json(case_dir / "staged_run_status.json", {}) or {}
     staged_outcome = str(staged_status.get("status", "")).upper()
@@ -686,6 +690,13 @@ def generate_validation_report(
     reference_differences, normalized_errors, peak_errors = write_polar_reference_error_products(
         output, ramair, cl_alpha, cd_cl,
     )
+    from ramair_2d_open_closed_comparison import write_rans_urans_comparison
+    rans_urans = write_rans_urans_comparison(
+        root,
+        "reference_uncut_validation_1m",
+        ramair,
+        output / "rans_urans",
+    )
 
     manifest = read_json(reference / "reference_manifest.json", {}) or {}
     report = {
@@ -702,6 +713,7 @@ def generate_validation_report(
         "reference_difference_points": int(len(reference_differences)),
         "normalized_polar_errors": normalized_errors.to_dict(orient="records"),
         "signed_peak_errors": peak_errors.to_dict(orient="records"),
+        "rans_urans_comparison": rans_urans,
         "maximum_absolute_percentage_errors": {
             str(row["coefficient"]): (
                 None
@@ -910,16 +922,35 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--reynolds-tolerance-fraction", type=float, default=0.01)
     parser.add_argument("--mach-tolerance", type=float, default=0.005)
+    parser.add_argument(
+        "--existing-published-only", action="store_true",
+        help="Regenerate products from the current published CSV without collecting extra results.",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    existing_points = None
+    existing_ignored = None
+    if args.existing_published_only:
+        root = project_root(args.case_root)
+        output = args.output_dir or (
+            root / "CFD_2D/results/validation/LS1_0417_M0p15_Re1p9e6"
+        )
+        existing_points = read_csv_or_empty(
+            output / "ramair_validation_points.csv", VALIDATION_POINT_COLUMNS,
+        )
+        existing_ignored = read_csv_or_empty(
+            output / "ignored_nonmatching_results.csv", IGNORED_POINT_COLUMNS,
+        )
     output = generate_validation_report(
         args.case_root,
         args.output_dir,
         args.reynolds_tolerance_fraction,
         args.mach_tolerance,
+        ramair_points=existing_points,
+        ignored_points=existing_ignored,
     )
     print(f"Validation report: {output.resolve()}")
 
