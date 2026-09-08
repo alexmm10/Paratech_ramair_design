@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-09-09
+
+- Standardized fast ParaView products at the true final OpenFOAM time and
+  restored the BL/TE mesh, Q-pressure and Q-vorticity images.
+- Added bounded parallel case campaigns with independent monitors and stop
+  controls across Validation, Open/Closed Comparison and Convergence Lab.
+- Split automatic MPI policy into single-case latency and concurrent campaign
+  throughput modes; measured benchmarks retain sequential execution as the
+  recommended default on the eight-core host.
+- Added per-case canonical URANS leases/runtime records and an open-lip
+  Courant feasibility gate before backward time integration.
+- Disabled the desktop application's idle shutdown by default; it remains an
+  opt-in environment setting for shared hosts.
+- Bumped the synchronized application/backend contract to API 27.
+
 ## [Unreleased]
 
 ### Fast/final postprocessing, deferred animations and repository handoff

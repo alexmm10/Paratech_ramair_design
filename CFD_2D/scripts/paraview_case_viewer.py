@@ -427,12 +427,15 @@ except Exception:
 positive_times = [value for value in available_times if value > 0.0]
 if not positive_times and available_times:
     positive_times = available_times
-if requested_time_range_s is not None and not is_iteration_stage:
+all_positive_times = list(positive_times)
+if requested_time_range_s is not None and not is_iteration_stage and include_animations:
     positive_times = [
         value for value in positive_times
         if requested_time_range_s[0] <= value <= requested_time_range_s[1]
     ]
-if len(positive_times) > maximum_frames:
+if not include_animations and all_positive_times:
+    selected_times = [all_positive_times[-1]]
+elif len(positive_times) > maximum_frames:
     selected_indices = sorted(set(
         int(round(index * (len(positive_times) - 1) / (maximum_frames - 1)))
         for index in range(maximum_frames)
@@ -863,7 +866,30 @@ products = {{
 if selected_times:
     latest = selected_times[-1]
     scene.AnimationTime = latest
+    # OpenFOAMReader can advertise only the fields present at time 0 during
+    # its first information pass.  Q, Co and other postProcess fields are
+    # commonly written only at the final time, so refresh the inventory there
+    # before updating downstream filters.  Without this pass the files exist
+    # on disk but ParaView silently omits them from the static products.
+    try:
+        source.UpdatePipeline(time=latest)
+        source.UpdatePipelineInformation()
+        final_available_cell_arrays = list(source.CellArrays.Available)
+        final_requested_arrays = [
+            "U", "p", "Cp", "Co", "nuTilda", "nut", "yPlus",
+            "wallShearStress", "vorticity", "Q", "UMean", "pMean",
+            "CpMean", "vorticityMean", "UPrime2Mean", "pPrime2Mean",
+            "nuTildaMean",
+        ]
+        source.CellArrays = [
+            name for name in final_requested_arrays
+            if name in final_available_cell_arrays
+        ]
+    except Exception:
+        final_available_cell_arrays = []
     source.UpdatePipeline(time=latest)
+    visual_source.UpdatePipeline(time=latest)
+    products["final_available_cell_arrays"] = final_available_cell_arrays
     streamline_source = CellDatatoPointData(
         registrationName="VisualPointFields",
         Input=visual_source,
@@ -1063,8 +1089,8 @@ if selected_times:
         view.CameraFocalPoint = [aft_x, aft_y, seed_z]
         view.CameraPosition = [aft_x, aft_y, seed_z + 5.0 * max(chord_m, 1.0e-6)]
         view.CameraViewUp = [0.0, 1.0, 0.0]
-        velocity_field = color_velocity(display, instantaneous=True)
-        velocity_lut = GetColorTransferFunction(str(velocity_field["name"]))
+        velocity_field = color_velocity(instantaneous=True)
+        velocity_lut = GetColorTransferFunction("U")
         velocity_lut.RescaleTransferFunction(0.0, max(1.05 * velocity_m_s, 1.0e-6))
         view.CameraParallelScale = max(0.11 * chord_m, 1.0e-6)
         set_title("|U| and mesh: aft boundary layer", latest)

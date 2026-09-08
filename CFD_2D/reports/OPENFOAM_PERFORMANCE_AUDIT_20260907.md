@@ -71,13 +71,12 @@ expected floating-point reduction order: max-Co relative spread was below
 Conclusions:
 
 - Lowest single-case latency: 8 ranks, but only 38.1% parallel efficiency.
-- Best practical balance: 2 ranks for this 204k-cell mesh.
-- Best campaign throughput should use several concurrent 1-2 rank cases,
-  capped to 8 physical cores and available RAM, rather than one 8-rank case.
-- Four ranks remain useful when reducing latency matters more than CPU cost.
-- The existing automatic target near 100k cells/rank is supported for this
-  mesh. The optional empirical tuner is preferable when a compatible cached
-  result exists.
+- Best measured latency/CPU compromise: 4 ranks for this 204k-cell mesh.
+- The former expectation that several concurrent small MPI jobs would improve
+  aggregate throughput was tested directly and rejected on this host.
+- The automatic single-case policy therefore targets about 50k cells/rank;
+  the explicitly selected concurrent mode uses about 100k cells/rank while
+  enforcing an aggregate eight-core limit.
 
 The existing closed-fine URANS case (618,382 cells, 8 ranks, about 77,298
 cells/rank) advanced with max Co about 14.63 and approximately 4 s per step in
@@ -120,11 +119,26 @@ default. See the Foundation [parallel-I/O guide](https://openfoam.org/guides/par
 The open-medium alpha=8 pilot also established a numerical feasibility limit,
 not a performance preference. Even the smallest original low-cost Cummings
 target (`1.22444e-5 s`) forced the adaptive lip-cell ramp down to about
-`3.02e-7 s` to hold `Co` near 10. Fixed-dt open runs now pause recoverably and
+`3.02e-7 s` while the open-only ramp targets `Co<=5`. Fixed-dt open runs now pause recoverably and
 report the achieved stable ceiling instead of entering `backward` with an
 incompatible target. The open validation default uses `maxCo=5`; changing the
 fixed convergence ladder requires either improving the limiting lip cells or
 explicitly accepting the much smaller timestep and its cost.
+
+## Concurrent-case throughput benchmark
+
+Two controlled tests used the same 203,691-cell state, fixed `dt=0.000125 s`,
+ten steps per case and the same total physical-core budget:
+
+| Total cores | Single case | Single throughput | Concurrent pair | Pair throughput | Pair change |
+|---:|---:|---:|---:|---:|---:|
+| 4 | `1x4`, 15.112 s | 0.6617 case-steps/s | `2x2`, 32.188 s | 0.6213 case-steps/s | -6.1% |
+| 8 | `1x8`, 12.816 s | 0.7803 case-steps/s | `2x4`, 28.027 s | 0.7136 case-steps/s | -8.5% |
+
+The concurrent solvers are functional, independently monitored and stoppable,
+but pressure/GAMG and shared memory bandwidth make them slower in aggregate on
+this laptop. Sequential execution remains the recommended default. Concurrent
+mode is retained as an explicit operational option, not an automatic speed-up.
 
 ## Solver bottleneck
 
@@ -160,14 +174,15 @@ not present in this installation.
 
 ## Recommended operating policy
 
-- Default automatic mode: retain the current approximately 100k cells/rank
-  rule bounded to physical cores, then reuse a compatible empirical profile.
-- Closed/open coarse near 200k cells: 2 ranks for normal campaigns; 4 for
-  reduced latency; 8 only for an explicitly latency-critical run.
-- Fine near 600k cells: start with 6 ranks from the current rule and run the
+- Default automatic single-case mode: approximately 50k cells/rank, bounded
+  to eight physical cores, then reuse a compatible empirical profile.
+- Closed/open coarse near 200k cells: 4 ranks by default; 8 only for an
+  explicitly latency-critical run where CPU cost is secondary.
+- Fine near 600k cells: start with 8 ranks from the current rule and run the
   tuner over 4/6/8 before a long campaign.
-- Campaign throughput: at most 8 physical-core ranks in total, normally four
-  concurrent 2-rank coarse cases. Do not oversubscribe the 7.5 GiB host.
+- Concurrent campaign mode: optional, at most eight physical-core ranks in
+  total and normally two cases; measured throughput is lower than sequential
+  on this host, so use it for operational independence rather than speed.
 - Keep Scotch in production. Benchmark hierarchical per mesh only when repeat
   results show a stable gain despite its larger interface.
 - Keep lightweight monitoring enabled. Run scaling, I/O, decomposition,
@@ -194,10 +209,10 @@ with angle, Courant response and the number of pressure iterations.
 
 The historical cached recommendation of six ranks for the 215k-cell validation
 mesh came from only four measured steps and is now rejected automatically.
-Without a representative compatible profile, balanced automatic mode selects
-2 ranks for about 215k cells, 3 for about 303k and 6 for about 618k. This
-matches the measured 100k-cells/rank operating region and leaves the user free
-to select manual ranks for a latency-critical single case.
+Without a representative compatible profile, single-case automatic mode
+selects about 4 ranks for 215k cells, 6 for 303k and 8 for 618k. Concurrent
+mode independently caps each case near 100k cells/rank and enforces the shared
+budget. The user can still set a lower manual ceiling when CPU cost matters.
 
 ## Evidence locations
 
@@ -206,6 +221,8 @@ to select manual ranks for a latency-critical single case.
 - Machine-readable strong-scaling result:
   `strong_scaling_summary.json` in that directory.
 - Monitor overhead result: `monitor_overhead.json` in that directory.
+- Concurrent benchmark results: `parallel_throughput_2x2_vs_1x4.json` and
+  `parallel_throughput_2x4_vs_1x8.json` in that directory.
 
 ## Further work
 

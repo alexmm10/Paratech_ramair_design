@@ -11,7 +11,8 @@ import pandas as pd
 import streamlit as st
 
 from ramair_2d_mesh_numerics import automatic_non_orthogonal_controls
-from ramair_2d_parallel import recommended_core_count
+from ramair_2d_parallel import parallel_campaign_allocation, recommended_core_count
+from parallel_campaign_ui import render_parallel_campaign_monitor
 from performance_report_page import render_performance_report
 
 from validation_plotting import (
@@ -24,6 +25,7 @@ from workflow_backend import (
     open_local_folder,
     open_paraview_case,
     open_validation_mesh_viewer,
+    parallel_campaign_command,
     interrupt_openfoam_case,
     request_openfoam_clean_stop,
     request_validation_pimple_stop,
@@ -808,7 +810,9 @@ def _render_rans_execution_menu(
     st.dataframe(status_rows, hide_index=True, width="stretch")
 
     labels = {key: value["label"] for key, value in catalog.items()}
-    individual_tab, queue_tab = st.tabs(["Ejecución individual", "Ejecución secuencial"])
+    individual_tab, queue_tab, parallel_tab = st.tabs([
+        "Ejecución individual", "Ejecución secuencial", "Ejecución paralela"
+    ])
     with individual_tab:
         selection = st.selectbox(
             "Malla y ángulo",
@@ -875,6 +879,73 @@ def _render_rans_execution_menu(
                     run=True,
                 ),
             )
+    with parallel_tab:
+        parallel_selection = st.multiselect(
+            "Bases independientes",
+            list(catalog),
+            format_func=lambda value: f"{labels[value]} · {catalog[value]['status']}",
+            key="validation-rans-parallel-selection",
+            help="Las bases se ejecutan en directorios independientes con un presupuesto conjunto de 8 cores.",
+        )
+        parallel_concurrency = int(st.number_input(
+            "Bases simultáneas", 2, 4, 2, key="validation-rans-parallel-concurrency"
+        ))
+        plans = parallel_campaign_allocation(
+            [int(meshes[catalog[key]["mesh_id"]].get("cell_count") or 0) or None for key in parallel_selection],
+            total_core_budget=8,
+            max_concurrent_cases=parallel_concurrency,
+        ) if parallel_selection else []
+        if plans:
+            st.dataframe([
+                {
+                    "Caso": labels[key],
+                    "Cores": plans[index]["recommended_ranks"],
+                    "Celdas/core": plans[index]["cells_per_rank"],
+                }
+                for index, key in enumerate(parallel_selection)
+            ], hide_index=True, width="stretch")
+        confirm_parallel = st.checkbox(
+            "Confirmo la ejecución paralela de bases RANS",
+            key="validation-rans-parallel-confirm",
+        )
+        campaign_id = "convergence_rans_parallel"
+        if st.button(
+            "Ejecutar / continuar bases en paralelo",
+            type="primary",
+            disabled=len(parallel_selection) < 2 or not confirm_parallel,
+            key="validation-rans-parallel-run",
+        ):
+            cases = []
+            for index, key in enumerate(parallel_selection):
+                selected = catalog[key]
+                mesh = meshes[selected["mesh_id"]]
+                state = selected.get("state") or {}
+                ranks = int(plans[index]["recommended_ranks"])
+                cases.append({
+                    "case_id": key.replace("|", "_"),
+                    "label": labels[key],
+                    "case_path": str(state.get("case") or state.get("case_path") or ""),
+                    "topology": mesh.get("topology"),
+                    "mesh_level": mesh.get("level"),
+                    "cell_count": int(mesh.get("cell_count") or 0),
+                    "alpha_deg": float(selected["alpha_deg"]),
+                    "n_cores": ranks,
+                    "command": validation_study_command(
+                        root, "rans-base", mesh_id=selected["mesh_id"],
+                        alpha_deg=float(selected["alpha_deg"]), run=True,
+                    ),
+                })
+            start_job(
+                "validation_lab_rans_parallel",
+                parallel_campaign_command(
+                    root, campaign_id=campaign_id, cases=cases,
+                    total_core_budget=8,
+                    max_concurrent_cases=parallel_concurrency,
+                ),
+            )
+        render_parallel_campaign_monitor(
+            root, campaign_id, key_scope="convergence-rans-parallel"
+        )
 
 
 def render_convergence_lab(root: Path, start_job: StartJob) -> None:
@@ -2090,7 +2161,9 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
                     custom_dt_values_s=manual_values,
                 ),
             )
-        single_tab, queue_tab = st.tabs(["Caso único", "Ejecución secuencial"])
+        single_tab, queue_tab, parallel_tab = st.tabs([
+            "Caso único", "Ejecución secuencial", "Ejecución paralela"
+        ])
         with single_tab:
             st.caption(
                 "Seleccione topología, malla y deltaT. La aplicación calcula si "
@@ -2337,6 +2410,110 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
                 st.dataframe(
                     queue_state.get("runs") or [], hide_index=True, width="stretch"
                 )
+
+        with parallel_tab:
+            st.caption(
+                "Ejecuta timelines URANS independientes a la vez. Cada identidad conserva "
+                "su lease, runtime, fases A-E y monitor; el total nunca supera 8 cores."
+            )
+            parallel_filter = st.columns(2)
+            parallel_topology = parallel_filter[0].selectbox(
+                "Topología paralela", ["closed", "open"],
+                key=f"canonical-urans-parallel-topology-{package}",
+            )
+            parallel_alpha = parallel_filter[1].selectbox(
+                "Ángulo paralelo [°]",
+                [16.0, 8.0] if parallel_topology == "closed" else [8.0, 16.0],
+                key=f"canonical-urans-parallel-alpha-{package}-{parallel_topology}",
+            )
+            parallel_rows = [
+                row for row in runs
+                if str(row.get("topology")) == parallel_topology
+                and abs(float(row.get("alpha_deg") or 0.0) - float(parallel_alpha)) < 1.0e-9
+            ]
+            parallel_labels = {
+                str(row["run_id"]): (
+                    f"{row['topology']} | {row['mesh_level']} | "
+                    f"α={float(row.get('alpha_deg') or 0):g}° | Δt={float(row['dt_s']):.6g} s"
+                )
+                for row in parallel_rows
+            }
+            parallel_selection = st.multiselect(
+                "Timelines URANS independientes",
+                list(parallel_labels),
+                format_func=lambda value: parallel_labels[value],
+                key=f"canonical-urans-parallel-selection-{package}-{parallel_topology}-{parallel_alpha:g}",
+            )
+            parallel_concurrency = int(st.number_input(
+                "Timelines simultáneos", 2, 4, 2,
+                key="canonical-urans-parallel-concurrency",
+            ))
+            selected_parallel_rows = [
+                next(row for row in parallel_rows if str(row["run_id"]) == case_id)
+                for case_id in parallel_selection
+            ]
+            plans = parallel_campaign_allocation(
+                [int(meshes[str(row["mesh_id"])].get("cell_count") or 0) or None for row in selected_parallel_rows],
+                total_core_budget=8,
+                max_concurrent_cases=parallel_concurrency,
+            ) if selected_parallel_rows else []
+            if plans:
+                st.dataframe([
+                    {
+                        "Caso": parallel_labels[str(row["run_id"])],
+                        "Cores": plans[index]["recommended_ranks"],
+                        "Celdas/core": plans[index]["cells_per_rank"],
+                    }
+                    for index, row in enumerate(selected_parallel_rows)
+                ], hide_index=True, width="stretch")
+            parallel_mode = st.segmented_control(
+                "Inicio temporal paralelo", ["progressive", "direct"],
+                default="progressive",
+                format_func=lambda value: "Progresivo A-E" if value == "progressive" else "Directo",
+                key="canonical-urans-parallel-mode",
+            )
+            parallel_confirm = st.checkbox(
+                "Confirmo la campaña URANS paralela",
+                key="canonical-urans-parallel-confirm",
+            )
+            campaign_id = "convergence_urans_parallel"
+            if st.button(
+                "Ejecutar / continuar timelines en paralelo",
+                type="primary",
+                disabled=len(selected_parallel_rows) < 2 or not parallel_confirm,
+                key="canonical-urans-parallel-run",
+            ):
+                cases = []
+                for index, row in enumerate(selected_parallel_rows):
+                    run_id = str(row["run_id"])
+                    mesh = meshes[str(row["mesh_id"])]
+                    ranks = int(plans[index]["recommended_ranks"])
+                    run_root = active / "runs" / str(row["topology"]) / str(row["mesh_level"]) / run_id
+                    cases.append({
+                        "case_id": run_id,
+                        "label": parallel_labels[run_id],
+                        "case_path": str(run_root / "case"),
+                        "topology": row.get("topology"),
+                        "mesh_level": row.get("mesh_level"),
+                        "cell_count": int(mesh.get("cell_count") or 0),
+                        "alpha_deg": float(row.get("alpha_deg") or 0.0),
+                        "n_cores": ranks,
+                        "command": validation_study_command(
+                            root, "execute", run_id=run_id,
+                            startup_mode=str(parallel_mode or "progressive"), run=True,
+                        ),
+                    })
+                start_job(
+                    "canonical_urans_parallel",
+                    parallel_campaign_command(
+                        root, campaign_id=campaign_id, cases=cases,
+                        total_core_budget=8,
+                        max_concurrent_cases=parallel_concurrency,
+                    ),
+                )
+            render_parallel_campaign_monitor(
+                root, campaign_id, key_scope="convergence-urans-parallel"
+            )
 
     if section == "Análisis RANS":
         st.caption(

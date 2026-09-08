@@ -9,6 +9,7 @@ from ramair_2d_parallel import (
     decompose_load_balance,
     detected_solver_stage,
     performance_profile_key,
+    parallel_campaign_allocation,
     processor_directory_audit,
     recommended_core_count,
     reconstruction_command,
@@ -37,7 +38,7 @@ def test_performance_profile_key_tracks_rans_vs_urans(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     ("cells", "maximum", "expected"),
-    [(80_000, 8, 1), (198_000, 8, 2), (600_000, 8, 6), (2_000_000, 8, 8)],
+    [(80_000, 8, 2), (198_000, 8, 4), (600_000, 8, 8), (2_000_000, 8, 8)],
 )
 def test_automatic_rank_selection_respects_cells_per_rank(
     cells: int, maximum: int, expected: int
@@ -48,7 +49,16 @@ def test_automatic_rank_selection_respects_cells_per_rank(
     assert plan["recommended_ranks"] == expected
     assert plan["recommended_ranks"] <= maximum
     if plan["recommended_ranks"] > 1 and cells <= 800_000:
-        assert plan["cells_per_rank"] >= 50_000
+        assert plan["cells_per_rank"] >= 25_000
+
+
+def test_campaign_allocation_respects_shared_budget() -> None:
+    plans = parallel_campaign_allocation(
+        [203_691, 302_692], total_core_budget=8, max_concurrent_cases=2
+    )
+    assert [plan["recommended_ranks"] for plan in plans] == [2, 3]
+    assert sum(plan["recommended_ranks"] for plan in plans) <= 8
+    assert all(plan["workload_mode"] == "concurrent_throughput" for plan in plans)
 
 
 def test_decomposition_dictionary_and_processor_count_share_rank_source(tmp_path: Path) -> None:

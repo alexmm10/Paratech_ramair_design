@@ -176,7 +176,7 @@ def test_api_schema_and_migration_remove_legacy_policy() -> None:
             "pilot_policy": "required", "attempts": [1], "retention": {}, "archive": True,
         }},
     })
-    assert BACKEND_API_VERSION == 26
+    assert BACKEND_API_VERSION == 27
     assert STUDY_CONFIG_SCHEMA_VERSION == 13
     urans = migrated["validation_study"]["urans"]
     assert not ({"pilot_policy", "attempts", "retention", "archive"} & set(urans))

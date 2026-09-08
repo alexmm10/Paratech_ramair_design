@@ -76,9 +76,14 @@ def diagnose(case_dir: Path, log_path: Path) -> dict[str, Any]:
     max_dt_s = max_dt_star * chord / max(velocity, 1.0e-30)
     final_dt = history["delta_t_s"][-1]
     final_co = history["courant_max"][-1]
+    observed_dt_min = min(history["delta_t_s"])
+    observed_dt_max = max(history["delta_t_s"])
+    observed_adaptive = observed_dt_max > observed_dt_min * (1.0 + 1.0e-6)
     dt_fraction = final_dt / max(max_dt_s, 1.0e-30)
     co_fraction = final_co / max(max_co, 1.0e-30)
-    if time_step_mode == "fixed":
+    if observed_adaptive:
+        limiter = "OBSERVED_ADAPTIVE_MAX_CO"
+    elif time_step_mode == "fixed":
         limiter = "FIXED_DELTA_T"
     elif dt_fraction >= 0.95:
         limiter = "MAX_DELTA_T"
@@ -95,6 +100,9 @@ def diagnose(case_dir: Path, log_path: Path) -> dict[str, Any]:
             "maxCo": max_co,
             "maxDeltaT_star": max_dt_star,
             "maxDeltaT_s": max_dt_s,
+            "case_config_mode": time_step_mode,
+            "observed_adaptive_deltaT": observed_adaptive,
+            "observed_deltaT_range_s": [observed_dt_min, observed_dt_max],
         },
         "measured_final": {
             "deltaT_s": final_dt,
@@ -104,9 +112,13 @@ def diagnose(case_dir: Path, log_path: Path) -> dict[str, Any]:
             "physical_time_s": history["physical_time_s"][-1] if history["physical_time_s"] else None,
             "deltaT_fraction_of_ceiling": dt_fraction,
             "Courant_fraction_of_limit": co_fraction,
+            "estimated_deltaT_for_Co_5_s": final_dt * 5.0 / max(final_co, 1.0e-30),
         },
         "active_limiter": limiter,
         "interpretation": (
+            "The phase log proves adaptive time stepping even though the base case_config describes the final fixed target. A local cell/face flux is controlling deltaT; the fixed target is not yet numerically reachable."
+            if limiter == "OBSERVED_ADAPTIVE_MAX_CO"
+            else
             "deltaT is imposed by the fixed-step configuration; Courant is diagnostic and does not reduce the step."
             if limiter == "FIXED_DELTA_T"
             else (

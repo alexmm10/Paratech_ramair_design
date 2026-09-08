@@ -68,7 +68,7 @@ from ramair_2d_urans_cases import (  # noqa: E402
 )
 
 
-BACKEND_API_VERSION = 26
+BACKEND_API_VERSION = 27
 SOLVER_CONFIG_SCHEMA_VERSION = 15
 
 
@@ -112,6 +112,54 @@ def read_json(path: Path, default: Any = None) -> Any:
         return json.loads(path.read_text(encoding="utf-8-sig"))
     except json.JSONDecodeError as exc:
         raise ValueError(f"Invalid JSON in {path}: line {exc.lineno}, column {exc.colno}: {exc.msg}") from exc
+
+
+def parallel_campaign_command(
+    project_root: Path,
+    *,
+    campaign_id: str,
+    cases: list[dict[str, Any]],
+    total_core_budget: int = 8,
+    max_concurrent_cases: int = 2,
+) -> list[str]:
+    """Persist and launch a bounded multi-case campaign as one managed job."""
+    safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(campaign_id)).strip("._-")
+    if not safe_id:
+        raise ValueError("Parallel campaign requires a stable identifier")
+    budget = max(1, int(total_core_budget))
+    concurrency = max(2, int(max_concurrent_cases))
+    normalized: list[dict[str, Any]] = []
+    for index, raw in enumerate(cases):
+        command = [str(value) for value in raw.get("command") or []]
+        ranks = max(1, int(raw.get("n_cores") or 1))
+        if not command:
+            raise ValueError(f"Parallel case {index + 1} has no command")
+        normalized.append({
+            **{key: value for key, value in raw.items() if key != "command"},
+            "case_id": str(raw.get("case_id") or f"case_{index + 1}"),
+            "command": command,
+            "n_cores": ranks,
+        })
+    if not normalized:
+        raise ValueError("Select at least one case for parallel execution")
+    if sum(sorted((item["n_cores"] for item in normalized), reverse=True)[:concurrency]) > budget:
+        raise ValueError("The selected concurrent cases exceed the total core budget")
+    root = Path(project_root).resolve()
+    path = root / "CFD_2D/app_state/parallel_campaigns" / f"{safe_id}.json"
+    _write_execution_json_atomic(path, {
+        "schema_version": 1,
+        "campaign_id": safe_id,
+        "project_root": str(root),
+        "total_core_budget": budget,
+        "max_concurrent_cases": concurrency,
+        "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "cases": normalized,
+    })
+    return python_command(
+        root,
+        "CFD_2D/scripts/ramair_2d_parallel_campaign.py",
+        "--manifest", path,
+    )
 
 
 def backup_file(path: Path, project_root: Path) -> Path | None:
@@ -2494,7 +2542,12 @@ def start_application_idle_watchdog(project_root: Path, manager: JobManager) -> 
             return
         _IDLE_WATCHDOG_STARTED = True
 
-    idle_minutes = max(0.0, float(os.environ.get("RAMAIR_APP_IDLE_SHUTDOWN_MIN", "15")))
+    # A CFD campaign is commonly inspected only every few hours.  Closing the
+    # server after a quiet browser interval made a healthy application look as
+    # though it had crashed and also hid completed background results.  Keep
+    # the opt-in watchdog for shared hosts, but do not expire desktop sessions
+    # unless the launcher explicitly configures a positive timeout.
+    idle_minutes = max(0.0, float(os.environ.get("RAMAIR_APP_IDLE_SHUTDOWN_MIN", "0")))
     if idle_minutes <= 0.0 or os.name == "nt":
         return
     heartbeat = touch_application_heartbeat(project_root)

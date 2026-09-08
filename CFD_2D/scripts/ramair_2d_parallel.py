@@ -258,11 +258,19 @@ def recommended_core_count(
     *,
     available_slots: int | None,
     requested_maximum: int,
-    target_cells_per_core: int = 100_000,
-    minimum_cells_per_core: int = 50_000,
+    workload_mode: str = "single_latency",
+    target_cells_per_core: int | None = None,
+    minimum_cells_per_core: int | None = None,
     maximum_cells_per_core: int = 200_000,
 ) -> dict[str, Any]:
-    """Choose ranks inside the efficient single-node cells/core envelope."""
+    """Choose ranks for either single-case latency or campaign throughput."""
+    mode = str(workload_mode).strip().lower()
+    if mode not in {"single_latency", "concurrent_throughput"}:
+        raise ValueError(f"Unsupported workload mode: {workload_mode}")
+    if target_cells_per_core is None:
+        target_cells_per_core = 50_000 if mode == "single_latency" else 100_000
+    if minimum_cells_per_core is None:
+        minimum_cells_per_core = 25_000 if mode == "single_latency" else 50_000
     requested_maximum = max(1, int(requested_maximum))
     slot_cap = max(1, int(available_slots)) if available_slots else requested_maximum
     cap = min(requested_maximum, slot_cap)
@@ -276,10 +284,15 @@ def recommended_core_count(
         minimum_ranks = max(1, math.ceil(cells / max(1, maximum_cells_per_core)))
         target_ranks = max(1, int(round(cells / max(1, target_cells_per_core))))
         ranks = min(cap, max(minimum_ranks, target_ranks))
-        reason = "measured_balanced_policy_nearest_100k_cells_per_rank_bounded_50k_to_200k"
+        reason = (
+            "measured_single_case_latency_policy_nearest_50k_cells_per_rank"
+            if mode == "single_latency"
+            else "measured_campaign_throughput_policy_nearest_100k_cells_per_rank"
+        )
     cells_per_rank = (float(cell_count) / ranks) if cell_count else None
     return {
         "selection_mode": "automatic",
+        "workload_mode": mode,
         "cell_count": int(cell_count) if cell_count else None,
         "requested_maximum_ranks": requested_maximum,
         "available_mpi_slots": available_slots,
@@ -290,6 +303,32 @@ def recommended_core_count(
         "reason": reason,
         "decomposition_method": "scotch" if ranks > 1 else "serial",
     }
+
+
+def parallel_campaign_allocation(
+    cell_counts: list[int | None],
+    *,
+    total_core_budget: int = 8,
+    max_concurrent_cases: int = 2,
+) -> list[dict[str, Any]]:
+    """Allocate a physical-core budget to independent concurrent cases."""
+    budget = max(1, int(total_core_budget))
+    concurrency = max(1, min(int(max_concurrent_cases), len(cell_counts) or 1))
+    per_case_cap = max(1, budget // concurrency)
+    plans = [
+        recommended_core_count(
+            cells,
+            available_slots=per_case_cap,
+            requested_maximum=per_case_cap,
+            workload_mode="concurrent_throughput",
+        )
+        for cells in cell_counts
+    ]
+    for plan in plans:
+        plan["total_core_budget"] = budget
+        plan["max_concurrent_cases"] = concurrency
+        plan["per_case_rank_cap"] = per_case_cap
+    return plans
 
 
 def configure_decompose_dictionary(path: Path, ranks: int, method: str = "scotch") -> None:

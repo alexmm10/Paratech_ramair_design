@@ -1125,6 +1125,13 @@ def run_case(
     case_cfg = read_json(cdir / "case_config.json", {}) or {}
     solver_module = str(case_cfg.get("solver_module", "incompressibleFluid"))
     requested_n_cores = max(1, int(n_cores))
+    campaign_rank_limit = os.environ.get("RAMAIR_CASE_RANK_LIMIT")
+    if campaign_rank_limit:
+        requested_n_cores = min(requested_n_cores, max(1, int(campaign_rank_limit)))
+    workload_mode = os.environ.get(
+        "RAMAIR_PARALLEL_WORKLOAD_MODE",
+        "concurrent_throughput" if campaign_rank_limit else "single_latency",
+    )
     preflight = linux_parallel_preflight(cdir)
     mpi_slots = int(preflight.get("physical_cores") or available_openmpi_slots() or requested_n_cores)
     cell_count, cell_count_source = case_cell_count(cdir)
@@ -1132,6 +1139,7 @@ def run_case(
         cell_count,
         available_slots=mpi_slots,
         requested_maximum=requested_n_cores,
+        workload_mode=workload_mode,
     )
     profile_key = performance_profile_key(cdir, solver_module=solver_module)
     project_root = next(
@@ -1140,6 +1148,10 @@ def run_case(
     )
     cache_path = project_root / "CFD_2D/app_state/parallel_execution_profiles.json"
     cached_profile = load_parallel_profile(cache_path, profile_key)
+    if workload_mode == "concurrent_throughput":
+        # Latency-oriented strong-scaling profiles are not transferable to a
+        # packed campaign where aggregate throughput is the objective.
+        cached_profile = None
     candidates = practical_rank_candidates(
         int(cell_count or 1), physical_cores=min(mpi_slots, requested_n_cores),
     )
@@ -1167,6 +1179,9 @@ def run_case(
             reason="manual_rank_count",
         )
     parallel_plan["cell_count_source"] = cell_count_source
+    parallel_plan["campaign_rank_limit"] = (
+        int(campaign_rank_limit) if campaign_rank_limit else None
+    )
     parallel_plan["preflight"] = preflight
     parallel_plan["candidate_ranks"] = candidates
     parallel_plan["parallel_profile_key"] = profile_key

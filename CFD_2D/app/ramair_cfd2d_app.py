@@ -50,7 +50,7 @@ from mesh_configuration import (
 )
 
 
-EXPECTED_BACKEND_API_VERSION = 26
+EXPECTED_BACKEND_API_VERSION = 27
 _REQUIRED_BACKEND_SYMBOLS = {
     "BACKEND_API_VERSION",
     "batch_postprocess_command",

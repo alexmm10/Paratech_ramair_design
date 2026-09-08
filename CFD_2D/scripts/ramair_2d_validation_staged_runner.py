@@ -456,8 +456,8 @@ def _bootstrap_backward_history(
     ).lower()
     if topology == "open":
         # The open lip contains the smallest and most distorted local cells. A
-        # direct 10x jump from phase C to the target step produced a local Co
-        # spike before backward was enabled. Ramp with Euler and robust Co=10,
+        # direct jump from phase C to the target step produced a local Co
+        # spike before backward was enabled. Ramp with Euler and Co<=5,
         # then create the three equally-spaced target-step states below.
         ramp_start = start
         ramp_dt = delta_t * Decimal("0.25")
@@ -474,7 +474,7 @@ def _bootstrap_backward_history(
             "sampling": False,
             "purge_write": max(4, int(stage.get("purge_write") or 0)),
             "adjust_time_step": True,
-            "maxCo": 10.0,
+            "maxCo": 5.0,
             "maxDeltaT_s": float(delta_t),
             "first_order_bootstrap": True,
         }
@@ -519,6 +519,20 @@ def _bootstrap_backward_history(
             returncode=ramp_returncode,
         )
         ramp_event = dict(ramp_segment.get("openfoam_event") or {})
+        last_adaptive_dt = (
+            float(ramp_status["deltaT"])
+            if ramp_status.get("deltaT") is not None else None
+        )
+        recommended_max_fixed_dt = (
+            0.8 * last_adaptive_dt if last_adaptive_dt is not None else None
+        )
+        target_dt_safety_ratio = (
+            recommended_max_fixed_dt / float(delta_t)
+            if recommended_max_fixed_dt is not None else None
+        )
+        target_dt_reachable = bool(
+            target_dt_safety_ratio is None or target_dt_safety_ratio >= 0.8
+        )
         ramp_complete = bool(
             ramp_returncode == 0
             and ramp_output.get("valid")
@@ -526,8 +540,9 @@ def _bootstrap_backward_history(
             and not ramp_event.get("numerical_divergence")
             and (
                 ramp_event.get("maximum_courant") is None
-                or float(ramp_event["maximum_courant"]) <= 50.0
+                or float(ramp_event["maximum_courant"]) <= 7.5
             )
+            and target_dt_reachable
         )
         ramp_row = {
             **ramp_applied,
@@ -538,14 +553,16 @@ def _bootstrap_backward_history(
             "returncode": int(ramp_returncode),
             "wall_seconds": time.monotonic() - ramp_started,
             "requested_target_dt_s": float(delta_t),
-            "last_adaptive_dt_s": ramp_status.get("deltaT"),
-            "recommended_max_fixed_dt_s": (
-                0.8 * float(ramp_status["deltaT"])
-                if ramp_status.get("deltaT") is not None
-                else None
-            ),
+            "last_adaptive_dt_s": last_adaptive_dt,
+            "recommended_max_fixed_dt_s": recommended_max_fixed_dt,
+            "target_dt_safety_ratio": target_dt_safety_ratio,
+            "target_dt_reachable": target_dt_reachable,
             "terminal_reason": (
-                "OPEN_EULER_RAMP_READY" if ramp_complete else "OPEN_EULER_RAMP_FAILED"
+                "OPEN_EULER_RAMP_READY"
+                if ramp_complete else
+                "OPEN_TARGET_DT_EXCEEDS_LOCAL_COURANT_LIMIT"
+                if not target_dt_reachable else
+                "OPEN_EULER_RAMP_FAILED"
             ),
             **ramp_segment,
         }

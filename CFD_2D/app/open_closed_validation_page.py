@@ -19,12 +19,15 @@ from ls1_validation_page import (
     _validation_execution_monitor,
 )
 from ramair_2d_ls1_validation_study import validation_phase_plan, validation_solver_profile
+from ramair_2d_parallel import parallel_campaign_allocation
+from parallel_campaign_ui import render_parallel_campaign_monitor
 from ramair_2d_mesh_numerics import quality_controls_for_mesh
 from workflow_backend import (
     case_directory,
     case_writer_command,
     open_local_folder,
     open_paraview_case,
+    parallel_campaign_command,
     postprocess_command,
     staged_runner_command,
     sweep_runner_command,
@@ -430,7 +433,7 @@ def render_open_closed_validation(root: Path, start_job: StartJob) -> None:
         parallel_mode = parallel[0].radio(
             "Selección paralela", ["Auto", "Manual"], horizontal=True,
             key="open-closed-parallel-mode",
-            help="Auto usa los benchmarks válidos y la política equilibrada por tamaño de malla.",
+            help="Auto prioriza la latencia de un caso dentro de los 8 cores físicos y reutiliza benchmarks compatibles.",
         )
         renumber = parallel[1].toggle(
             "Renumber en caso nuevo", value=True, key="open-closed-renumber",
@@ -502,6 +505,92 @@ def render_open_closed_validation(root: Path, start_job: StartJob) -> None:
                 ),
             )
         st.caption("Los controles del monitor permiten guardar y saltar el caso actual o pausar toda la cola.")
+
+        st.markdown("#### Ejecución paralela")
+        parallel_angles = st.multiselect(
+            "Ángulos simultáneos",
+            prepared,
+            default=[],
+            key="open-closed-parallel-angles",
+            help="Cada ángulo conserva su propio RANS, fases A-E, archivos y monitor.",
+        )
+        parallel_concurrency = int(st.number_input(
+            "Casos simultáneos", 2, 4, 2, key="open-closed-parallel-concurrency"
+        ))
+        quality = _read_json(root / f"CFD_2D/meshes/{VARIANT}/mesh_quality_report.json")
+        mesh_cells = int(quality.get("checkMesh_cell_count") or quality.get("cell_count") or 0)
+        parallel_plans = parallel_campaign_allocation(
+            [mesh_cells or None] * len(parallel_angles),
+            total_core_budget=8,
+            max_concurrent_cases=parallel_concurrency,
+        ) if parallel_angles else []
+        if parallel_plans:
+            st.dataframe([
+                {
+                    "Ángulo": f"{value:g}°",
+                    "Cores": parallel_plans[index]["recommended_ranks"],
+                    "Celdas/core": parallel_plans[index]["cells_per_rank"],
+                }
+                for index, value in enumerate(parallel_angles)
+            ], hide_index=True, width="stretch")
+        parallel_confirm = st.checkbox(
+            "Confirmo la campaña abierta paralela", key="open-closed-parallel-confirm"
+        )
+        campaign_id = "open_closed_validation_parallel"
+        if st.button(
+            "Ejecutar casos abiertos en paralelo",
+            disabled=len(parallel_angles) < 2 or not parallel_confirm,
+            key="open-closed-parallel-run",
+        ):
+            cases = []
+            for index, value in enumerate(parallel_angles):
+                item_case = case_directory(root, VARIANT, float(value))
+                ranks = int(parallel_plans[index]["recommended_ranks"])
+                cases.append({
+                    "case_id": f"open_alpha_{float(value):g}",
+                    "label": f"Open α={float(value):g}°",
+                    "case_path": str(item_case),
+                    "topology": "open",
+                    "mesh_level": "validation",
+                    "cell_count": mesh_cells,
+                    "alpha_deg": float(value),
+                    "n_cores": ranks,
+                    "command": staged_runner_command(
+                        root, variant=VARIANT, alpha=float(value), solver="auto",
+                        execution_backend="native", n_cores=ranks,
+                        timeout_min=60.0 * timeout_h, run=True,
+                        stop_if_checkmesh_fails=True, pyfoam_live_monitor=False,
+                        cleanup_processor_directories=True,
+                        stop_when_force_stable=True,
+                        convergence_minimum_time_star=20.0,
+                        convergence_window_time_star=10.0,
+                        convergence_mean_tolerance=0.02,
+                        convergence_oscillation_tolerance=0.1,
+                        steady_initialization=True,
+                        steady_timeout_min=steady_timeout,
+                        steady_force_window_samples=rans_window,
+                        steady_force_mean_tolerance_percent=rans_mean_tol,
+                        steady_force_fluctuation_tolerance_percent=rans_fluct_tol,
+                        continue_transient_after_steady_timeout=True,
+                        resume=item_case.is_dir(),
+                        transient_phase_plan=phase_path,
+                        automatic_core_selection=True,
+                        renumber_before_decompose=renumber,
+                    ),
+                })
+            start_job(
+                "open_closed_parallel_campaign",
+                parallel_campaign_command(
+                    root,
+                    campaign_id=campaign_id,
+                    cases=cases,
+                    total_core_budget=8,
+                    max_concurrent_cases=parallel_concurrency,
+                ),
+            )
+        render_parallel_campaign_monitor(
+            root, campaign_id, key_scope="open-closed-parallel"
+        )
 
     with post_tab:
         alpha_post = st.selectbox("Ángulo a postprocesar", prepared, key="open-closed-post-alpha")

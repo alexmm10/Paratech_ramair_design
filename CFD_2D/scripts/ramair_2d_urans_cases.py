@@ -602,59 +602,77 @@ def runtime_paths(project_root: Path) -> dict[str, Path]:
         "active": root / "active_execution.json",
         "latest": root / "latest_execution.json",
         "lease": root / "solver_lease.json",
+        "active_dir": root / "active_executions",
+        "latest_dir": root / "latest_executions",
+        "lease_dir": root / "solver_leases",
     }
+
+
+def _runtime_identity(payload: dict[str, Any]) -> str:
+    raw = str(payload.get("case_id") or payload.get("run_id") or payload.get("lease_id") or "case")
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", raw).strip("._-") or "case"
 
 
 def publish_runtime(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     paths = runtime_paths(project_root)
     paths["root"].mkdir(parents=True, exist_ok=True)
+    paths["active_dir"].mkdir(parents=True, exist_ok=True)
     now = utc_stamp()
-    current = read_json(paths["active"], {}) or {}
+    case_active = paths["active_dir"] / f"{_runtime_identity(payload)}.json"
+    current = read_json(case_active, {}) or {}
     merged = {
         **current,
         "schema_version": RUNTIME_SCHEMA_VERSION,
         **payload,
         "updated_at": now,
     }
+    write_json_atomic(case_active, merged)
+    # Compatibility pointer for legacy single-case monitors. Parallel-aware
+    # views consume active_executions/*.json and therefore do not overwrite
+    # one another when several independent cases advance simultaneously.
     write_json_atomic(paths["active"], merged)
     if str(merged.get("status") or "") not in {"PREPARING", "RUNNING"}:
+        paths["latest_dir"].mkdir(parents=True, exist_ok=True)
+        write_json_atomic(paths["latest_dir"] / case_active.name, merged)
         write_json_atomic(paths["latest"], merged)
     return merged
 
 
 def acquire_solver_lease(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
-    """Acquire the single Validation Lab solver lease atomically."""
+    """Acquire one atomic lease per canonical case identity."""
     paths = runtime_paths(project_root)
     paths["root"].mkdir(parents=True, exist_ok=True)
-    existing = read_json(paths["lease"], {}) or {}
+    paths["lease_dir"].mkdir(parents=True, exist_ok=True)
+    lease_path = paths["lease_dir"] / f"{_runtime_identity(payload)}.json"
+    existing = read_json(lease_path, {}) or {}
     if existing and process_identity_is_live(
         existing.get("PID"), existing.get("process_start_token")
     ):
         raise CanonicalCaseError(
             "SOLVER_LEASE_BUSY",
-            "Another Validation Lab solver process owns the execution lease.",
+            "Another solver process already owns this canonical case.",
             remediation="Wait for the active case to finish or stop it explicitly.",
             evidence=existing,
         )
     if existing:
-        paths["lease"].unlink(missing_ok=True)
+        lease_path.unlink(missing_ok=True)
     lease = {
         "schema_version": RUNTIME_SCHEMA_VERSION,
         **payload,
         "acquired_at": utc_stamp(),
         "updated_at": utc_stamp(),
     }
-    temporary = paths["lease"].with_name(
-        f".{paths['lease'].name}.{os.getpid()}.{time.time_ns()}.tmp"
+    temporary = lease_path.with_name(
+        f".{lease_path.name}.{os.getpid()}.{time.time_ns()}.tmp"
     )
     temporary.write_text(
         json.dumps(lease, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
     try:
-        os.link(temporary, paths["lease"])
+        os.link(temporary, lease_path)
     except FileExistsError:
-        current = read_json(paths["lease"], {}) or {}
+        current = read_json(lease_path, {}) or {}
         if process_identity_is_live(
             current.get("PID"), current.get("process_start_token")
         ):
@@ -664,8 +682,8 @@ def acquire_solver_lease(project_root: Path, payload: dict[str, Any]) -> dict[st
                 remediation="Wait for the active case to finish or stop it explicitly.",
                 evidence=current,
             )
-        paths["lease"].unlink(missing_ok=True)
-        os.replace(temporary, paths["lease"])
+        lease_path.unlink(missing_ok=True)
+        os.replace(temporary, lease_path)
     finally:
         temporary.unlink(missing_ok=True)
     return lease
@@ -673,22 +691,35 @@ def acquire_solver_lease(project_root: Path, payload: dict[str, Any]) -> dict[st
 
 def release_solver_lease(project_root: Path, lease_id: str) -> None:
     paths = runtime_paths(project_root)
-    current = read_json(paths["lease"], {}) or {}
-    if current and str(current.get("lease_id") or "") != str(lease_id):
-        raise CanonicalCaseError(
-            "SOLVER_LEASE_OWNERSHIP_MISMATCH",
-            "The current process does not own the Validation Lab solver lease.",
-            remediation="Do not remove a lease owned by another active execution.",
-            evidence=current,
-        )
-    paths["lease"].unlink(missing_ok=True)
+    candidates = list(paths["lease_dir"].glob("*.json")) if paths["lease_dir"].is_dir() else []
+    if paths["lease"].is_file():
+        candidates.append(paths["lease"])
+    for candidate in candidates:
+        current = read_json(candidate, {}) or {}
+        if str(current.get("lease_id") or "") == str(lease_id):
+            candidate.unlink(missing_ok=True)
+            return
+    # Releasing an already-cleaned lease is idempotent. It is important during
+    # orderly multi-case SIGINT handling, where child and parent cleanup race.
 
 
 def clear_active_runtime(project_root: Path, terminal: dict[str, Any]) -> None:
     paths = runtime_paths(project_root)
     payload = {**terminal, "updated_at": utc_stamp()}
+    paths["latest_dir"].mkdir(parents=True, exist_ok=True)
+    identity = _runtime_identity(payload)
+    write_json_atomic(paths["latest_dir"] / f"{identity}.json", payload)
     write_json_atomic(paths["latest"], payload)
-    paths["active"].unlink(missing_ok=True)
+    (paths["active_dir"] / f"{identity}.json").unlink(missing_ok=True)
+    remaining = sorted(
+        paths["active_dir"].glob("*.json") if paths["active_dir"].is_dir() else [],
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    if remaining:
+        write_json_atomic(paths["active"], read_json(remaining[0], {}) or {})
+    else:
+        paths["active"].unlink(missing_ok=True)
 
 
 def quick_check_paths(project_root: Path) -> dict[str, Path]:

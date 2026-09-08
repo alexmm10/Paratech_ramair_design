@@ -13,6 +13,8 @@ import streamlit as st
 
 from ramair_2d_ls1_validation_study import validation_phase_plan, validation_solver_profile
 from ramair_2d_mesh_numerics import quality_controls_for_mesh
+from ramair_2d_parallel import parallel_campaign_allocation
+from parallel_campaign_ui import render_parallel_campaign_monitor
 from validation_plotting import close_figures, coefficient_figure, residual_figure
 
 from workflow_backend import (
@@ -23,6 +25,7 @@ from workflow_backend import (
     openfoam_case_from_command,
     open_mesh_viewer,
     open_paraview_case,
+    parallel_campaign_command,
     interrupt_openfoam_case,
     postprocess_command,
     staged_runner_command,
@@ -1156,6 +1159,118 @@ def render_ls1_validation(root: Path, start_job: StartJob) -> None:
                     renumber_before_decompose=renumber_before_decompose,
                 ),
             )
+
+        st.markdown("#### Ejecución paralela de casos independientes")
+        parallel_alphas = st.multiselect(
+            "Ángulos simultáneos",
+            prepared_alphas,
+            default=[],
+            key="ls1-validation-parallel-alphas",
+            help=(
+                "Ejecuta varios ángulos completos RANS→URANS a la vez. El selector "
+                "reparte como máximo 8 cores físicos. Los benchmarks de este equipo "
+                "recomiendan la cola secuencial para obtener mayor productividad."
+            ),
+        )
+        parallel_concurrency = st.number_input(
+            "Casos simultáneos",
+            min_value=2,
+            max_value=4,
+            value=2,
+            key="ls1-validation-parallel-concurrency",
+        )
+        quality = _read_json(
+            root / f"CFD_2D/meshes/{VARIANT}/mesh_quality_report.json"
+        )
+        validation_cells = int(
+            quality.get("checkMesh_cell_count") or quality.get("cell_count") or 0
+        )
+        plans = parallel_campaign_allocation(
+            [validation_cells or None] * len(parallel_alphas),
+            total_core_budget=8,
+            max_concurrent_cases=int(parallel_concurrency),
+        ) if parallel_alphas else []
+        if plans:
+            st.dataframe(
+                [
+                    {
+                        "Ángulo": f"{value:g}°",
+                        "Cores": plans[index]["recommended_ranks"],
+                        "Celdas/core": plans[index]["cells_per_rank"],
+                    }
+                    for index, value in enumerate(parallel_alphas)
+                ],
+                hide_index=True,
+                width="stretch",
+            )
+        parallel_confirm = st.checkbox(
+            "Confirmo la campaña paralela",
+            key="ls1-validation-parallel-confirm",
+        )
+        validation_parallel_id = "ls1_validation_parallel"
+        if st.button(
+            "Ejecutar casos en paralelo",
+            disabled=len(parallel_alphas) < 2 or not parallel_confirm,
+            key="ls1-validation-parallel-run",
+        ):
+            cases = []
+            for index, value in enumerate(parallel_alphas):
+                parallel_case = case_directory(root, VARIANT, float(value))
+                parallel_pending = _read_json(
+                    parallel_case / "steadyInitialization/pending_stage.json"
+                )
+                parallel_resume = (
+                    _latest_physical_time(parallel_case) > 0.0 and not parallel_pending
+                )
+                ranks = int(plans[index]["recommended_ranks"])
+                cases.append({
+                    "case_id": f"alpha_{float(value):g}",
+                    "label": f"α={float(value):g}°",
+                    "case_path": str(parallel_case),
+                    "topology": "closed",
+                    "mesh_level": "validation",
+                    "cell_count": validation_cells,
+                    "alpha_deg": float(value),
+                    "n_cores": ranks,
+                    "command": staged_runner_command(
+                        root, variant=VARIANT, alpha=float(value), solver="auto",
+                        execution_backend="native", n_cores=ranks,
+                        timeout_min=float(timeout), run=True,
+                        stop_if_checkmesh_fails=True, pyfoam_live_monitor=False,
+                        cleanup_processor_directories=True,
+                        stop_when_force_stable=True,
+                        convergence_minimum_time_star=20.0,
+                        convergence_window_time_star=10.0,
+                        convergence_mean_tolerance=0.02,
+                        convergence_oscillation_tolerance=0.1,
+                        steady_initialization=True,
+                        steady_timeout_min=float(steady_timeout_min),
+                        steady_force_window_samples=int(rans_window),
+                        steady_force_mean_tolerance_percent=float(rans_mean_tol),
+                        steady_force_fluctuation_tolerance_percent=float(rans_fluct_tol),
+                        continue_transient_after_steady_timeout=True,
+                        resume=parallel_resume,
+                        steady_decision="extend" if parallel_pending else "auto",
+                        transient_phase_plan=phase_path,
+                        automatic_core_selection=True,
+                        renumber_before_decompose=renumber_before_decompose,
+                    ),
+                })
+            start_job(
+                "ls1_validation_parallel_campaign",
+                parallel_campaign_command(
+                    root,
+                    campaign_id=validation_parallel_id,
+                    cases=cases,
+                    total_core_budget=8,
+                    max_concurrent_cases=int(parallel_concurrency),
+                ),
+            )
+        render_parallel_campaign_monitor(
+            root,
+            validation_parallel_id,
+            key_scope="ls1-validation-parallel",
+        )
 
         with st.expander("Paquete portátil de esta campaña", expanded=False):
             st.caption(

@@ -1,7 +1,7 @@
 # RamAir Project Context for Codex
 
 Context version: 2026-08-26
-Application backend API: 26
+Application backend API: 27
 Validation Lab schema: 13
 Solver configuration schema: 15
 Work Case manifest schema: 3
@@ -53,7 +53,7 @@ future work and must not be inferred from diagnostic placeholders.
 - `Generate_RamAir_Canopy_MAIN.CATScript`: CATIA V5 model generation.
 - `run_ramair_cfd2d_app.py`: official Windows-to-WSL application launcher.
 - `CFD_2D/app/ramair_cfd2d_app.py`: Streamlit shell.
-- `CFD_2D/app/workflow_backend.py`: API 26 orchestration boundary.
+- `CFD_2D/app/workflow_backend.py`: API 27 orchestration boundary.
 - `CFD_2D/app/validation_convergence_page.py`: Validation/Convergence shell.
 - `CFD_2D/app/ls1_validation_page.py`: independent LS(1)-0417 polar validation.
 - `CFD_2D/scripts/ramair_2d_ls1_validation_study.py`: idempotent migration and
@@ -344,7 +344,7 @@ requires explicit approval and a bounded identical-numerics benchmark.
 ### Final integration state
 
 T17 closes the software restructuring with Work Case schema 3, solver schema
-15, Validation Lab schema 11 and API 26. Gates A-E are implemented and covered
+15, Validation Lab schema 11 and API 27. Gates A-E are implemented and covered
 by bounded evidence. Gate F is intentionally open at the scientific level:
 nOuter 4 is running phase E and no full convergence campaign has been launched.
 Do not infer acceptance or independence until those real data pass the stored
