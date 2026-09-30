@@ -15,7 +15,7 @@ import webbrowser
 from pathlib import Path
 
 
-BACKEND_API_VERSION = 27
+BACKEND_API_VERSION = 28
 BOOTSTRAP = Path("Documents and Manuals/Application/bootstrap_cfd2d_app_wsl.sh")
 CANONICAL_WSL_ROOT = "~/ramair_cfd/DESIGN_APP"
 
@@ -299,6 +299,7 @@ import os
 import shutil
 import sys
 import tempfile
+import subprocess
 import time
 import uuid
 from pathlib import Path
@@ -366,9 +367,11 @@ try:
         shutil.rmtree(destination / "__pycache__", ignore_errors=True)
 
     replace_trees = [
+        (source / "CFD_2D/native", target / "CFD_2D/native"),
         (source / "Application Support/Tools", target / "Application Support/Tools"),
         (source / "Application Support/Tests", target / "Application Support/Tests"),
         (source / "Documents and Manuals/Application", target / "Documents and Manuals/Application"),
+        (source / "Documents and Manuals/Current", target / "Documents and Manuals/Current"),
         (source / "CATIA/Utilities", target / "CATIA/Utilities"),
         (
             source / "CFD_2D/CFD_2D_inputs/config/mesh_presets",
@@ -394,11 +397,10 @@ try:
         shutil.rmtree(previous, ignore_errors=True)
 
     for relative in (
-        "run_ramair_cfd2d_app.py", "README_PROJECT_STRUCTURE.md",
+        "run_ramair_cfd2d_app.py", "README.md", "RELEASE.json", "README_PROJECT_STRUCTURE.md",
         "PROJECT_CONTEXT_FOR_CODEX.md", "CHANGELOG.md", "AGENTS.md",
         "CFD_2D/README_CFD_2D.md",
         "CFD_2D/reports/OPENFOAM_PERFORMANCE_AUDIT_20260907.md",
-        "Dockerfile", "docker-compose.yml", ".dockerignore",
         "START_RAMAIR_CFD2D_APP.bat", "INSTALL_AND_START_RAMAIR_CFD2D_APP.bat",
         "preprocess_ramair_main.py", "Generate_RamAir_Canopy_MAIN.CATScript",
         "SETUP_CATIA_PREPROCESSOR_WINDOWS.bat", "RUN_CATIA_PREPROCESSOR_WINDOWS.bat",
@@ -410,6 +412,23 @@ try:
             temporary = dst.with_suffix(dst.suffix + ".incoming")
             shutil.copy2(src, temporary)
             temporary.replace(dst)
+
+    # Shared libraries are additive: never replace runtime-created profiles/presets.
+    for relative in ("Airfoil Profiles/Reference", "Airfoil Profiles/Processed", "Mesh Presets", "Validation Gallery"):
+        src = source / relative
+        dst = target / relative
+        if src.is_dir():
+            for item in src.rglob("*"):
+                if item.is_file() and not (dst / item.relative_to(src)).exists():
+                    destination = dst / item.relative_to(src)
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(item, destination)
+
+    # Retired source files only; scientific data and historical archives are never pruned.
+    for relative in ("Dockerfile", "docker-compose.yml", ".dockerignore", "DOCKER_STRATEGY.md", "PROJECT_CONTEXT.md"):
+        retired = target / relative
+        if retired.is_file() and not (source / relative).exists():
+            retired.unlink()
 
     reference_configs = [
         "CFD_2D/CFD_2D_inputs/config/cfd2d_mesh_config_reference.json",
@@ -492,6 +511,16 @@ try:
             temporary.write_text(json.dumps(data, indent=2) + "\\n", encoding="utf-8")
             temporary.replace(editable_mesh_config)
 
+    release = json.loads((source / "RELEASE.json").read_text(encoding="utf-8")) if (source / "RELEASE.json").is_file() else {{}}
+    packaged_manifest = source / "PORTABLE_PACKAGE_MANIFEST.json"
+    if packaged_manifest.is_file():
+        release.update(json.loads(packaged_manifest.read_text(encoding="utf-8")).get("release", {{}}))
+    if (source / ".git").exists():
+        git_args = ["git", "-c", "safe.directory=" + str(source)]
+        head = subprocess.run(git_args + ["rev-parse", "HEAD"], cwd=source, capture_output=True, text=True)
+        if head.returncode == 0:
+            release["commit"] = head.stdout.strip()
+            release["working_tree_modified"] = bool(subprocess.run(git_args + ["status", "--porcelain"], cwd=source, capture_output=True, text=True).stdout.strip())
     manifest = {{
         "status": "SYNCHRONIZED",
         "backend_api": expected_api,
@@ -499,6 +528,7 @@ try:
         "runtime_project": str(target),
         "synchronized_at": time.strftime("%Y-%m-%d %H:%M:%S %z"),
         "editable_runtime_data_preserved": True,
+        "release": release,
     }}
     manifest_path = target / "CFD_2D/app_state/runtime_sync_manifest.json"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -517,7 +547,7 @@ def initialize_native_runtime(args: argparse.Namespace, source_root: str, reques
     exclusions = [
         ".venv-cfd2d-ui", ".venv-cfd2d", ".venv-catia", "__pycache__", ".pytest_cache",
         "Application Support/Logs", "Application Support/Reports", "Application Support/Temp",
-        "Previous Versions", "Results", "CATIA/Exports", "CFD_2D/app_state", "CFD_2D/meshes",
+        "Data Archive", "Results", "CATIA/Exports", "CFD_2D/app_state", "CFD_2D/meshes",
         "CFD_2D/openfoam_cases", "CFD_2D/reports", "CFD_2D/results",
     ]
     exclude_args = " ".join(f"--exclude={shlex.quote(item)}" for item in exclusions)

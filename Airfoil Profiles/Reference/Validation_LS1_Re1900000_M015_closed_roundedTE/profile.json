@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "profile",
+  "id": "ee66da8998314639ba9f3a1682042833",
+  "name": "Validation_LS1_Re1900000_M015_closed_roundedTE",
+  "created_at": "2026-09-09T10:33:14",
+  "topology": "closed",
+  "chord_m": 1.0,
+  "source": "Airfoil Profiles/Designs/NASA_LS1_0417_standard_Re1900000_M0_150/repanelled_profile.dat",
+  "source_sha256": "7a710c0a36c0c24e1d615d0e592c2c90eca886a360528a9fd484282b3e44cbdc",
+  "te": {
+    "mode": "rounded",
+    "method": "trimmed_C1_cubic_cap",
+    "anchor_x_c": 0.9955558834564282,
+    "maximum_x_c": 1.0,
+    "samples": 35,
+    "upstream_coordinates_preserved": true
+  },
+  "base_profile": null,
+  "coordinates": "upper_TE_to_LE__lower_LE_to_TE__cap_lower_to_upper",
+  "revision": "984a916f1391e911d22607892b2b7c38067fc894928176b6cf81967c88732308",
+  "source_role": "historical_provenance; coordinates are bundled beside profile.json"
+}

@@ -9,6 +9,7 @@ import shutil
 import tempfile
 import time
 import zipfile
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,8 @@ def sha256(path: Path) -> str:
 def safe_extract(archive: zipfile.ZipFile, destination: Path) -> None:
     root = destination.resolve()
     for member in archive.infolist():
+        if stat.S_ISLNK(member.external_attr >> 16):
+            raise ValueError(f"Symlinks are not permitted in a return archive: {member.filename}")
         target = (destination / member.filename).resolve()
         if target != root and root not in target.parents:
             raise ValueError(f"Unsafe archive member: {member.filename}")
@@ -41,6 +44,8 @@ def read_manifest(root: Path) -> dict[str, Any]:
 def verify_files(root: Path, manifest: dict[str, Any]) -> None:
     for relative, expected in (manifest.get("files") or {}).items():
         path = root / str(relative)
+        if not path.resolve().is_relative_to(root.resolve()):
+            raise ValueError(f"Unsafe manifest path: {relative}")
         if not path.is_file():
             raise FileNotFoundError(f"Remote result is incomplete: {relative}")
         expected_bytes = expected.get("bytes", -1)
@@ -123,15 +128,42 @@ def main() -> int:
             if not source.is_dir() or relative.is_absolute() or ".." in relative.parts:
                 raise ValueError(f"Invalid imported case path: {relative}")
             destination = project / relative
+            if not destination.resolve().is_relative_to(project):
+                raise ValueError("The imported case escapes the project")
+            if relative.parts[0] == "Workspaces" and not (destination.parent.parent / "solver_setup.json").is_file():
+                raise ValueError("Register the original Studio workspace before importing its returned results")
+            import sys
+            sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "CFD_2D/scripts"))
+            from ramair_execution_control import pid_is_alive
+            process_file = destination / ".ramair_solver_process.json"
+            process = json.loads(process_file.read_text()) if process_file.is_file() else {}
+            if process.get("pid") and pid_is_alive(int(process["pid"]), process.get("pid_start_token") or process.get("start_token")):
+                raise ValueError("Stop the active solver before importing returned results")
             archived = None
             if destination.exists() and args.existing_action == "refuse":
                 raise FileExistsError(destination)
             if destination.exists() and args.existing_action == "archive":
-                archive_root = project / "CFD_2D/openfoam_cases/_remote_import_archive" / timestamp
-                archived = archive_root / relative.parent.name / relative.name
+                archive_root = project / "Data Archive/Remote Imports" / timestamp
+                archived = archive_root / relative
                 archived.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(destination), str(archived))
             shutil.copytree(source, destination, dirs_exist_ok=args.existing_action == "merge")
+            old_root = str(manifest.get("remote_project_root") or "")
+            if old_root:
+                def rebase(value):
+                    if isinstance(value, str) and (value == old_root or value.startswith(old_root + "/")):
+                        return str(project) + value[len(old_root):]
+                    if isinstance(value, list):
+                        return [rebase(item) for item in value]
+                    if isinstance(value, dict):
+                        return {key: rebase(item) for key, item in value.items()}
+                    return value
+                for metadata in destination.rglob("*.json"):
+                    try:
+                        data = json.loads(metadata.read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError):
+                        continue
+                    metadata.write_text(json.dumps(rebase(data), indent=2) + "\n", encoding="utf-8")
             monitor_recovery = monitor_recovery_evidence(destination)
             evidence = {
                 "schema_version": 1,

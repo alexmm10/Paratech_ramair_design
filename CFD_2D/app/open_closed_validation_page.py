@@ -55,7 +55,7 @@ def _points(path: Path) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def _comparison_command(root: Path, action: str, alpha: float | None = None, allow_incomplete: bool = False) -> list[str]:
+def _comparison_command(root: Path, action: str, alpha: float | None = None, allow_incomplete: bool = False, stage: str = "URANS") -> list[str]:
     command = [
         sys.executable,
         str(root / "CFD_2D/scripts/ramair_2d_open_closed_comparison.py"),
@@ -65,6 +65,7 @@ def _comparison_command(root: Path, action: str, alpha: float | None = None, all
         command += ["--alpha", str(float(alpha))]
     if allow_incomplete:
         command.append("--allow-incomplete")
+    command += ["--stage", stage]
     return command
 
 
@@ -435,10 +436,8 @@ def render_open_closed_validation(root: Path, start_job: StartJob) -> None:
             key="open-closed-parallel-mode",
             help="Auto prioriza la latencia de un caso dentro de los 8 cores físicos y reutiliza benchmarks compatibles.",
         )
-        renumber = parallel[1].toggle(
-            "Renumber en caso nuevo", value=True, key="open-closed-renumber",
-            help="Solo se aplica a casos limpios; no reordena silenciosamente un reinicio.",
-        )
+        renumber = False
+        parallel[1].caption("Se conserva el orden de la malla durante arranques y reinicios.")
         automatic_cores = parallel_mode == "Auto"
         rans_window = int(solver_settings["rans_window"])
         rans_mean_tol = float(solver_settings["rans_mean_tol"])
@@ -490,13 +489,13 @@ def render_open_closed_validation(root: Path, start_job: StartJob) -> None:
                     steady_force_fluctuation_tolerance_percent=rans_fluct_tol,
                     continue_transient_after_steady_timeout=True,
                     resume_existing=queue_policy == "resume_or_start",
-                    resume_additional_time_star=None, continue_after_timeout=True,
+                    resume_additional_time_star=None, continue_after_timeout=False,
                     stop_when_force_stable=True, convergence_minimum_time_star=20.0,
                     convergence_window_time_star=10.0, convergence_mean_tolerance=0.02,
                     convergence_oscillation_tolerance=0.1, stop_if_checkmesh_fails=True,
                     pyfoam_live_monitor=False, steady_pyfoam_live_monitor=False,
                     cleanup_processor_directories=True, postprocess_after_each=True,
-                    continue_after_error=True,
+                    continue_after_error=False,
                     average_from_fraction=float(phase.get("average_from_fraction", 14.0 / 64.0)),
                     transient_phase_plan=phase_path, solver_config_path=solver_path,
                     restart_existing=queue_policy == "delete_and_restart",
@@ -653,13 +652,16 @@ def render_open_closed_validation(root: Path, start_job: StartJob) -> None:
                             simulation_mode=mode, include_rans_stage=include_rans,
                         ),
                     )
+        publication_stage = st.radio("Fuente del punto de polar", ["URANS", "RANS"], horizontal=True, key="open-closed-point-stage")
+        if publication_stage == "RANS":
+            st.caption("Publica el promedio estacionario revisado aunque URANS haya divergido, sea breve o no exista. La tabla identifica la fuente RANS; no acredita convergencia temporal.")
         provisional = st.toggle(
             "Permitir publicación provisional", value=False, key="open-closed-provisional",
             help="Marca el punto como provisional si todavía no se ha completado la fase E.",
         )
         actions = st.columns(4)
         if actions[0].button("Añadir a comparación", key="open-closed-publish"):
-            start_job("open_closed_publish", _comparison_command(root, "publish", alpha_post, provisional))
+            start_job("open_closed_publish", _comparison_command(root, "publish", alpha_post, provisional, publication_stage))
         if actions[1].button("Quitar de comparación", key="open-closed-remove"):
             start_job("open_closed_remove", _comparison_command(root, "remove", alpha_post))
         result = result_root / case_directory(root, VARIANT, alpha_post).name

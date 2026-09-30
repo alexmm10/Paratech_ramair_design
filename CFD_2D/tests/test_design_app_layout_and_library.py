@@ -134,7 +134,7 @@ def test_loading_legacy_config_migrates_only_layout_paths(project: Path) -> None
     assert migrated["project_paths"]["catia_inputs_dir"] == "CATIA/Inputs"
     assert migrated["profile_inputs"]["main_profile"] == "Airfoil Profiles/reference.dat"
     assert migrated["canopy_geometry"]["chord_mm"] == 3016.0
-    assert any((project / "Previous Versions/Config Backups").rglob("default_case_config.json"))
+    assert any((project / "Data Archive/Config Backups").rglob("default_case_config.json"))
 
 
 @pytest.mark.parametrize("stage", ["geometry", "case", "mesh", "solver", "simulation", "postprocess"])
@@ -241,7 +241,7 @@ def test_legacy_manifest_adapter_is_read_only_until_explicit_migration(
     assert migrated["migration"]["metadata_only"] is True
     assert (project / "Results/work_case_index.json").is_file()
     assert any(
-        (project / "Previous Versions/Results Library Manifest Backups/legacy_case").glob(
+        (project / "Data Archive/Results Library Manifest Backups/legacy_case").glob(
             "*_case_manifest_schema1.json"
         )
     )
@@ -810,16 +810,17 @@ def test_codex_context_and_changelog_contract() -> None:
     context = (ROOT / "PROJECT_CONTEXT_FOR_CODEX.md").read_text(encoding="utf-8")
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    assert "Application backend API: 27" in context
+    assert "Application backend API: 28" in context
     launcher = (ROOT / "run_ramair_cfd2d_app.py").read_text(encoding="utf-8")
     bootstrap = (ROOT / "Documents and Manuals/Application/bootstrap_cfd2d_app_wsl.sh").read_text(encoding="utf-8")
-    assert "BACKEND_API_VERSION = 27" in launcher
-    assert "expected API 25" in bootstrap
-    assert "BACKEND_API_VERSION != 27" in bootstrap
+    assert "BACKEND_API_VERSION = 28" in launcher
+    assert "expected API 28" in bootstrap
+    assert "BACKEND_API_VERSION != 28" in bootstrap
     assert "PROJECT_CONTEXT_FOR_CODEX.md" in agents
     assert "CHANGELOG.md" in agents
     assert "## [Unreleased]" in changelog
-    assert "## [2026-08-18]" in changelog
+    release = json.loads((ROOT / "RELEASE.json").read_text(encoding="utf-8"))
+    assert f"## [{release['version'].replace('.', '-')}]" in changelog
     assert (ROOT / "Application Support/Tools/check_project_context.py").is_file()
 
 
@@ -854,65 +855,41 @@ def test_open_validation_workcase_assets_and_dynamic_mesh_editor_exist() -> None
     assert (
         ROOT / "CFD_2D/scripts/ramair_2d_open_validation_workcase.py"
     ).is_file()
-    app_text = (ROOT / "CFD_2D/app/ramair_cfd2d_app.py").read_text(
-        encoding="utf-8"
-    )
-    zero_branch = app_text.index(
-        'if data.get("open_geometry_representation") == "zero_thickness_base_profile":'
-    )
-    finite_branch = app_text.index(
-        'if data.get("open_geometry_representation") != "zero_thickness_base_profile":'
-    )
-    assert zero_branch < finite_branch
-    assert '"open_zero_thickness_contour_target_nodes"' in app_text[zero_branch:finite_branch]
-    assert '"open_cavity_inlet_size_strategy"' in app_text[zero_branch:finite_branch]
-    assert '"hybrid_boundary_extension"' in app_text
-    assert '"open_fabric_thickness_m"' not in app_text[zero_branch:finite_branch]
-    assert "zero_thickness_open_editor" in app_text
-    assert "Sustituir este paquete por la malla activa" in app_text
-    assert "Ese paquete de malla ya existe." in app_text
+    app_text = (ROOT / "CFD_2D/app/workspace_app.py").read_text(encoding="utf-8")
+    assert "render_open_experimental_mesh" in app_text
+    assert "zero_thickness_open_editor" not in app_text
+    assert "workspace_geometry=geometry" in app_text
+
 
 
 def test_solver_editor_reruns_when_time_step_policy_changes() -> None:
-    app_text = (ROOT / "CFD_2D/app/ramair_cfd2d_app.py").read_text(encoding="utf-8")
-    assert 'with st.form("solver-config-form")' not in app_text
-    assert 'key="save-solver-configuration"' in app_text
-    assert 'tabs = st.tabs(["General", "Solver Settings", "Writing & Postprocess", "Traceability"])' in app_text
-    assert 'edited.get("time_step_mode") == "fixed"' in app_text
-    assert '"subset": "Subconjunto seleccionado"' in app_text
-    assert "writer-reynolds" not in app_text
-    assert 'edited["config_schema_version"] = _workflow_backend.SOLVER_CONFIG_SCHEMA_VERSION' in app_text
-    assert "ungrouped = []" in app_text
-    assert "permanecen ocultos porque no intervienen" in app_text
-    assert '"Detener visualizacion"' in app_text
+    source = (ROOT / "CFD_2D/app/workspace_app.py").read_text(encoding="utf-8")
+    assert "Tiempo y fases A–E" in source and "Residuales y convergencia" in source
+    assert "solver.update(editor(values" in source
+    assert 'solver["mesh_quality_numerics_mode"] = "automatic"' in source
+    assert "writer-reynolds" not in source
+    assert '"Traceability"' not in source
 
 
 def test_mesh_page_owns_one_unique_case_library_form() -> None:
-    app_text = (ROOT / "CFD_2D/app/ramair_cfd2d_app.py").read_text(
-        encoding="utf-8"
-    )
-    mapping = app_text[app_text.index("library_stage_by_page = {") :]
-    assert '"Malla": "mesh"' not in mapping
-    assert app_text.count('case_library_panel(\n        "mesh",') == 1
-    assert 'def solver_live_monitor_panel()' in app_text
-    assert 'st.fragment(_solver_live_monitor_panel, run_every=refresh)()' in app_text
+    source = (ROOT / "CFD_2D/app/workspace_app.py").read_text(encoding="utf-8")
+    assert 'workspace_geometry=geometry' in source
+    assert "case_library_panel(" not in source
+    assert 'bind_mesh_config(read_json(preset), geometry)' in source
 
 
 def test_workcase_loading_is_explicit_and_sidebar_is_read_only() -> None:
-    app_text = (ROOT / "CFD_2D/app/ramair_cfd2d_app.py").read_text(encoding="utf-8")
-    assert 'key="workcase-load-candidate"' in app_text
-    assert 'key="workcase-explicit-load"' in app_text
-    assert "Confirmo el cambio de caso de trabajo" in app_text
-    assert 'st.sidebar.caption(f"Work Case:' in app_text
-    assert 'with st.sidebar.expander("Crear caso de trabajo"' not in app_text
-    assert "Versiones y carga por etapa del caso seleccionado" not in app_text
+    source = (ROOT / "CFD_2D/app/workspace_app.py").read_text(encoding="utf-8")
+    assert 'st.sidebar.selectbox("Caso de trabajo"' in source
+    assert "register_workspace(root, Path(location))" in source
+    assert "Confirmo el cambio de caso" not in source
 
 
 def test_mesh_preview_filters_crossports_and_short_optimizer_is_removed() -> None:
-    app_text = (ROOT / "CFD_2D/app/ramair_cfd2d_app.py").read_text(encoding="utf-8")
-    assert 'if "crossport" in str(series_name).lower()' in app_text
-    assert "Optimizacion corta de parametros" not in app_text
-    assert "Importar solo ajustes como base" in app_text
+    source = (ROOT / "CFD_2D/app/workspace_app.py").read_text(encoding="utf-8")
+    assert "profile_preview(geometry" in source
+    assert "Optimizacion corta de parametros" not in source
+    assert "Solo se importarán parámetros" in source
 
 
 def test_suspension_defaults_and_legacy_modes_are_supported() -> None:
@@ -972,19 +949,12 @@ def test_suspension_all_loaded_and_explicit_rib_ids_select_real_rows() -> None:
 
 
 def test_geometry_ui_uses_cfd_case_as_physical_source_and_clean_summaries() -> None:
-    app_text = (ROOT / "CFD_2D/app/ramair_cfd2d_app.py").read_text(encoding="utf-8")
-    preprocessor = (ROOT / "preprocess_ramair_main.py").read_text(encoding="utf-8")
-    assert "CATIA & CFD exports" in app_text
-    assert '("CFD 2D y plots", ["cfd_2d_exports", "cfd_2d", "debug_plots"])' not in app_text
-    assert "geometry_actions_panel()" in app_text
-    assert "ramair_chord_distribution.png" in app_text
-    assert "ramair_suspension_network_preview.png" in app_text
-    assert "active_conditions = workflow_data.get(\"case_conditions\")" in preprocessor
-    assert "XFLR5" not in app_text
-    environment_check = (ROOT / "CFD_2D/scripts/check_environment.py").read_text(
-        encoding="utf-8"
-    )
-    assert "XFLR5_optional" not in environment_check
+    source = (ROOT / "CFD_2D/app/workspace_app.py").read_text(encoding="utf-8")
+    jobs = (ROOT / "CFD_2D/scripts/ramair_workspace_jobs.py").read_text(encoding="utf-8")
+    assert "physical_conditions(re, mach, p, t)" in source
+    assert '"--cad-only"' in jobs
+    assert 'cfg.pop("cfd_2d", None)' in jobs
+    assert "XFLR5_optional" not in (ROOT / "CFD_2D/scripts/check_environment.py").read_text(encoding="utf-8")
 
 
 def test_live_monitor_uses_round_axes_and_throttled_snapshots() -> None:

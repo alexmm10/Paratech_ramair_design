@@ -741,7 +741,9 @@ def test_writer_uses_openfoam13_freestream_farfield_by_default(tmp_path: Path) -
     assert "farfield { type freestream;" in nut
 
 
-def test_resume_uses_latest_time_and_extends_convective_duration(tmp_path: Path) -> None:
+def test_resume_uses_latest_time_and_extends_convective_duration(tmp_path: Path, monkeypatch) -> None:
+    # Dictionary timing is isolated here; mesh identity has dedicated coverage.
+    monkeypatch.setattr("ramair_2d_openfoam_runner.verify_restart_mesh", lambda *args: {})
     (tmp_path / "system").mkdir()
     (tmp_path / "1.5").mkdir()
     (tmp_path / "system" / "controlDict").write_text(
@@ -1717,7 +1719,7 @@ def test_explicit_delete_does_not_create_previous_versions_backup(tmp_path: Path
     (case_dir / "old.txt").write_text("old", encoding="utf-8")
     prepare_existing_case_dir(tmp_path, case_dir, "reference_uncut", "alpha_p4p000", "delete")
     assert not case_dir.exists()
-    assert not (tmp_path / "Previous Versions").exists()
+    assert not (tmp_path / "Data Archive").exists()
 
 
 def test_explicit_simulation_delete_preserves_case_inputs_and_results_library(tmp_path: Path) -> None:
@@ -1738,7 +1740,7 @@ def test_explicit_simulation_delete_preserves_case_inputs_and_results_library(tm
     assert not (case_dir / "1.0").exists()
     assert not (case_dir / "postProcessing").exists()
     assert (saved / "keep.txt").is_file()
-    assert not (tmp_path / "Previous Versions").exists()
+    assert not (tmp_path / "Data Archive").exists()
 
 
 def test_staged_runner_dry_run_builds_plan_without_openfoam(tmp_path: Path) -> None:

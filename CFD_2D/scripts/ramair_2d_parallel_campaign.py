@@ -41,8 +41,8 @@ def run_campaign(manifest_path: Path) -> int:
         raise ValueError("A parallel campaign requires at least one case")
     total_budget = max(1, int(manifest.get("total_core_budget") or 1))
     max_concurrent = max(1, int(manifest.get("max_concurrent_cases") or 1))
-    if max_concurrent < 2:
-        raise ValueError("Parallel campaign requires max_concurrent_cases >= 2")
+    if max_concurrent < 1:
+        raise ValueError("Campaign requires max_concurrent_cases >= 1")
     for item in cases:
         item["command"] = [str(value) for value in item.get("command") or []]
         item["n_cores"] = max(1, int(item.get("n_cores") or 1))
@@ -76,12 +76,14 @@ def run_campaign(manifest_path: Path) -> int:
     def stop_all(_signum: int | None = None, _frame: Any = None) -> None:
         nonlocal stop_requested
         stop_requested = True
-        for process, _, _ in active.values():
+        for index, (process, _, _) in active.items():
             if process.poll() is None:
                 try:
+                    from ramair_execution_control import request_case_pause
+                    request_case_pause(Path(cases[index]["case_path"]), campaign=True)
+                    cases[index]["pause_requested"] = True
+                except (KeyError, FileNotFoundError):
                     process.send_signal(signal.SIGINT)
-                except ProcessLookupError:
-                    pass
 
     signal.signal(signal.SIGINT, stop_all)
     signal.signal(signal.SIGTERM, stop_all)
@@ -99,7 +101,8 @@ def run_campaign(manifest_path: Path) -> int:
                 requested_id = str(request.get("case_id") or "")
                 for index, (process, _, _) in list(active.items()):
                     if str(cases[index].get("case_id")) == requested_id and process.poll() is None:
-                        process.send_signal(signal.SIGINT)
+                        from ramair_execution_control import request_case_pause
+                        request_case_pause(Path(cases[index]["case_path"]), campaign=True)
                         cases[index]["pause_requested"] = True
             control_path.unlink(missing_ok=True)
 
@@ -110,10 +113,14 @@ def run_campaign(manifest_path: Path) -> int:
             handle.flush()
             handle.close()
             item = cases[index]
+            pending_rans = bool(item.get("case_path")) and (
+                Path(item["case_path"]) / "steadyInitialization/pending_stage.json"
+            ).is_file()
             item.update(
                 returncode=int(returncode),
-                status=("PAUSED" if item.get("pause_requested") or stop_requested else
+                status=("PAUSED" if item.get("pause_requested") or stop_requested or (returncode == 0 and pending_rans) else
                         "COMPLETED" if returncode == 0 else "FAILED"),
+                scientific_stage_pending=pending_rans,
                 finished_at=_stamp(),
                 wall_time_s=time.monotonic() - started,
             )
@@ -132,6 +139,8 @@ def run_campaign(manifest_path: Path) -> int:
                 environment["RAMAIR_CASE_RANK_LIMIT"] = str(item["n_cores"])
                 environment["RAMAIR_PARALLEL_WORKLOAD_MODE"] = "concurrent_throughput"
                 environment["RAMAIR_PARALLEL_CAMPAIGN_ID"] = str(state["campaign_id"])
+                if item.get("case_path"):
+                    (Path(item["case_path"])/".ramair_campaign_pause.json").unlink(missing_ok=True)
                 process = subprocess.Popen(
                     item["command"],
                     cwd=str(manifest.get("project_root") or manifest_path.parent),

@@ -804,14 +804,21 @@ def audit_steady_to_transient_continuity(
     }
 
 
+def preserve_archive_collision(destination: Path) -> None:
+    """Keep previous evidence when extending an already archived steady run."""
+    if destination.exists():
+        revision = destination.parent / "previous_versions" / str(time.time_ns())
+        revision.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(destination), str(revision / destination.name))
+
+
 def archive_stage_runtime_artifacts(case_dir: Path, archive: Path) -> list[str]:
     """Move generated stage logs/postprocessing without touching case inputs."""
     moved: list[str] = []
     post = case_dir / "postProcessing"
     if post.is_dir():
         destination = archive / "postProcessing"
-        if destination.exists():
-            shutil.rmtree(destination)
+        preserve_archive_collision(destination)
         shutil.move(str(post), str(destination))
         moved.append(str(destination))
     for pattern in (
@@ -830,8 +837,7 @@ def archive_stage_runtime_artifacts(case_dir: Path, archive: Path) -> list[str]:
         for path in case_dir.glob(pattern):
             if path.is_file():
                 destination = archive / path.name
-                if destination.exists():
-                    destination.unlink()
+                preserve_archive_collision(destination)
                 shutil.move(str(path), destination)
                 moved.append(str(destination))
     return moved
@@ -902,6 +908,7 @@ def archive_steady_outputs(
     times_archive = archive / "time_directories"
     times_archive.mkdir(parents=True, exist_ok=True)
     for _, path in positive:
+        preserve_archive_collision(times_archive / path.name)
         shutil.move(str(path), str(times_archive / path.name))
     archived_latest = times_archive / latest.name
     for field, item in field_continuity.items():
@@ -1059,7 +1066,23 @@ def load_pending_state(case_dir: Path) -> dict[str, Any]:
 def set_steady_extension(case_dir: Path, additional_iterations: int) -> dict[str, float]:
     positive = [(value, path) for value, path in numeric_time_dirs(case_dir) if value > 0.0]
     if not positive:
-        raise RuntimeError("Cannot extend SIMPLE: no positive steady iteration directory exists.")
+        pending = load_pending_state(case_dir)
+        archive = Path(pending["archive"])
+        archived = [(value, path) for value, path in numeric_time_dirs(archive/"time_directories") if value > 0 and float(value).is_integer()]
+        if not archived:
+            raise RuntimeError("Cannot extend SIMPLE: neither active nor archived restart fields exist.")
+        value, source = archived[-1]
+        required = ("U", "p", "nuTilda")
+        if any(not (source/name).is_file() and not (source/(name+".gz")).is_file() for name in required):
+            raise RuntimeError(f"Archived SIMPLE checkpoint is incomplete: {source}")
+        destination = case_dir/source.name
+        shutil.copytree(source, destination)
+        if (archive/"postProcessing").is_dir() and not (case_dir/"postProcessing").exists():
+            shutil.copytree(archive/"postProcessing", case_dir/"postProcessing")
+        (case_dir/"steadyInitialization/restored_checkpoint.json").write_text(json.dumps({"source":str(source),"destination":str(destination),"iteration":value,"archive_preserved":True},indent=2),encoding="utf-8")
+        positive = [(value,destination)]
+    if any(not float(value).is_integer() for value,_ in positive):
+        raise RuntimeError("Active transient times cannot be interpreted as SIMPLE iterations; archive them before restoring RANS.")
     latest = positive[-1][0]
     end_iteration = latest + max(1, int(additional_iterations))
     control = case_dir / "system" / "controlDict"
@@ -1067,12 +1090,27 @@ def set_steady_extension(case_dir: Path, additional_iterations: int) -> dict[str
     text = re.sub(r"\bstartFrom\s+\w+\s*;", "startFrom       latestTime;", text, count=1)
     text = re.sub(r"\bstartTime\s+[0-9.eE+-]+\s*;", f"startTime       {latest:.12g};", text, count=1)
     text = re.sub(r"\bendTime\s+[0-9.eE+-]+\s*;", f"endTime         {end_iteration:.12g};", text, count=1)
+    # SIMPLE uses unit iteration time. Align writes to the absolute target so
+    # a short extension cannot finish successfully without a restart checkpoint.
+    interval_match = re.search(r"\bwriteInterval\s+([0-9.eE+-]+)\s*;", text)
+    nominal_interval = max(1, int(float(interval_match.group(1)))) if interval_match else 500
+    final_write_interval = math.gcd(nominal_interval, int(end_iteration))
+    for name, value in (("writeControl", "runTime"), ("writeInterval", str(final_write_interval)), ("stopAt", "endTime")):
+        pattern = rf"\b{name}\s+[^;]+;"
+        entry = f"{name} {value};"
+        text = re.sub(pattern, entry, text, count=1) if re.search(pattern, text) else text+"\n"+entry+"\n"
     control.write_text(text, encoding="utf-8")
-    return {"latest_iteration_before_extension": latest, "new_end_iteration": end_iteration}
+    return {"latest_iteration_before_extension": latest, "new_end_iteration": end_iteration,
+            "write_interval_iterations": final_write_interval}
 
 
 def reset_transient_time_origin(case_dir: Path) -> dict[str, Any]:
     """Start PIMPLE at physical t=0 while retaining transferred steady fields."""
+    uniform = case_dir / "0/uniform"
+    if uniform.is_dir():
+        destination = case_dir / "steadyInitialization" / ("zero_uniform_before_transient_"+str(time.time_ns()))
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(uniform), str(destination))
     control = case_dir / "system" / "controlDict"
     text = control.read_text(encoding="utf-8", errors="ignore")
     text = re.sub(r"\bstartFrom\s+\w+\s*;", "startFrom       startTime;", text, count=1)
@@ -1204,10 +1242,18 @@ def run_transient_phase_plan(
     phase_d_gate: dict[str, Any] | None = None
     current_times = [value for value, _ in numeric_time_dirs(args.case) if value > 0.0]
     latest_time_s = max(current_times, default=0.0)
-    completion_tolerance_s = max(1.0e-12, abs(target_dt_star * convective_second) * 0.25)
+    # A short user-defined phase must never be considered complete at t=0.
+    # Use serialization tolerance, not a quarter of the nominal time step.
+    minimum_phase_star = min(float(p["duration_time_star"]) for p in stages)
+    if minimum_phase_star <= 0:
+        raise ValueError("Every transient phase must have a positive duration")
+    completion_tolerance_s = max(1.0e-12, min(target_dt_star, minimum_phase_star)*convective_second*1e-6)
     for index, phase in enumerate(stages):
+        if (args.case / ".ramair_campaign_pause.json").is_file():
+            phase_reports.append({"stage": phase.get("stage"), "status": "STOPPED_PARTIAL", "reason": "campaign_pause_requested"})
+            return 0, phase_reports
         duration_star = float(phase["duration_time_star"])
-        dt_star = target_dt_star * float(phase.get("dt_factor", 1.0))
+        dt_star = min(target_dt_star * float(phase.get("dt_factor", 1.0)), duration_star / 4.0)
         start_star = elapsed_star
         elapsed_star += duration_star
         stage = {
@@ -1218,13 +1264,14 @@ def run_transient_phase_plan(
             "end_s": elapsed_star * convective_second,
             "steps": max(1, int(math.ceil(duration_star / dt_star))),
             "adjust_time_step": bool(plan.get("adjust_time_step", True)),
-            "maxCo": float(plan.get("maxCo", 50.0)),
+            "maxCo": float(phase.get("maxCo", plan.get("maxCo", 50.0))),
             "maxDeltaT_s": dt_star * convective_second,
             "write_interval_s": field_write_star * convective_second,
             "purge_write": retained_snapshots,
             "retain_outer_residual_control": bool(plan.get("outer_residual_control_enabled", True)),
+            "write_policy": phase.get("write_policy"),
         }
-        if latest_time_s >= float(stage["end_s"]) - completion_tolerance_s:
+        if current_times and latest_time_s >= float(stage["end_s"]) - completion_tolerance_s:
             phase_reports.append({
                 "phase": str(phase["stage"]),
                 "sampling": bool(phase.get("sampling", False)),
@@ -1238,6 +1285,8 @@ def run_transient_phase_plan(
             str(phase.get("scheme") or "").lower() == "backward"
             or str(next_phase.get("scheme") or "").lower() == "backward"
         )
+        if phase.get("write_policy"):
+            preserve_history = phase["write_policy"] == "restart_history"
         configuration = configure_stage(
             args.case,
             stage,
@@ -1251,7 +1300,8 @@ def run_transient_phase_plan(
             include_transient_convergence=False,
             include_resume_extension=False,
             reconstruction_mode=(
-                "history" if preserve_history and bool(stage.get("adjust_time_step", False))
+                "all" if configuration.get("production_capture")
+                else "history" if preserve_history and bool(stage.get("adjust_time_step", False))
                 else "latest"
             ),
         )
@@ -1274,6 +1324,10 @@ def run_transient_phase_plan(
             return int(completed.returncode), phase_reports
         current_times = [value for value, _ in numeric_time_dirs(args.case) if value > 0.0]
         latest_time_s = max(current_times, default=latest_time_s)
+        if latest_time_s < float(stage["end_s"]) - completion_tolerance_s:
+            phase_report["run_status"]["status"] = "STOPPED_PARTIAL"
+            phase_report["reason"] = "Solver exited before the phase physical end time"
+            return 0, phase_reports
         if str(phase["stage"]).upper() == "D":
             phase_d_gate = _phase_d_steady_equivalence(
                 args.case,
@@ -1422,6 +1476,9 @@ def main() -> int:
         raise FileNotFoundError(f"Invalid OpenFOAM case: {args.case}")
     positive_times = [value for value, _ in numeric_time_dirs(args.case) if value > 0.0]
     pending_exists = pending_state_path(args.case).is_file()
+    # A stopped SIMPLE iteration directory is not URANS physical time.
+    if args.resume and pending_exists and args.steady_decision == "auto":
+        args.steady_decision = "extend"
     recovered_failed_stage: dict[str, Any] | None = None
     if (
         args.run
@@ -1705,26 +1762,34 @@ def main() -> int:
             steady_requested
             or (
                 resolving_pending
-                and args.steady_decision == "start-transient"
+                and args.steady_decision in {"start-transient", "extend"}
             )
         ):
             raise RuntimeError(
                 "--steady-only requires a new SIMPLE run or an explicit "
-                "start-transient decision for a pending bounded state"
+                "extend/start-transient decision for a pending bounded state"
             )
-        report["steady_transfer"] = archive_steady_outputs(
-            args.case,
-            archive,
-            transfer_to_transient_zero=True,
-            paraview_snapshot_count=args.steady_paraview_snapshots,
+        # RANS-only must retain its iteration directories. Transferring fields
+        # to transient t=0 here would lose the continuation's iteration origin.
+        latest_iteration = max((value for value, _ in numeric_time_dirs(args.case)), default=0.0)
+        report["steady_paraview_preview"] = create_steady_paraview_case(
+            args.case, archive,
+            [(value, path) for value, path in numeric_time_dirs(args.case) if value > 0.0],
+            args.steady_paraview_snapshots,
         )
         restore_transient_system(args.case, archive)
-        report["transient_time_origin"] = reset_transient_time_origin(args.case)
-        pending_state_path(args.case).unlink(missing_ok=True)
+        write_pending_state(args.case, {
+            "status": "RANS_CHECKPOINT_READY", "archive": str(archive.resolve()),
+            "latest_iteration": latest_iteration, "transition": transition or {},
+            "available_actions": ["extend", "start-transient", "finish"],
+            "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        })
         report.update(
             status="STEADY_CHECKPOINT_READY",
             transient_started=False,
-            available_actions=[],
+            latest_iteration=latest_iteration,
+            data_preserved_for_resume=True,
+            available_actions=["extend", "start-transient", "finish"],
             finished_at=time.strftime("%Y-%m-%d %H:%M:%S"),
         )
         (args.case / "staged_run_status.json").write_text(

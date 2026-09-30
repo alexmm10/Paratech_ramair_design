@@ -111,7 +111,7 @@ def staged_command(entry: dict[str, Any], resume: bool) -> list[str]:
     )
     command.append(
         "--renumber-before-decompose"
-        if bool(entry.get("renumber_before_decompose", True))
+        if bool(entry.get("renumber_before_decompose", False))
         else "--no-renumber-before-decompose"
     )
     phase_plan = entry.get("transient_phase_plan")
@@ -121,6 +121,11 @@ def staged_command(entry: dict[str, Any], resume: bool) -> list[str]:
     if execution_mode == "rans_only":
         command += ["--steady-initialization", "--steady-only"]
         command += ["--steady-timeout-min", str(float(entry.get("steady_timeout_min", 180.0)))]
+        if resume:
+            command.append("--resume")
+            if (case / "steadyInitialization/pending_stage.json").is_file():
+                command += ["--steady-decision", "extend"]
+        command += ["--steady-additional-iterations", str(int(entry.get("steady_additional_iterations", 500)))]
     elif bool(entry.get("steady_initialization", True)) and not (resume and numeric_times(case)):
         command.append("--steady-initialization")
         command += ["--steady-timeout-min", str(float(entry.get("steady_timeout_min", 120.0)))]
@@ -129,7 +134,7 @@ def staged_command(entry: dict[str, Any], resume: bool) -> list[str]:
         extension = entry.get("resume_additional_time_star")
         if extension is not None:
             command += ["--resume-additional-time-star", str(float(extension))]
-    if bool(entry.get("continue_transient_after_steady_timeout", False)):
+    if execution_mode != "rans_only" and bool(entry.get("continue_transient_after_steady_timeout", False)):
         command.append("--continue-transient-after-steady-timeout")
     return command
 
@@ -166,6 +171,23 @@ def _stop_timed_out_process(process: subprocess.Popen[Any], case: Path) -> None:
 
 def run_queue(resume: bool = False) -> int:
     queue = read_json(QUEUE, {}) or {}
+    original_root = str(queue.get("original_project_root") or "")
+    if original_root and original_root != str(ROOT):
+        def rebase(value):
+            if isinstance(value, str) and (value == original_root or value.startswith(original_root + "/")):
+                return str(ROOT) + value[len(original_root):]
+            if isinstance(value, list):
+                return [rebase(item) for item in value]
+            if isinstance(value, dict):
+                return {key: rebase(item) for key, item in value.items()}
+            return value
+        for entry in queue.get("cases") or []:
+            for metadata in (ROOT / str(entry["case"])).rglob("*.json"):
+                value = read_json(metadata, None)
+                if value is not None:
+                    write_json(metadata, rebase(value))
+        queue["original_project_root"] = str(ROOT)
+        write_json(QUEUE, queue)
     entries = list(queue.get("cases") or [])
     if not entries:
         raise RuntimeError(f"No cases in {QUEUE}")
@@ -176,7 +198,9 @@ def run_queue(resume: bool = False) -> int:
     for index, entry in enumerate(entries):
         case_id = str(entry["id"])
         previous = dict(status["cases"].get(case_id) or {})
-        if previous.get("status") == "COMPLETED":
+        # An explicit resume extends a retained checkpoint. Ordinary run remains
+        # idempotent and skips completed entries.
+        if previous.get("status") == "COMPLETED" and not resume:
             continue
         if STOP.is_file():
             break
@@ -185,7 +209,7 @@ def run_queue(resume: bool = False) -> int:
         if lifecycle.get("state") == ExecutionState.RUNNING.value:
             reconcile_solver_record(case)
             lifecycle = load_execution_state(case)
-        if lifecycle.get("state") == ExecutionState.COMPLETED.value:
+        if lifecycle.get("state") == ExecutionState.COMPLETED.value and not resume:
             status["cases"][case_id] = {
                 **previous,
                 "status": ExecutionState.COMPLETED.value,
@@ -290,7 +314,7 @@ def postprocess_queue() -> int:
     rc = 0
     for entry in queue.get("cases") or []:
         case = (ROOT / str(entry["case"])).resolve()
-        output = ROOT / "Remote Postprocess" / str(entry["id"])
+        output = case / "Postprocess"
         command = [
             sys.executable,
             str(ROOT / "CFD_2D/scripts/ramair_2d_postprocess.py"),
@@ -302,7 +326,17 @@ def postprocess_queue() -> int:
             "--run-openfoam-postprocess",
             "--automatic-paraview-products",
         ]
+        if str(entry.get("execution_mode")) == "rans_only":
+            command += ["--simulation-mode", "RANS"]
         completed = subprocess.run(command, cwd=str(ROOT), check=False)
+        if bool(entry.get("workflow_test")):
+            for summary in output.rglob("stage_summary.json"):
+                value = read_json(summary, {})
+                value["diagnostic_workflow_test"] = True
+                value["scientific_accepted"] = False
+                value["processing_status"] = value.get("status")
+                value["status"] = "PROCESSED_PARTIAL"
+                write_json(summary, value)
         rc = max(rc, int(completed.returncode))
     return rc
 
@@ -354,6 +388,8 @@ def collect_results() -> int:
         "schema_version": 1,
         "package_id": package_id,
         "package_scope": queue.get("package_scope", "generic"),
+        "remote_project_root": str(ROOT),
+        "release": queue.get("release", {}),
         "created_at": time.time(),
         "cases": case_rows,
         "files": files,

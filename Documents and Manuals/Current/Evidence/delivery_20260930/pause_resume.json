@@ -1,0 +1,106 @@
+{
+  "pause_requested": true,
+  "pause_returncode": 0,
+  "before_resume": [
+    {
+      "alpha": 0.0,
+      "case": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_coarse/OpenFOAM/Final_Delivery_RANS/Angles/alpha_p0p000",
+      "initiated": true,
+      "rans_iteration": 22,
+      "rans_stable": false,
+      "RANS": "Iteración 22 (Pendiente de revisar)",
+      "urans_time_s": 0.0,
+      "URANS": "t = 0 s (No iniciado)",
+      "Estado": "Pendiente de continuación"
+    },
+    {
+      "alpha": 8.0,
+      "case": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_coarse/OpenFOAM/Final_Delivery_RANS/Angles/alpha_p8p000",
+      "initiated": true,
+      "rans_iteration": 22,
+      "rans_stable": false,
+      "RANS": "Iteración 22 (Pendiente de revisar)",
+      "urans_time_s": 0.0,
+      "URANS": "t = 0 s (No iniciado)",
+      "Estado": "Pendiente de continuación"
+    },
+    {
+      "alpha": 0.0,
+      "case": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_medium/OpenFOAM/RANS_Final_Delivery_2x2_1790782808808213238/Angles/alpha_p0p000",
+      "initiated": false,
+      "rans_iteration": 0,
+      "rans_stable": false,
+      "RANS": "Iteración 0 (No iniciado)",
+      "urans_time_s": 0.0,
+      "URANS": "t = 0 s (No iniciado)",
+      "Estado": "Preparado"
+    },
+    {
+      "alpha": 8.0,
+      "case": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_medium/OpenFOAM/RANS_Final_Delivery_2x2_1790782808808213238/Angles/alpha_p8p000",
+      "initiated": false,
+      "rans_iteration": 0,
+      "rans_stable": false,
+      "RANS": "Iteración 0 (No iniciado)",
+      "urans_time_s": 0.0,
+      "URANS": "t = 0 s (No iniciado)",
+      "Estado": "Preparado"
+    }
+  ],
+  "mesh_sha256_before": {
+    "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_coarse/OpenFOAM/Final_Delivery_RANS/Angles/alpha_p0p000": "530d41924328c7375e740a71ec0c13ae62ed9e7597ae34c37bd41308f6aef2b6",
+    "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_coarse/OpenFOAM/Final_Delivery_RANS/Angles/alpha_p8p000": "530d41924328c7375e740a71ec0c13ae62ed9e7597ae34c37bd41308f6aef2b6",
+    "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_medium/OpenFOAM/RANS_Final_Delivery_2x2_1790782808808213238/Angles/alpha_p0p000": "2f49cb6f83ff541b1289e57707894df21659efeb650597571137d3b108412e1d",
+    "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_medium/OpenFOAM/RANS_Final_Delivery_2x2_1790782808808213238/Angles/alpha_p8p000": "2f49cb6f83ff541b1289e57707894df21659efeb650597571137d3b108412e1d"
+  },
+  "queue": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Convergence/RANS/Final_Delivery_2x2/Queues/queue_1790782809206459798.json",
+  "resume_returncode": 0,
+  "after_resume": [
+    {
+      "alpha": 0.0,
+      "case": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_coarse/OpenFOAM/Final_Delivery_RANS/Angles/alpha_p0p000",
+      "initiated": true,
+      "rans_iteration": 42,
+      "rans_stable": false,
+      "RANS": "Iteración 42 (Pendiente de revisar)",
+      "urans_time_s": 0.0,
+      "URANS": "t = 0 s (No iniciado)",
+      "Estado": "Pendiente de continuación"
+    },
+    {
+      "alpha": 8.0,
+      "case": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_coarse/OpenFOAM/Final_Delivery_RANS/Angles/alpha_p8p000",
+      "initiated": true,
+      "rans_iteration": 42,
+      "rans_stable": false,
+      "RANS": "Iteración 42 (Pendiente de revisar)",
+      "urans_time_s": 0.0,
+      "URANS": "t = 0 s (No iniciado)",
+      "Estado": "Pendiente de continuación"
+    },
+    {
+      "alpha": 0.0,
+      "case": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_medium/OpenFOAM/RANS_Final_Delivery_2x2_1790782808808213238/Angles/alpha_p0p000",
+      "initiated": true,
+      "rans_iteration": 80,
+      "rans_stable": false,
+      "RANS": "Iteración 80 (Pendiente de revisar)",
+      "urans_time_s": 0.0,
+      "URANS": "t = 0 s (No iniciado)",
+      "Estado": "STEADY_CHECKPOINT_READY"
+    },
+    {
+      "alpha": 8.0,
+      "case": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_medium/OpenFOAM/RANS_Final_Delivery_2x2_1790782808808213238/Angles/alpha_p8p000",
+      "initiated": true,
+      "rans_iteration": 80,
+      "rans_stable": false,
+      "RANS": "Iteración 80 (Pendiente de revisar)",
+      "urans_time_s": 0.0,
+      "URANS": "t = 0 s (No iniciado)",
+      "Estado": "STEADY_CHECKPOINT_READY"
+    }
+  ],
+  "mesh_order_preserved": true,
+  "study": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Convergence/RANS/Final_Delivery_2x2"
+}

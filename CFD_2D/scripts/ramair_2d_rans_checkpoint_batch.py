@@ -256,7 +256,7 @@ def delete_active_base(
             )
             archived_to = (
                 project_root
-                / "Previous Versions/ValidationLab"
+                / "Data Archive/ValidationLab"
                 / f"{mesh_id}_{suffix}_{stamp}"
             )
             archived_to.parent.mkdir(parents=True, exist_ok=True)
@@ -761,32 +761,20 @@ def checkpoint_status(project_root: Path, mesh_id: str) -> dict[str, Any]:
             f"expected={expected_restart_alpha:.6g} deg"
         )
     checkpoint_poly = checkpoint_case / "constant/polyMesh"
-    missing_poly = [name for name in POLYMESH_FILES if not (checkpoint_poly / name).is_file()]
+    missing_poly = [name for name in POLYMESH_FILES if _field_path(checkpoint_poly,name) is None]
     if missing_poly:
-        source_case = Path(str(manifest.get("source_case") or ""))
-        source_poly = source_case / "constant/polyMesh"
-        source_identity = (
-            checkpoint_mesh_identity(source_case, Path(str(restart_zero)))
-            if restart_zero and source_case.is_dir()
-            else {}
-        )
-        if source_identity.get("status") == "READY":
-            checkpoint_poly.mkdir(parents=True, exist_ok=True)
-            for name in POLYMESH_FILES:
-                source = source_poly / name
-                destination = checkpoint_poly / name
-                if destination.exists() and source.samefile(destination):
-                    continue
-                shutil.copy2(source, destination)
-            compatibility_warnings.append(
-                "CHECKPOINT_POLYMESH_RESTORED_FROM_FIELD_COUNT_AND_PATCH_VERIFIED_SOURCE_CASE"
-            )
+        # Equal cell counts do not prove equal ordering. A read-only status
+        # query must never overwrite the mesh attached to saved fields.
+        compatibility_warnings.append("CHECKPOINT_MESH_MISSING_RESTORE_EXACT_ARCHIVED_MESH_REQUIRED")
     checkpoint_identity: dict[str, Any] = {}
     if restart_zero and Path(str(restart_zero)).is_dir() and checkpoint_case.is_dir():
         checkpoint_identity = checkpoint_mesh_identity(
             checkpoint_case,
             Path(str(restart_zero)),
         )
+        if checkpoint_identity.get("status") != "READY":
+            status = "CHECKPOINT_STALE_MESH_CHANGED"
+            compatibility_warnings.append("CHECKPOINT_MESH_OR_FIELDS_INVALID_OR_AMBIGUOUS")
     if manifest.get("mesh_hash") != contract["mesh_hash"]:
         if checkpoint_identity.get("status") == "READY":
             compatibility_warnings.append(
@@ -911,6 +899,7 @@ def _latest_restart_state(case: Path) -> tuple[int, Path] | None:
             except ValueError:
                 continue
             candidates.append((iteration, path))
+    candidates = [(value,path) for value,path in candidates if value>0 and all(_field_path(path,name) for name in REQUIRED_BASE_FIELDS)]
     return max(candidates, key=lambda item: item[0]) if candidates else None
 
 
@@ -1092,6 +1081,10 @@ def _configure_simple_template(case: Path, rans: dict[str, Any]) -> None:
     )
     control = _replace_foam_entry(control, "purgeWrite", "2")
     control_path.write_text(control, encoding="utf-8")
+    stage_path = template / "stage_config.json"
+    stage_config = read_json(stage_path, {}) or {}
+    stage_config.update(maximum_iterations=int(rans.get("maximum_iterations", 20000)), residual_control=dict(rans.get("residual_tolerances") or {}))
+    write_json_atomic(stage_path, stage_config)
 
     solution_path = template / "fvSolution"
     solution = solution_path.read_text(encoding="utf-8")
@@ -1290,11 +1283,19 @@ def _numeric_iterations(case: Path) -> list[tuple[int, Path]]:
 
 
 def _pending_latest_iteration(case: Path) -> int:
-    return int(
-        authoritative_simple_iteration(case).get(
-            "absolute_simple_iteration", 0
-        )
-    )
+    # A log can be ahead of the last write after an interrupted run. Only
+    # complete restart fields determine where an extension actually starts.
+    roots = [case, *[p/"time_directories" for p in (case/"steadyInitialization/history").glob("run_*")]]
+    iterations = []
+    for folder in roots:
+        if not folder.is_dir(): continue
+        for path in folder.iterdir():
+            if not path.is_dir(): continue
+            try: value = float(path.name)
+            except ValueError: continue
+            if value > 0 and value.is_integer() and all(_field_path(path, name) for name in REQUIRED_BASE_FIELDS):
+                iterations.append(int(value))
+    return max(iterations, default=0)
 
 
 def _runner_command(
@@ -1335,12 +1336,15 @@ def _runner_command(
     ]
     if decision:
         command += ["--steady-decision", decision]
+        if decision == "extend": command.append("--resume")
     else:
         command.append("--steady-initialization")
         if not bool(rans.get("potentialFoam", True)):
             command.append("--no-steady-potential-foam")
     if extension is not None:
         command += ["--steady-additional-iterations", str(int(extension))]
+    command.append("--automatic-core-selection" if rans.get("automatic_core_selection", True) else "--no-automatic-core-selection")
+    command.append("--renumber-before-decompose" if rans.get("renumber_before_decompose", True) else "--no-renumber-before-decompose")
     if run:
         command.append("--run")
     return command
@@ -1668,6 +1672,7 @@ def _execute_targeted_rans_blocks(
             extension=extension,
             maximum=maximum,
         )
+        if manual_extension_target is not None: target = int(manual_extension_target)
         if before > 0:
             remaining = max(0, target - before)
             if remaining == 0:
@@ -1722,6 +1727,7 @@ def _execute_targeted_rans_blocks(
             elapsed_seconds=elapsed,
         )
         staged = read_json(case / "staged_run_status.json", {}) or {}
+        runner_state = read_json(case / "run_status.json", {}) or {}
         explicit_stop = _stop_requested(project_root)
         stop_source = _simple_stop_request_source(
             case,
@@ -1732,7 +1738,7 @@ def _execute_targeted_rans_blocks(
             return_code=code,
             absolute_iteration=after,
             block_target_iteration=target,
-            staged_status=str(staged.get("status") or ""),
+            staged_status=str(runner_state.get("status") if runner_state.get("status") in {"TIMEOUT_PARTIAL", "RUN_TIMEOUT_PARTIAL", "RUN_DIVERGED"} else staged.get("status") or ""),
             explicit_stop_requested=explicit_stop,
             environment_failure=_environment_failure(
                 {
@@ -1963,6 +1969,11 @@ def _execute_base_unlocked(
     existing_iteration = (
         _pending_latest_iteration(case) if case.is_dir() else 0
     )
+    if existing_iteration > 0:
+        restart = _latest_restart_state(case)
+        identity = checkpoint_mesh_identity(case,restart[1]) if restart else {}
+        if identity.get("status") != "READY":
+            raise RuntimeError(f"{mesh_id}: checkpoint mesh/fields are missing or ambiguous; restore the matching mesh before running. {identity.get('ambiguous_mesh_files', [])}")
     if overwrite and existing_iteration > 0:
         raise RuntimeError(
             f"{mesh_id}: a RANS solution already exists at iteration "
@@ -2037,7 +2048,15 @@ def _execute_base_unlocked(
             "config_hash": sha256_json(current_rans),
             "created_at": utc_stamp(),
         }
-    rans = dict(resolved_run.get("effective_rans") or current_rans)
+    # A user-selected continuation applies the currently selected numerics;
+    # preserve the preceding revision so a change is auditable, never hidden.
+    rans = dict(current_rans)
+    if resolved_run.get("effective_rans") != rans and resolved_run_path.exists():
+        previous = checkpoint / "configuration_history" / (str(time.time_ns())+"_resolved_run_config.json")
+        previous.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(resolved_run_path, previous)
+    resolved_run["effective_rans"] = rans
+    resolved_run["config_hash"] = sha256_json(rans)
     _configure_simple_template(case, rans)
     write_json_atomic(resolved_run_path, resolved_run)
     audit = audit_simple_case_configuration(
@@ -2853,6 +2872,10 @@ def execute_selection_queue(
     write_json_atomic(state_path, state)
     first_pending_index: int | None = None
     for index, requested in enumerate(ordered):
+        if run and _stop_requested(project_root):
+            state.update(status="PAUSED_BY_USER", current_index=index)
+            write_json_atomic(state_path, state)
+            return state
         mesh_id = str(requested["mesh_id"])
         status = checkpoint_status(project_root, mesh_id)
         item = {**requested, **prior_cases.get(str(requested["requested_case"]), {})}
@@ -3206,4 +3229,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

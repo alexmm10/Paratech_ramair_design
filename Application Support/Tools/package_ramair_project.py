@@ -10,9 +10,11 @@ import sys
 import time
 import zipfile
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from release_identity import release_identity
 
 
-ALWAYS_EXCLUDED_NAMES = {"__pycache__", ".pytest_cache", ".git", ".mypy_cache"}
+ALWAYS_EXCLUDED_NAMES = {"__pycache__", ".pytest_cache", ".git", ".mypy_cache", ".history", "Dockerfile", "docker-compose.yml", ".dockerignore"}
 GENERATED_PREFIXES = {
     ".venv-cfd2d-ui",
     ".venv-cfd2d",
@@ -21,7 +23,19 @@ GENERATED_PREFIXES = {
     "Application Support/Reports",
     "Application Support/Packages",
     "Application Support/Temp",
+    "Data Archive",
     "Previous Versions",
+    "logs",
+    "tmp",
+    "Workspaces",
+    "CATIA/Models",
+    "CATIA/Inputs",
+    "CFD_2D/experimental_meshes",
+    "CFD_2D/validation_studies",
+    "CFD_2D/scratch",
+    "Airfoil Profiles/Designs",
+    "Airfoil Profiles/.settings",
+    "Application Support/Tools/xfoil",
     "Results",
     "CFD_2D/app_state",
     "CFD_2D/meshes",
@@ -45,15 +59,22 @@ REQUIRED_ARCHIVE_MEMBERS = {
     "DESIGN APP/CFD_2D/scripts/ramair_2d_openfoam_staged_runner.py",
     "DESIGN APP/CFD_2D/scripts/ramair_2d_postprocess.py",
     "DESIGN APP/Documents and Manuals/Application/bootstrap_cfd2d_app_wsl.sh",
-    "DESIGN APP/Documents and Manuals/OpenFOAM/OpenFOAMUserGuide-A4.pdf",
     "DESIGN APP/CFD_2D/scripts/ramair_2d_inlet_designer.py",
     "DESIGN APP/CFD_2D/CFD_2D_inputs/config/cfd2d_inlet_design_config.json",
-    "DESIGN APP/Application Support/Tools/xfoil/linux/xfoil",
-    "DESIGN APP/Application Support/Tools/xfoil/source/Xfoil699src.zip",
-    "DESIGN APP/Application Support/Tools/xfoil/source/xfoil699-gfortran-eof.patch",
     "DESIGN APP/Documents and Manuals/Application/build_xfoil_699_wsl.sh",
 }
 CRITICAL_SOURCE_MEMBERS = (
+    "CFD_2D/scripts/ramair_2d_checkpoint_integrity.py",
+    "CFD_2D/scripts/ramair_2d_urans_review.py",
+    "CFD_2D/scripts/ramair_2d_space_time_convergence.py",
+    "CFD_2D/scripts/ramair_production_capture.py",
+    "CFD_2D/scripts/openfoam_history.py",
+    "CFD_2D/app/workspace_app.py",
+    "CFD_2D/scripts/ramair_workspace.py",
+    "CFD_2D/scripts/ramair_profile_library.py",
+    "CFD_2D/scripts/ramair_workspace_jobs.py",
+    "CFD_2D/scripts/ramair_workspace_lifecycle.py",
+    "CFD_2D/scripts/ramair_workspace_storage.py",
     "preprocess_ramair_main.py",
     "Generate_RamAir_Canopy_MAIN.CATScript",
     "run_ramair_cfd2d_app.py",
@@ -62,6 +83,9 @@ CRITICAL_SOURCE_MEMBERS = (
     "CFD_2D/scripts/ramair_2d_openfoam_case_writer.py",
     "CFD_2D/scripts/ramair_2d_openfoam_staged_runner.py",
     "CFD_2D/scripts/ramair_2d_postprocess.py",
+    "CFD_2D/scripts/ramair_suspension_layout.py",
+    "CFD_2D/scripts/ramair_rans_mesh_study.py",
+    "CFD_2D/app/workspace_rans_convergence.py",
 )
 
 
@@ -75,6 +99,8 @@ def excluded(relative: Path, include_generated: bool, output: Path, source: Path
     if any(part in ALWAYS_EXCLUDED_NAMES or part.endswith(".pyc") for part in relative.parts):
         return True
     text = relative.as_posix()
+    if not include_generated and relative.suffix.lower() in {".pdf", ".msh", ".vtu", ".vtk", ".foam", ".catpart", ".catproduct"}:
+        return True
     if not include_generated and any(text == prefix or text.startswith(prefix + "/") for prefix in GENERATED_PREFIXES):
         return True
     try:
@@ -132,6 +158,8 @@ def main() -> int:
     ).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     files, skipped_unreadable = collect_files(source, output, args.include_generated)
+    if skipped_unreadable:
+        raise RuntimeError("Package incomplete: unreadable source files")
     manifest = {
         "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "source_project_name": source.name,
@@ -140,6 +168,8 @@ def main() -> int:
         "skipped_unreadable": skipped_unreadable,
         "excluded_generated_prefixes": [] if args.include_generated else sorted(GENERATED_PREFIXES),
         "openfoam_reference_version": "14",
+        "release": release_identity(source),
+        "files": {path.relative_to(source).as_posix(): {"sha256": sha256(path), "bytes": path.stat().st_size} for path in sorted(files)},
         "critical_source_sha256": {
             relative: sha256(source / relative)
             for relative in CRITICAL_SOURCE_MEMBERS

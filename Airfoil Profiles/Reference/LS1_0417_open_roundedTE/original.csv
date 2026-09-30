@@ -1,0 +1,197 @@
+point_id,x_norm,z_norm,x_m,z_m,source_section,source_order,variant,boundary_role,notes
+1,1.0000000000,-0.0007431670,1.0000000000,-0.0007431670,UPPER,1,open_ramair_validation_1m,trailing_edge,from 2D profile source
+2,0.9942769100,0.0008022190,0.9942769100,0.0008022190,UPPER,2,open_ramair_validation_1m,upper_wall,from 2D profile source
+3,0.9848888010,0.0033456580,0.9848888010,0.0033456580,UPPER,3,open_ramair_validation_1m,upper_wall,from 2D profile source
+4,0.9744691960,0.0061817450,0.9744691960,0.0061817450,UPPER,4,open_ramair_validation_1m,upper_wall,from 2D profile source
+5,0.9629698900,0.0093234330,0.9629698900,0.0093234330,UPPER,5,open_ramair_validation_1m,upper_wall,from 2D profile source
+6,0.9504078550,0.0127553590,0.9504078550,0.0127553590,UPPER,6,open_ramair_validation_1m,upper_wall,from 2D profile source
+7,0.9368622280,0.0164382540,0.9368622280,0.0164382540,UPPER,7,open_ramair_validation_1m,upper_wall,from 2D profile source
+8,0.9224379570,0.0203387770,0.9224379570,0.0203387770,UPPER,8,open_ramair_validation_1m,upper_wall,from 2D profile source
+9,0.9072869880,0.0244239870,0.9072869880,0.0244239870,UPPER,9,open_ramair_validation_1m,upper_wall,from 2D profile source
+10,0.8916013410,0.0286528090,0.8916013410,0.0286528090,UPPER,10,open_ramair_validation_1m,upper_wall,from 2D profile source
+11,0.8755846840,0.0329701080,0.8755846840,0.0329701080,UPPER,11,open_ramair_validation_1m,upper_wall,from 2D profile source
+12,0.8594120610,0.0373146220,0.8594120610,0.0373146220,UPPER,12,open_ramair_validation_1m,upper_wall,from 2D profile source
+13,0.8431976610,0.0416387500,0.8431976610,0.0416387500,UPPER,13,open_ramair_validation_1m,upper_wall,from 2D profile source
+14,0.8270055560,0.0459153760,0.8270055560,0.0459153760,UPPER,14,open_ramair_validation_1m,upper_wall,from 2D profile source
+15,0.8109319560,0.0501132660,0.8109319560,0.0501132660,UPPER,15,open_ramair_validation_1m,upper_wall,from 2D profile source
+16,0.7950114070,0.0541798970,0.7950114070,0.0541798970,UPPER,16,open_ramair_validation_1m,upper_wall,from 2D profile source
+17,0.7791352490,0.0581318380,0.7791352490,0.0581318380,UPPER,17,open_ramair_validation_1m,upper_wall,from 2D profile source
+18,0.7633197480,0.0619956040,0.7633197480,0.0619956040,UPPER,18,open_ramair_validation_1m,upper_wall,from 2D profile source
+19,0.7476609160,0.0657499040,0.7476609160,0.0657499040,UPPER,19,open_ramair_validation_1m,upper_wall,from 2D profile source
+20,0.7322098680,0.0693571770,0.7322098680,0.0693571770,UPPER,20,open_ramair_validation_1m,upper_wall,from 2D profile source
+21,0.7169500360,0.0727942250,0.7169500360,0.0727942250,UPPER,21,open_ramair_validation_1m,upper_wall,from 2D profile source
+22,0.7018331130,0.0760603440,0.7018331130,0.0760603440,UPPER,22,open_ramair_validation_1m,upper_wall,from 2D profile source
+23,0.6868459430,0.0791649750,0.6868459430,0.0791649750,UPPER,23,open_ramair_validation_1m,upper_wall,from 2D profile source
+24,0.6720069040,0.0820982750,0.6720069040,0.0820982750,UPPER,24,open_ramair_validation_1m,upper_wall,from 2D profile source
+25,0.6573082630,0.0848451820,0.6573082630,0.0848451820,UPPER,25,open_ramair_validation_1m,upper_wall,from 2D profile source
+26,0.6427066360,0.0873996680,0.6427066360,0.0873996680,UPPER,26,open_ramair_validation_1m,upper_wall,from 2D profile source
+27,0.6281528120,0.0897746900,0.6281528120,0.0897746900,UPPER,27,open_ramair_validation_1m,upper_wall,from 2D profile source
+28,0.6136482990,0.0919862140,0.6136482990,0.0919862140,UPPER,28,open_ramair_validation_1m,upper_wall,from 2D profile source
+29,0.5992449160,0.0940136550,0.5992449160,0.0940136550,UPPER,29,open_ramair_validation_1m,upper_wall,from 2D profile source
+30,0.5848801990,0.0958278860,0.5848801990,0.0958278860,UPPER,30,open_ramair_validation_1m,upper_wall,from 2D profile source
+31,0.5704515090,0.0974445760,0.5704515090,0.0974445760,UPPER,31,open_ramair_validation_1m,upper_wall,from 2D profile source
+32,0.5559056190,0.0988872240,0.5559056190,0.0988872240,UPPER,32,open_ramair_validation_1m,upper_wall,from 2D profile source
+33,0.5412256580,0.1001779250,0.5412256580,0.1001779250,UPPER,33,open_ramair_validation_1m,upper_wall,from 2D profile source
+34,0.5264331170,0.1013285280,0.5264331170,0.1013285280,UPPER,34,open_ramair_validation_1m,upper_wall,from 2D profile source
+35,0.5115534050,0.1023357200,0.5115534050,0.1023357200,UPPER,35,open_ramair_validation_1m,upper_wall,from 2D profile source
+36,0.4965896340,0.1031965890,0.4965896340,0.1031965890,UPPER,36,open_ramair_validation_1m,upper_wall,from 2D profile source
+37,0.4815389930,0.1039121390,0.4815389930,0.1039121390,UPPER,37,open_ramair_validation_1m,upper_wall,from 2D profile source
+38,0.4663996750,0.1044863860,0.4663996750,0.1044863860,UPPER,38,open_ramair_validation_1m,upper_wall,from 2D profile source
+39,0.4511763980,0.1049249550,0.4511763980,0.1049249550,UPPER,39,open_ramair_validation_1m,upper_wall,from 2D profile source
+40,0.4358829230,0.1052328670,0.4358829230,0.1052328670,UPPER,40,open_ramair_validation_1m,upper_wall,from 2D profile source
+41,0.4205398350,0.1054133360,0.4205398350,0.1054133360,UPPER,41,open_ramair_validation_1m,upper_wall,from 2D profile source
+42,0.4051673230,0.1054682700,0.4051673230,0.1054682700,UPPER,42,open_ramair_validation_1m,upper_wall,from 2D profile source
+43,0.3897916970,0.1054004810,0.3897916970,0.1054004810,UPPER,43,open_ramair_validation_1m,upper_wall,from 2D profile source
+44,0.3744451960,0.1052078610,0.3744451960,0.1052078610,UPPER,44,open_ramair_validation_1m,upper_wall,from 2D profile source
+45,0.3591475020,0.1048841810,0.3591475020,0.1048841810,UPPER,45,open_ramair_validation_1m,upper_wall,from 2D profile source
+46,0.3439023320,0.1044228150,0.3439023320,0.1044228150,UPPER,46,open_ramair_validation_1m,upper_wall,from 2D profile source
+47,0.3287041630,0.1038215530,0.3287041630,0.1038215530,UPPER,47,open_ramair_validation_1m,upper_wall,from 2D profile source
+48,0.3135517880,0.1030835070,0.3135517880,0.1030835070,UPPER,48,open_ramair_validation_1m,upper_wall,from 2D profile source
+49,0.2984619810,0.1022159100,0.2984619810,0.1022159100,UPPER,49,open_ramair_validation_1m,upper_wall,from 2D profile source
+50,0.2834733040,0.1012248860,0.2834733040,0.1012248860,UPPER,50,open_ramair_validation_1m,upper_wall,from 2D profile source
+51,0.2686292440,0.1001085290,0.2686292440,0.1001085290,UPPER,51,open_ramair_validation_1m,upper_wall,from 2D profile source
+52,0.2539604300,0.0988623180,0.2539604300,0.0988623180,UPPER,52,open_ramair_validation_1m,upper_wall,from 2D profile source
+53,0.2394899620,0.0974838430,0.2394899620,0.0974838430,UPPER,53,open_ramair_validation_1m,upper_wall,from 2D profile source
+54,0.2252460590,0.0959763190,0.2252460590,0.0959763190,UPPER,54,open_ramair_validation_1m,upper_wall,from 2D profile source
+55,0.2112662820,0.0943493850,0.2112662820,0.0943493850,UPPER,55,open_ramair_validation_1m,upper_wall,from 2D profile source
+56,0.1976115900,0.0926220240,0.1976115900,0.0926220240,UPPER,56,open_ramair_validation_1m,upper_wall,from 2D profile source
+57,0.1843792990,0.0908050810,0.1843792990,0.0908050810,UPPER,57,open_ramair_validation_1m,upper_wall,from 2D profile source
+58,0.1716302670,0.0888829890,0.1716302670,0.0888829890,UPPER,58,open_ramair_validation_1m,upper_wall,from 2D profile source
+59,0.1593619830,0.0868428950,0.1593619830,0.0868428950,UPPER,59,open_ramair_validation_1m,upper_wall,from 2D profile source
+60,0.1475716370,0.0847168350,0.1475716370,0.0847168350,UPPER,60,open_ramair_validation_1m,upper_wall,from 2D profile source
+61,0.1363390670,0.0825588380,0.1363390670,0.0825588380,UPPER,61,open_ramair_validation_1m,upper_wall,from 2D profile source
+62,0.1257387920,0.0803901960,0.1257387920,0.0803901960,UPPER,62,open_ramair_validation_1m,upper_wall,from 2D profile source
+63,0.1158037530,0.0782191440,0.1158037530,0.0782191440,UPPER,63,open_ramair_validation_1m,upper_wall,from 2D profile source
+64,0.1065387680,0.0760469870,0.1065387680,0.0760469870,UPPER,64,open_ramair_validation_1m,upper_wall,from 2D profile source
+65,0.0979231520,0.0738720180,0.0979231520,0.0738720180,UPPER,65,open_ramair_validation_1m,upper_wall,from 2D profile source
+66,0.0899205470,0.0716952410,0.0899205470,0.0716952410,UPPER,66,open_ramair_validation_1m,upper_wall,from 2D profile source
+67,0.0824902820,0.0695273020,0.0824902820,0.0695273020,UPPER,67,open_ramair_validation_1m,upper_wall,from 2D profile source
+68,0.0755941930,0.0673817580,0.0755941930,0.0673817580,UPPER,68,open_ramair_validation_1m,upper_wall,from 2D profile source
+69,0.0691966290,0.0652695570,0.0691966290,0.0652695570,UPPER,69,open_ramair_validation_1m,upper_wall,from 2D profile source
+70,0.0632636440,0.0631938110,0.0632636440,0.0631938110,UPPER,70,open_ramair_validation_1m,upper_wall,from 2D profile source
+71,0.0577615970,0.0611469880,0.0577615970,0.0611469880,UPPER,71,open_ramair_validation_1m,upper_wall,from 2D profile source
+72,0.0526541300,0.0591214560,0.0526541300,0.0591214560,UPPER,72,open_ramair_validation_1m,upper_wall,from 2D profile source
+73,0.0479061960,0.0571132980,0.0479061960,0.0571132980,UPPER,73,open_ramair_validation_1m,upper_wall,from 2D profile source
+74,0.0434866620,0.0551199030,0.0434866620,0.0551199030,UPPER,74,open_ramair_validation_1m,upper_wall,from 2D profile source
+75,0.0393701180,0.0531327340,0.0393701180,0.0531327340,UPPER,75,open_ramair_validation_1m,upper_wall,from 2D profile source
+76,0.0355344720,0.0511410460,0.0355344720,0.0511410460,UPPER,76,open_ramair_validation_1m,upper_wall,from 2D profile source
+77,0.0319582310,0.0491371060,0.0319582310,0.0491371060,UPPER,77,open_ramair_validation_1m,upper_wall,from 2D profile source
+78,0.0286195030,0.0471220180,0.0286195030,0.0471220180,UPPER,78,open_ramair_validation_1m,upper_wall,from 2D profile source
+79,0.0254966940,0.0451028130,0.0254966940,0.0451028130,UPPER,79,open_ramair_validation_1m,upper_wall,from 2D profile source
+80,0.0225704240,0.0430882280,0.0225704240,0.0430882280,UPPER,80,open_ramair_validation_1m,upper_wall,from 2D profile source
+81,0.0198255260,0.0410837850,0.0198255260,0.0410837850,UPPER,81,open_ramair_validation_1m,upper_wall,from 2D profile source
+82,0.0172516570,0.0390898880,0.0172516570,0.0390898880,UPPER,82,open_ramair_validation_1m,upper_wall,from 2D profile source
+83,0.0148430920,0.0371015140,0.0148430920,0.0371015140,UPPER,83,open_ramair_validation_1m,upper_wall,from 2D profile source
+84,0.0125950120,0.0351136430,0.0125950120,0.0351136430,UPPER,84,open_ramair_validation_1m,upper_wall,from 2D profile source
+85,0.0105021930,0.0331231600,0.0105021930,0.0331231600,UPPER,85,open_ramair_validation_1m,upper_wall,from 2D profile source
+86,0.0085592120,0.0311286600,0.0085592120,0.0311286600,UPPER,86,open_ramair_validation_1m,upper_wall,from 2D profile source
+87,0.0067624550,0.0291285360,0.0067624550,0.0291285360,UPPER,87,open_ramair_validation_1m,upper_wall,from 2D profile source
+88,0.0051110170,0.0271197750,0.0051110170,0.0271197750,UPPER,88,open_ramair_validation_1m,upper_wall,from 2D profile source
+89,0.0036068070,0.0250985620,0.0036068070,0.0250985620,UPPER,89,open_ramair_validation_1m,upper_wall,from 2D profile source
+90,0.0022519330,0.0230628860,0.0022519330,0.0230628860,UPPER,90,open_ramair_validation_1m,upper_wall,from 2D profile source
+91,0.0010498100,0.0210115440,0.0010498100,0.0210115440,UPPER,91,open_ramair_validation_1m,upper_wall,from 2D profile source
+92,0.0000000360,0.0189468450,0.0000000360,0.0189468450,UPPER,92,open_ramair_validation_1m,upper_wall,from 2D profile source
+93,0.0000000000,0.0189467630,0.0000000000,0.0189467630,UPPER,93,open_ramair_validation_1m,inlet_upper_lip,from 2D profile source
+94,0.0471224660,-0.0361728590,0.0471224660,-0.0361728590,LOWER,1,open_ramair_validation_1m,inlet_lower_lip,from 2D profile source
+95,0.0518975060,-0.0374748050,0.0518975060,-0.0374748050,LOWER,2,open_ramair_validation_1m,lower_wall,from 2D profile source
+96,0.0570392180,-0.0388389180,0.0570392180,-0.0388389180,LOWER,3,open_ramair_validation_1m,lower_wall,from 2D profile source
+97,0.0625833450,-0.0402531450,0.0625833450,-0.0402531450,LOWER,4,open_ramair_validation_1m,lower_wall,from 2D profile source
+98,0.0685703600,-0.0416997100,0.0685703600,-0.0416997100,LOWER,5,open_ramair_validation_1m,lower_wall,from 2D profile source
+99,0.0750483670,-0.0431583260,0.0750483670,-0.0431583260,LOWER,6,open_ramair_validation_1m,lower_wall,from 2D profile source
+100,0.0820754140,-0.0446142310,0.0820754140,-0.0446142310,LOWER,7,open_ramair_validation_1m,lower_wall,from 2D profile source
+101,0.0897143680,-0.0460672230,0.0897143680,-0.0460672230,LOWER,8,open_ramair_validation_1m,lower_wall,from 2D profile source
+102,0.0980289020,-0.0475190100,0.0980289020,-0.0475190100,LOWER,9,open_ramair_validation_1m,lower_wall,from 2D profile source
+103,0.1070830880,-0.0489764210,0.1070830880,-0.0489764210,LOWER,10,open_ramair_validation_1m,lower_wall,from 2D profile source
+104,0.1169293500,-0.0504581360,0.1169293500,-0.0504581360,LOWER,11,open_ramair_validation_1m,lower_wall,from 2D profile source
+105,0.1275557360,-0.0519891600,0.1275557360,-0.0519891600,LOWER,12,open_ramair_validation_1m,lower_wall,from 2D profile source
+106,0.1388735680,-0.0535353500,0.1388735680,-0.0535353500,LOWER,13,open_ramair_validation_1m,lower_wall,from 2D profile source
+107,0.1508091340,-0.0550280110,0.1508091340,-0.0550280110,LOWER,14,open_ramair_validation_1m,lower_wall,from 2D profile source
+108,0.1633706670,-0.0564216500,0.1633706670,-0.0564216500,LOWER,15,open_ramair_validation_1m,lower_wall,from 2D profile source
+109,0.1765526440,-0.0577362530,0.1765526440,-0.0577362530,LOWER,16,open_ramair_validation_1m,lower_wall,from 2D profile source
+110,0.1902661870,-0.0589795510,0.1902661870,-0.0589795510,LOWER,17,open_ramair_validation_1m,lower_wall,from 2D profile source
+111,0.2044068490,-0.0601453190,0.2044068490,-0.0601453190,LOWER,18,open_ramair_validation_1m,lower_wall,from 2D profile source
+112,0.2188676760,-0.0612180910,0.2188676760,-0.0612180910,LOWER,19,open_ramair_validation_1m,lower_wall,from 2D profile source
+113,0.2335630030,-0.0621767770,0.2335630030,-0.0621767770,LOWER,20,open_ramair_validation_1m,lower_wall,from 2D profile source
+114,0.2484537620,-0.0630024950,0.2484537620,-0.0630024950,LOWER,21,open_ramair_validation_1m,lower_wall,from 2D profile source
+115,0.2635453780,-0.0636896240,0.2635453780,-0.0636896240,LOWER,22,open_ramair_validation_1m,lower_wall,from 2D profile source
+116,0.2788483940,-0.0642472000,0.2788483940,-0.0642472000,LOWER,23,open_ramair_validation_1m,lower_wall,from 2D profile source
+117,0.2943521660,-0.0646911920,0.2943521660,-0.0646911920,LOWER,24,open_ramair_validation_1m,lower_wall,from 2D profile source
+118,0.3100165220,-0.0650339530,0.3100165220,-0.0650339530,LOWER,25,open_ramair_validation_1m,lower_wall,from 2D profile source
+119,0.3257857250,-0.0652789970,0.3257857250,-0.0652789970,LOWER,26,open_ramair_validation_1m,lower_wall,from 2D profile source
+120,0.3416205080,-0.0654227100,0.3416205080,-0.0654227100,LOWER,27,open_ramair_validation_1m,lower_wall,from 2D profile source
+121,0.3574950600,-0.0654635840,0.3574950600,-0.0654635840,LOWER,28,open_ramair_validation_1m,lower_wall,from 2D profile source
+122,0.3733863830,-0.0654008160,0.3733863830,-0.0654008160,LOWER,29,open_ramair_validation_1m,lower_wall,from 2D profile source
+123,0.3892761000,-0.0652338050,0.3892761000,-0.0652338050,LOWER,30,open_ramair_validation_1m,lower_wall,from 2D profile source
+124,0.4051464340,-0.0649624480,0.4051464340,-0.0649624480,LOWER,31,open_ramair_validation_1m,lower_wall,from 2D profile source
+125,0.4209784050,-0.0645865460,0.4209784050,-0.0645865460,LOWER,32,open_ramair_validation_1m,lower_wall,from 2D profile source
+126,0.4367517250,-0.0641060990,0.4367517250,-0.0641060990,LOWER,33,open_ramair_validation_1m,lower_wall,from 2D profile source
+127,0.4524425940,-0.0635213060,0.4524425940,-0.0635213060,LOWER,34,open_ramair_validation_1m,lower_wall,from 2D profile source
+128,0.4680185740,-0.0628312660,0.4680185740,-0.0628312660,LOWER,35,open_ramair_validation_1m,lower_wall,from 2D profile source
+129,0.4834534520,-0.0620305530,0.4834534520,-0.0620305530,LOWER,36,open_ramair_validation_1m,lower_wall,from 2D profile source
+130,0.4987263400,-0.0611156540,0.4987263400,-0.0611156540,LOWER,37,open_ramair_validation_1m,lower_wall,from 2D profile source
+131,0.5138092180,-0.0600777310,0.5138092180,-0.0600777310,LOWER,38,open_ramair_validation_1m,lower_wall,from 2D profile source
+132,0.5287008820,-0.0588958950,0.5287008820,-0.0588958950,LOWER,39,open_ramair_validation_1m,lower_wall,from 2D profile source
+133,0.5434408990,-0.0575405180,0.5434408990,-0.0575405180,LOWER,40,open_ramair_validation_1m,lower_wall,from 2D profile source
+134,0.5581246760,-0.0559847880,0.5581246760,-0.0559847880,LOWER,41,open_ramair_validation_1m,lower_wall,from 2D profile source
+135,0.5728839750,-0.0542281020,0.5728839750,-0.0542281020,LOWER,42,open_ramair_validation_1m,lower_wall,from 2D profile source
+136,0.5877263280,-0.0523025960,0.5877263280,-0.0523025960,LOWER,43,open_ramair_validation_1m,lower_wall,from 2D profile source
+137,0.6026599700,-0.0501858750,0.6026599700,-0.0501858750,LOWER,44,open_ramair_validation_1m,lower_wall,from 2D profile source
+138,0.6178001930,-0.0478718140,0.6178001930,-0.0478718140,LOWER,45,open_ramair_validation_1m,lower_wall,from 2D profile source
+139,0.6331902800,-0.0453909410,0.6331902800,-0.0453909410,LOWER,46,open_ramair_validation_1m,lower_wall,from 2D profile source
+140,0.6487794160,-0.0427847340,0.6487794160,-0.0427847340,LOWER,47,open_ramair_validation_1m,lower_wall,from 2D profile source
+141,0.6644919780,-0.0400721740,0.6644919780,-0.0400721740,LOWER,48,open_ramair_validation_1m,lower_wall,from 2D profile source
+142,0.6802736340,-0.0372760580,0.6802736340,-0.0372760580,LOWER,49,open_ramair_validation_1m,lower_wall,from 2D profile source
+143,0.6960299820,-0.0344563410,0.6960299820,-0.0344563410,LOWER,50,open_ramair_validation_1m,lower_wall,from 2D profile source
+144,0.7115656900,-0.0316762940,0.7115656900,-0.0316762940,LOWER,51,open_ramair_validation_1m,lower_wall,from 2D profile source
+145,0.7268381760,-0.0288472370,0.7268381760,-0.0288472370,LOWER,52,open_ramair_validation_1m,lower_wall,from 2D profile source
+146,0.7418897210,-0.0260172770,0.7418897210,-0.0260172770,LOWER,53,open_ramair_validation_1m,lower_wall,from 2D profile source
+147,0.7565315190,-0.0233787320,0.7565315190,-0.0233787320,LOWER,54,open_ramair_validation_1m,lower_wall,from 2D profile source
+148,0.7708914160,-0.0209317040,0.7708914160,-0.0209317040,LOWER,55,open_ramair_validation_1m,lower_wall,from 2D profile source
+149,0.7851290920,-0.0184128690,0.7851290920,-0.0184128690,LOWER,56,open_ramair_validation_1m,lower_wall,from 2D profile source
+150,0.7992466570,-0.0159262720,0.7992466570,-0.0159262720,LOWER,57,open_ramair_validation_1m,lower_wall,from 2D profile source
+151,0.8131679850,-0.0136368160,0.8131679850,-0.0136368160,LOWER,58,open_ramair_validation_1m,lower_wall,from 2D profile source
+152,0.8269536350,-0.0115689030,0.8269536350,-0.0115689030,LOWER,59,open_ramair_validation_1m,lower_wall,from 2D profile source
+153,0.8406113390,-0.0096852750,0.8406113390,-0.0096852750,LOWER,60,open_ramair_validation_1m,lower_wall,from 2D profile source
+154,0.8540433820,-0.0079754890,0.8540433820,-0.0079754890,LOWER,61,open_ramair_validation_1m,lower_wall,from 2D profile source
+155,0.8671476280,-0.0064519960,0.8671476280,-0.0064519960,LOWER,62,open_ramair_validation_1m,lower_wall,from 2D profile source
+156,0.8798530740,-0.0051396030,0.8798530740,-0.0051396030,LOWER,63,open_ramair_validation_1m,lower_wall,from 2D profile source
+157,0.8921254750,-0.0040678360,0.8921254750,-0.0040678360,LOWER,64,open_ramair_validation_1m,lower_wall,from 2D profile source
+158,0.9039887320,-0.0032671230,0.9039887320,-0.0032671230,LOWER,65,open_ramair_validation_1m,lower_wall,from 2D profile source
+159,0.9155006920,-0.0027368640,0.9155006920,-0.0027368640,LOWER,66,open_ramair_validation_1m,lower_wall,from 2D profile source
+160,0.9266823450,-0.0024574730,0.9266823450,-0.0024574730,LOWER,67,open_ramair_validation_1m,lower_wall,from 2D profile source
+161,0.9375340910,-0.0024040450,0.9375340910,-0.0024040450,LOWER,68,open_ramair_validation_1m,lower_wall,from 2D profile source
+162,0.9480233930,-0.0025375140,0.9480233930,-0.0025375140,LOWER,69,open_ramair_validation_1m,lower_wall,from 2D profile source
+163,0.9580859770,-0.0028479370,0.9580859770,-0.0028479370,LOWER,70,open_ramair_validation_1m,lower_wall,from 2D profile source
+164,0.9676862900,-0.0033722710,0.9676862900,-0.0033722710,LOWER,71,open_ramair_validation_1m,lower_wall,from 2D profile source
+165,0.9768735430,-0.0041828260,0.9768735430,-0.0041828260,LOWER,72,open_ramair_validation_1m,lower_wall,from 2D profile source
+166,0.9857409330,-0.0053083220,0.9857409330,-0.0053083220,LOWER,73,open_ramair_validation_1m,lower_wall,from 2D profile source
+167,0.9943625750,-0.0067434380,0.9943625750,-0.0067434380,LOWER,74,open_ramair_validation_1m,lower_wall,from 2D profile source
+168,1.0000000000,-0.0078635120,1.0000000000,-0.0078635120,LOWER,75,open_ramair_validation_1m,trailing_edge,from 2D profile source
+169,1.0004001209,-0.0079191639,1.0004001209,-0.0079191639,TE_ROUNDED_CAP,1,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+170,1.0007712436,-0.0079235588,1.0007712436,-0.0079235588,TE_ROUNDED_CAP,2,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+171,1.0011134146,-0.0078800016,1.0011134146,-0.0078800016,TE_ROUNDED_CAP,3,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+172,1.0014266802,-0.0077917972,1.0014266802,-0.0077917972,TE_ROUNDED_CAP,4,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+173,1.0017110870,-0.0076622505,1.0017110870,-0.0076622505,TE_ROUNDED_CAP,5,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+174,1.0019666814,-0.0074946664,1.0019666814,-0.0074946664,TE_ROUNDED_CAP,6,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+175,1.0021935099,-0.0072923497,1.0021935099,-0.0072923497,TE_ROUNDED_CAP,7,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+176,1.0023916190,-0.0070586055,1.0023916190,-0.0070586055,TE_ROUNDED_CAP,8,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+177,1.0025610551,-0.0067967385,1.0025610551,-0.0067967385,TE_ROUNDED_CAP,9,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+178,1.0027018646,-0.0065100537,1.0027018646,-0.0065100537,TE_ROUNDED_CAP,10,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+179,1.0028140941,-0.0062018560,1.0028140941,-0.0062018560,TE_ROUNDED_CAP,11,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+180,1.0028977900,-0.0058754502,1.0028977900,-0.0058754502,TE_ROUNDED_CAP,12,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+181,1.0029529987,-0.0055341413,1.0029529987,-0.0055341413,TE_ROUNDED_CAP,13,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+182,1.0029797668,-0.0051812342,1.0029797668,-0.0051812342,TE_ROUNDED_CAP,14,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+183,1.0029781406,-0.0048200337,1.0029781406,-0.0048200337,TE_ROUNDED_CAP,15,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+184,1.0029481667,-0.0044538447,1.0029481667,-0.0044538447,TE_ROUNDED_CAP,16,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+185,1.0028898914,-0.0040859722,1.0028898914,-0.0040859722,TE_ROUNDED_CAP,17,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+186,1.0028033614,-0.0037197211,1.0028033614,-0.0037197211,TE_ROUNDED_CAP,18,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+187,1.0026886230,-0.0033583962,1.0026886230,-0.0033583962,TE_ROUNDED_CAP,19,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+188,1.0025457227,-0.0030053024,1.0025457227,-0.0030053024,TE_ROUNDED_CAP,20,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+189,1.0023747069,-0.0026637446,1.0023747069,-0.0026637446,TE_ROUNDED_CAP,21,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+190,1.0021756221,-0.0023370278,1.0021756221,-0.0023370278,TE_ROUNDED_CAP,22,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+191,1.0019485148,-0.0020284567,1.0019485148,-0.0020284567,TE_ROUNDED_CAP,23,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+192,1.0016934315,-0.0017413364,1.0016934315,-0.0017413364,TE_ROUNDED_CAP,24,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+193,1.0014104185,-0.0014789717,1.0014104185,-0.0014789717,TE_ROUNDED_CAP,25,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+194,1.0010995225,-0.0012446676,1.0010995225,-0.0012446676,TE_ROUNDED_CAP,26,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+195,1.0007607897,-0.0010417288,1.0007607897,-0.0010417288,TE_ROUNDED_CAP,27,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry
+196,1.0003942667,-0.0008734603,1.0003942667,-0.0008734603,TE_ROUNDED_CAP,28,open_ramair_validation_1m,trailing_edge_closure,explicit tangent-continuous rounded TE cap for 2D CFD/FEM geometry

@@ -127,7 +127,7 @@ def archive_or_delete_existing(project_root: Path, mesh_root: Path, variant: str
     if action == "delete":
         shutil.rmtree(mesh_root)
         return None
-    backup = project_root / "Previous Versions/mesh_optimizer_backups" / f"{variant}_{stamp}"
+    backup = project_root / "Data Archive/mesh_optimizer_backups" / f"{variant}_{stamp}"
     backup.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(mesh_root), str(backup))
     return backup
@@ -228,7 +228,7 @@ def optimize(args: argparse.Namespace) -> Path:
     shutil.move(str(best_dir), str(mesh_root))
     best_config = candidates[best_index - 1]
     best_config.pop("mesh_optimizer_candidate", None)
-    config_backup = project_root / "Previous Versions/config_backups" / stamp / "CFD_2D/CFD_2D_inputs/config/cfd2d_mesh_config.json"
+    config_backup = project_root / "Data Archive/config_backups" / stamp / "CFD_2D/CFD_2D_inputs/config/cfd2d_mesh_config.json"
     config_backup.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(active_config_path, config_backup)
     write_json(active_config_path, best_config)

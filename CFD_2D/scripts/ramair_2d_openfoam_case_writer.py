@@ -179,7 +179,7 @@ def backup_existing_case_dir(case_root: Path, case_dir: Path, variant: str, safe
     if not case_dir.exists():
         return None
     project_root = project_root_from_case_root(case_root)
-    backup_root = project_root / "Previous Versions" / "openfoam_case_backups"
+    backup_root = project_root / "Data Archive" / "openfoam_case_backups"
     backup_root.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d_%H%M%S")
     target = backup_root / f"{variant}_{safe_alpha}_{stamp}"
@@ -243,7 +243,7 @@ def vec(v):
 
 @dataclass
 class OpenFOAMCaseConfig:
-    config_schema_version: int = 15
+    config_schema_version: int = 16
     solver: str = "foamRun"
     solver_module: str = "incompressibleFluid"
     turbulence_model: str = "SpalartAllmaras"
@@ -454,6 +454,8 @@ def load_physical(
     reynolds: float | None = None,
     variant: str | None = None,
     solver_config_path: Path | None = None,
+    physical_config: dict | None = None,
+    geometry_manifest: dict | None = None,
 ) -> OpenFOAMCaseConfig:
     phys = read_json(cfd_inputs_root(case_root) / "case_package" / "physical_config.json", {})
     case_template = read_json(cfd_inputs_root(case_root) / "config" / "cfd2d_case_config_template.json", {})
@@ -461,6 +463,8 @@ def load_physical(
     merged_phys = dict(case_template or {})
     merged_phys.update(phys_defaults or {})
     merged_phys.update(phys or {})
+    if physical_config is not None:
+        merged_phys = dict(physical_config)
     raw_solver = read_json(
         solver_config_path.resolve()
         if solver_config_path is not None
@@ -472,6 +476,8 @@ def load_physical(
         cfd_inputs_root(case_root) / "case_package" / str(variant) / "manifest.json",
         {},
     ) if variant else {}
+    if geometry_manifest is not None:
+        variant_manifest = dict(geometry_manifest)
     solver, geometry_topology, numerics_profile = topology_solver_config(
         raw_solver,
         variant_manifest,
@@ -672,7 +678,7 @@ def load_physical(
         velocity_from_mach_m_s=u_mach,
         required_mu_for_mach_and_re=required_mu,
         required_rho_for_mach_and_re=required_rho,
-        spanwise_thickness_chord=float(mesh_cfg.get("spanwise_thickness_chord", 0.01)),
+        spanwise_thickness_chord=float(variant_manifest.get("spanwise_thickness_chord", mesh_cfg.get("spanwise_thickness_chord", 0.01))),
         geometry_topology=geometry_topology,
         numerics_profile=numerics_profile,
         ddt_scheme=ddt_scheme,
@@ -821,6 +827,9 @@ def write_steady_initialization_templates(case_dir: Path, cfg: OpenFOAMCaseConfi
     """Write an opt-in SIMPLE stage without changing the transient case files."""
     directory = case_dir / "system" / "steadyInitialization"
     directory.mkdir(parents=True, exist_ok=True)
+    # OpenFOAM only writes on scheduled iterations. Guarantee a resumable
+    # final state even when the requested run is shorter than the write interval.
+    final_write_interval = math.gcd(cfg.steady_max_iterations, cfg.steady_write_interval_iterations)
     (directory / "controlDict").write_text(foam_header("dictionary", "controlDict") + f"""
 application     {cfg.solver};
 solver          {cfg.solver_module};
@@ -830,7 +839,7 @@ stopAt          endTime;
 endTime         {cfg.steady_max_iterations};
 deltaT          1;
 writeControl    timeStep;
-writeInterval   {cfg.steady_write_interval_iterations};
+writeInterval   {final_write_interval};
 purgeWrite      0;
 writeFormat     ascii;
 writePrecision  8;
@@ -1265,7 +1274,7 @@ __TRANSIENT_RELAXATION__
         "relaxationFactors\n"
         "{\n"
         f"    equations {{ {transient_relaxation_entries} "
-        "pFinal 1; UFinal 1; nuTildaFinal 1; }}\n"
+        "pFinal 1; UFinal 1; nuTildaFinal 1; }\n"
         "}\n"
         if transient_relaxation_entries else ""
     )
@@ -1692,8 +1701,12 @@ def write_case(
     require_converted_polymesh: bool = False,
     existing_case_action: str = "archive",
     solver_config_path: Path | None = None,
+    mesh_directory: Path | None = None,
+    output_directory: Path | None = None,
+    physical_config: dict | None = None,
+    geometry_manifest: dict | None = None,
 ) -> Path:
-    mesh_root = cfd_meshes_root(case_root) / variant
+    mesh_root = mesh_directory or cfd_meshes_root(case_root) / variant
     if require_approval and not (mesh_root / "MESH_APPROVED.flag").exists():
         raise RuntimeError(f"Mesh approval required but missing: {mesh_root / 'MESH_APPROVED.flag'}")
     mesh_file = mesh_root / "mesh_final.msh"
@@ -1705,10 +1718,12 @@ def write_case(
     if poly_src is not None:
         reject_forbidden_boundary(poly_src)
     boundary_patches = parse_boundary_patches(poly_src)
-    cfg = load_physical(case_root, alpha, reynolds, variant, solver_config_path)
+    cfg = load_physical(case_root, alpha, reynolds, variant, solver_config_path, physical_config, geometry_manifest)
     automatic_mesh_numerics = apply_mesh_quality_numerics(cfg, mesh_root)
     safe_alpha = f"alpha_{alpha:+.3f}".replace("+", "p").replace("-", "m").replace(".", "p")
-    case_dir = cfd_cases_root(case_root) / variant / safe_alpha
+    case_dir = output_directory or cfd_cases_root(case_root) / variant / safe_alpha
+    if output_directory is not None and (case_dir / "case_config.json").exists() and not overwrite:
+        raise FileExistsError(f"Existing workspace case must not be overwritten: {case_dir}")
     if case_dir.exists() and overwrite:
         backup = prepare_existing_case_dir(
             case_root,

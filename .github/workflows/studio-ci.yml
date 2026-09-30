@@ -1,0 +1,40 @@
+name: RamAir Studio software checks
+on:
+  push:
+    branches: [main]
+    tags: ['studio-delivery-*']
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  software:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: CFD_2D/app/requirements-development.txt
+      - name: Install scientific and UI dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglu1-mesa
+          python -m pip install -r CFD_2D/app/requirements-development.txt
+      - name: Contracts and source artifact audits
+        run: |
+          python 'Application Support/Tools/check_project_context.py'
+          python 'Application Support/Tools/check_repository_artifacts.py'
+      - name: Complete software suite
+        run: python -m pytest -c 'Application Support/Tests/pytest.ini' CFD_2D/tests -q --junitxml=software-tests.xml
+      - name: Build and verify portable source
+        run: |
+          python 'Application Support/Tools/package_ramair_project.py' --output /tmp/RamAir_Application.zip
+          python 'Application Support/Tools/verify_studio_package.py' /tmp/RamAir_Application.zip
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: software-test-evidence
+          path: software-tests.xml

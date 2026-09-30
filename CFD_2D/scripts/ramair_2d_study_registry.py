@@ -309,7 +309,7 @@ def default_study_config() -> dict[str, Any]:
             "renumber_before_decompose": True,
             "reconstruction_mode": "latest",
             "timeout_hours": 24.0,
-            "steady_checkpoint_timeout_min": 120.0,
+            "steady_checkpoint_timeout_min": 1440.0,
             "rans_base_states": {
                 "enabled": True,
                 "initial_iterations": 20000,
@@ -326,7 +326,7 @@ def default_study_config() -> dict[str, Any]:
                 "simple_non_orthogonal_correctors": 0,
                 "potentialFoam": True,
                 "storage_profile": "steady_checkpoint_compact",
-                "timeout_min": 120.0,
+                "timeout_min": 1440.0,
                 "mpi_ranks": 8,
                 "automatic_core_selection": True,
                 "renumber_before_decompose": True,

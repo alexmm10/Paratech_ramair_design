@@ -1,0 +1,50 @@
+{
+  "name": "Workflow parcial 20260909 closed",
+  "figures": [
+    {
+      "file": "Cl_Cd_Cm_history_dfd235f21c91.png",
+      "sha256": "dfd235f21c9118da1a9728a5be964b76c6eefa07695f4adf58ac5b1842bb3232",
+      "source": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Workflow_Validation_20260909/CFD_2D/SL_Re1900000_M015/Geometries/LS1_closed/Meshes/validation_medium_01/OpenFOAM/Workflow_smoke/Angles/alpha_p8p000/Postprocess/URANS/Cl_Cd_Cm_history.png",
+      "source_status": "PROCESSED_PARTIAL",
+      "workflow_test": {
+        "purpose": "bounded software integration; partial aerodynamics",
+        "rans_iterations": 50,
+        "validation_numerics_preserved": true
+      }
+    },
+    {
+      "file": "aerodynamic_efficiency_c0f0bd85c94b.png",
+      "sha256": "c0f0bd85c94b1eac3e16d6fd062b460ed9b886022cd5909162eef96a4fc4e34c",
+      "source": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Workflow_Validation_20260909/CFD_2D/SL_Re1900000_M015/Geometries/LS1_closed/Meshes/validation_medium_01/OpenFOAM/Workflow_smoke/Angles/alpha_p8p000/Postprocess/URANS/aerodynamic_efficiency.png",
+      "source_status": "PROCESSED_PARTIAL",
+      "workflow_test": {
+        "purpose": "bounded software integration; partial aerodynamics",
+        "rans_iterations": 50,
+        "validation_numerics_preserved": true
+      }
+    },
+    {
+      "file": "courant_history_68f736ac943d.png",
+      "sha256": "68f736ac943d44aeafd9082aa7511c0b2151b1d29e194b4b7c748bff4bde68ab",
+      "source": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Workflow_Validation_20260909/CFD_2D/SL_Re1900000_M015/Geometries/LS1_closed/Meshes/validation_medium_01/OpenFOAM/Workflow_smoke/Angles/alpha_p8p000/Postprocess/URANS/courant_history.png",
+      "source_status": "PROCESSED_PARTIAL",
+      "workflow_test": {
+        "purpose": "bounded software integration; partial aerodynamics",
+        "rans_iterations": 50,
+        "validation_numerics_preserved": true
+      }
+    },
+    {
+      "file": "boundary_layer_thickness_comparison_32d27cb932ee.png",
+      "sha256": "32d27cb932ee82db28b26acca69f79717609f52e7a18505644b77e626618ab8d",
+      "source": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Workflow_Validation_20260909/CFD_2D/SL_Re1900000_M015/Geometries/LS1_closed/Meshes/validation_medium_01/OpenFOAM/Workflow_smoke/Angles/alpha_p8p000/Postprocess/URANS/boundary_layer_thickness_comparison.png",
+      "source_status": "PROCESSED_PARTIAL",
+      "workflow_test": {
+        "purpose": "bounded software integration; partial aerodynamics",
+        "rans_iterations": 50,
+        "validation_numerics_preserved": true
+      }
+    }
+  ],
+  "scope": "selected final figures only; source validity is retained"
+}

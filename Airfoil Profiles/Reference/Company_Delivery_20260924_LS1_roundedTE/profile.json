@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "profile",
+  "id": "43d1f7e361224a3fb44027f093fcd40d",
+  "name": "Company_Delivery_20260924_LS1_roundedTE",
+  "created_at": "2026-09-24T20:43:02",
+  "topology": "closed",
+  "chord_m": 1.0,
+  "source": "Airfoil Profiles/NASA LS1-0417.dat",
+  "source_sha256": "aae4d6bdcd0a21cfc56414954dd01fd8e88eaa5d6789bafac0fd164017fd7c59",
+  "te": {
+    "mode": "rounded",
+    "method": "trimmed_C1_cubic_cap",
+    "anchor_x_c": 0.995555791634337,
+    "maximum_x_c": 1.0,
+    "samples": 35,
+    "upstream_coordinates_preserved": true
+  },
+  "base_profile": null,
+  "coordinates": "upper_TE_to_LE__lower_LE_to_TE__cap_lower_to_upper",
+  "revision": "2eb1c85d973a9200b027280bd8dde6b7d0929b625b39a3c69092064fee262e36",
+  "source_role": "historical_provenance; coordinates are bundled beside profile.json"
+}

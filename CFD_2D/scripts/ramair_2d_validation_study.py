@@ -794,6 +794,7 @@ def prepare_run(
 
     study_config = study["study_config"]
     condition = operating_condition(study_config["operating_condition"])
+    condition["alpha_deg"] = float(row["alpha_deg"])
     topology = str(row["topology"])
     plan_config, active_temporal_package = _plan_config_for_topology(
         study_config, topology

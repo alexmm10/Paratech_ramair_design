@@ -36,6 +36,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "design_mode": "optimized_cl_window",
     "reynolds": 4000000.0,
     "mach": 0.10,
+    "ncrit": 9.0,
+    "xtrip_upper": 1.0,
+    "xtrip_lower": 1.0,
     "panel_count": 200,
     "panel_bunching": 1.0,
     "te_le_density_ratio": 0.15,
@@ -160,6 +163,11 @@ def load_design_config(path: Path) -> dict[str, Any]:
 
 
 def validate_design_config(config: dict[str, Any]) -> None:
+    if not 0 < float(config.get("ncrit", 9.0)) <= 20:
+        raise ValueError("Ncrit must be positive and no greater than 20")
+    for key in ("xtrip_upper", "xtrip_lower"):
+        if not 0 <= float(config.get(key, 1.0)) <= 1:
+            raise ValueError(f"{key} must be a chord fraction between 0 and 1")
     mode = str(config.get("design_mode", ""))
     if mode not in {"standard_full_polar", "optimized_cl_window"}:
         raise ValueError("design_mode must be standard_full_polar or optimized_cl_window")
@@ -224,6 +232,7 @@ def _polar_commands(config: dict[str, Any]) -> str:
         f"VISC {float(config['reynolds']):.12g}",
         f"MACH {float(config['mach']):.12g}",
         f"ITER {int(config['xfoil_iteration_limit'])}",
+        *_transition_commands(config),
         "PACC", "polar.txt", "",
         f"ASEQ {values[0]:.8g} {values[-1]:.8g} {float(config['alpha_step_deg']):.8g}",
         "PACC", "", "QUIT", "",
@@ -258,11 +267,18 @@ def _cp_commands(config: dict[str, Any], converged_alphas: Iterable[float]) -> s
         f"VISC {float(config['reynolds']):.12g}",
         f"MACH {float(config['mach']):.12g}",
         f"ITER {int(config['xfoil_iteration_limit'])}",
+        *_transition_commands(config),
     ]
     for alpha in converged_alphas:
         commands.extend([f"ALFA {float(alpha):.8g}", f"CPWR {_cp_file_name(float(alpha))}"])
     commands.extend(["", "QUIT", ""])
     return "\n".join(commands)
+
+
+def _transition_commands(config: dict[str, Any]) -> list[str]:
+    """Use identical transition assumptions for the polar and every Cp solve."""
+    return ["VPAR", f"N {float(config.get('ncrit', 9.0)):.8g}",
+            f"XTR {float(config.get('xtrip_upper', 1.0)):.8g} {float(config.get('xtrip_lower', 1.0)):.8g}", ""]
 
 
 def parse_cp(path: Path) -> pd.DataFrame:
@@ -422,15 +438,17 @@ def _archive_or_remove(path: Path, project_root: Path, action: str) -> None:
     if action != "archive":
         raise ValueError("existing_output_action must be archive, delete or keep")
     relative_name = path.name
-    destination = project_root / "Previous Versions/inlet_design_backups" / f"{relative_name}_{time.strftime('%Y%m%d_%H%M%S')}"
+    destination = project_root / "Data Archive/inlet_design_backups" / f"{relative_name}_{time.strftime('%Y%m%d_%H%M%S')}"
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(path), str(destination))
 
 
-def _plot_outputs(output_dir: Path, polar: pd.DataFrame, points: list[dict[str, Any]], selected: list[dict[str, Any]], cut: pd.DataFrame) -> None:
+def _plot_outputs(output_dir: Path, polar: pd.DataFrame, points: list[dict[str, Any]], selected: list[dict[str, Any]], cut: pd.DataFrame, base: Any = None) -> None:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from ramair_scientific_plot_style import apply_scientific_style
+    apply_scientific_style()
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
     axes[0].plot(polar["alpha_deg"], polar["CL"], marker="o", markersize=3, linewidth=1)
@@ -441,7 +459,10 @@ def _plot_outputs(output_dir: Path, polar: pd.DataFrame, points: list[dict[str, 
         axes[0].legend()
     axes[0].set(xlabel="alpha [deg]", ylabel="CL", title="Converged XFOIL polar")
     axes[0].grid(True, alpha=0.25)
-    axes[1].plot(cut["x"], cut["y"], color="#1f4e79", linewidth=1.2)
+    if base is not None:
+        for index, branch in enumerate((base.upper, base.lower)):
+            axes[1].plot(branch.x_norm, branch.z_norm, color="#555555", linestyle="--", linewidth=1, label="Base profile" if index == 0 else None)
+    axes[1].plot(cut["x"], cut["y"], color="#1f4e79", linewidth=1.2, label="Cut profile")
     accepted = [p for p in points if p.get("accepted")]
     if accepted:
         axes[1].scatter([p["x_over_c"] for p in accepted], [p["z_over_c"] for p in accepted], c="#777777", s=18, label="Valid stagnation")
@@ -451,6 +472,8 @@ def _plot_outputs(output_dir: Path, polar: pd.DataFrame, points: list[dict[str, 
     axes[1].legend()
     fig.tight_layout()
     fig.savefig(output_dir / "inlet_design_summary.png", dpi=180)
+    fig.savefig(output_dir / "inlet_design_summary.pdf")
+    fig.savefig(output_dir / "inlet_design_summary.svg")
     plt.close(fig)
 
 
@@ -496,7 +519,8 @@ def design_inlet(project_root: Path, config_path: Path, executable_override: str
         f"{_safe_name(base_profile.stem)}_{mode_token}_"
         f"Re{_reynolds_token(float(config['reynolds']))}_M{float(config['mach']):.3f}"
     )
-    output_dir = root / "CFD_2D/CFD_2D_inputs/inlet_design" / _safe_name(case_token)
+    output_root = root / str(config.get("output_root", "CFD_2D/CFD_2D_inputs/inlet_design"))
+    output_dir = output_root / _safe_name(case_token)
     _archive_or_remove(output_dir, root, str(config.get("existing_output_action", "archive")))
     output_dir.mkdir(parents=True, exist_ok=False)
 
@@ -536,14 +560,14 @@ def design_inlet(project_root: Path, config_path: Path, executable_override: str
     profile_name = generated_profile_name(base_profile, config, cut_report["inlet_gap_percent_chord"])
     profile_path = root / "Airfoil Profiles" / profile_name
     if profile_path.exists():
-        archive = root / "Previous Versions/generated_profile_backups" / f"{profile_path.stem}_{time.strftime('%Y%m%d_%H%M%S')}{profile_path.suffix}"
+        archive = root / "Data Archive/generated_profile_backups" / f"{profile_path.stem}_{time.strftime('%Y%m%d_%H%M%S')}{profile_path.suffix}"
         archive.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(profile_path, archive)
     cut_profile.to_csv(profile_path, index=False, quoting=csv.QUOTE_MINIMAL)
     cut_profile.to_csv(output_dir / profile_name, index=False, quoting=csv.QUOTE_MINIMAL)
     pd.DataFrame(stagnation).to_csv(output_dir / "stagnation_points.csv", index=False)
     pd.DataFrame(selected).to_csv(output_dir / "selected_stagnation_envelope.csv", index=False)
-    _plot_outputs(output_dir, polar, stagnation, selected, cut_profile)
+    _plot_outputs(output_dir, polar, stagnation, selected, cut_profile, canonical)
 
     metadata_path = output_dir / "inlet_design_metadata.json"
     metadata = {

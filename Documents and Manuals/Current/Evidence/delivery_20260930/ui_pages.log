@@ -1,0 +1,12 @@
+2026-09-30 18:40:43.805 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+{"page": "Inicio", "exceptions": [], "errors": [], "warnings": [], "duration_s": 0.389}
+{"page": "Casos de trabajo", "exceptions": [], "errors": [], "warnings": [], "duration_s": 0.452}
+{"page": "Perfiles 2D", "exceptions": [], "errors": [], "warnings": [], "duration_s": 0.778}
+{"page": "Geometría CATIA", "exceptions": [], "errors": [], "warnings": [], "duration_s": 6.96}
+{"page": "Caso CFD", "exceptions": [], "errors": [], "warnings": [], "duration_s": 0.384}
+{"page": "Mallado", "exceptions": [], "errors": [], "warnings": [], "duration_s": 2.258}
+{"page": "Caso OpenFOAM", "exceptions": [], "errors": [], "warnings": [], "duration_s": 0.462}
+{"page": "Ejecución", "exceptions": [], "errors": [], "warnings": [], "duration_s": 6.346}
+{"page": "Postproceso", "exceptions": [], "errors": [], "warnings": [], "duration_s": 0.983}
+{"page": "Validation & Convergence Lab", "exceptions": [], "errors": [], "warnings": ["Una ejecución nueva siempre realiza RANS antes de A-B-C-D-E. Activa continuar solo para reanudar una fase transitoria previamente detenida.", "Resolución de pared insuficiente para SA integrado: y+ máximo = 3.41 (> 1). Revise la primera altura y las zonas de aceleración antes de aceptar el punto."], "duration_s": 7.516}
+{"page": "Archivos y logs", "exceptions": [], "errors": [], "warnings": [], "duration_s": 0.378}

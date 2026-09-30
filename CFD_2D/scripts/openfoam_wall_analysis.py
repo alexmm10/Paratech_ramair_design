@@ -215,6 +215,13 @@ def read_legacy_vtk_wall(path: Path, field_name: str = "yPlus") -> pd.DataFrame:
         "z_m": centres[:, 2],
         "patch": path.parent.name,
     }
+    normals=[]
+    for indices in polygons:
+        vertices=points[indices]
+        vector=np.sum(np.cross(vertices,np.roll(vertices,-1,axis=0)),axis=0)
+        normals.append(vector/max(float(np.linalg.norm(vector)),1e-30))
+    normals=np.asarray(normals)
+    rows.update(normal_x=normals[:,0],normal_y=normals[:,1],normal_z=normals[:,2])
     # A spanwise-extruded 2-D wall face has two unique projected XY vertices.
     # Preserve that edge connectivity so branch ordering never depends on x.
     edge_points: list[tuple[float, float, float, float]] = []
@@ -392,7 +399,8 @@ def _classify_wall_samples(data: pd.DataFrame, chord_m: float) -> pd.DataFrame:
             "combined",
         ),
     )
-    return data.drop(columns=["_bin"])
+    from ramair_wall_topology import classify_connected_faces
+    return classify_connected_faces(data.drop(columns=["_bin"]), chord)
 
 
 def _load_all_wall_patches(
@@ -683,6 +691,8 @@ def plot_yplus_distribution(data: pd.DataFrame, target_y_plus: float, output: Pa
 
 
 def _station_geometry(data: pd.DataFrame, surface: str, station_xc: float) -> dict[str, float]:
+    if 'wall_side' in data and (data.wall_side=='external').any():
+        data=data[data.wall_side=='external']
     subset = data[data["surface"] == surface].sort_values("x_over_c").reset_index(drop=True)
     if len(subset) < 3:
         raise ValueError(f"Not enough {surface} wall faces for a normal sampling line.")
@@ -750,13 +760,22 @@ def write_velocity_profile_control_dict(
                 geometry["z_m"],
             )
             name = f"{surface}_xc_{requested_xc:.3f}".replace(".", "p")
+            # A monotone quadratic map resolves the near-wall gradient while
+            # retaining the same physical normal and endpoint. OF14 'points'
+            # supports ordered distance output, unlike unordered cloud sets.
+            offsets = epsilon + (distance-epsilon)*np.linspace(0., 1., max(10, int(sample_points)))**2
+            samples = [(geometry["x_m"]+s*geometry["normal_x"],
+                        geometry["y_m"]+s*geometry["normal_y"], geometry["z_m"]) for s in offsets]
+            point_text = "\n".join(f"                ({x:.12g} {y:.12g} {z:.12g})" for x,y,z in samples)
             set_blocks.append(f"""        {name}
         {{
-            type            lineUniform;
+            type            points;
+            ordered         yes;
             axis            distance;
-            start           ({start[0]:.12g} {start[1]:.12g} {start[2]:.12g});
-            end             ({end[0]:.12g} {end[1]:.12g} {end[2]:.12g});
-            nPoints         {max(10, int(sample_points))};
+            points
+            (
+{point_text}
+            );
         }}""")
             definitions.append({
                 "name": name,
@@ -767,10 +786,12 @@ def write_velocity_profile_control_dict(
                 "end_m": list(end),
                 "normal_xy": [geometry["normal_x"], geometry["normal_y"]],
                 "sample_distance_m": distance,
+                "sampling_distribution": "quadratic_near_wall",
+                "sample_points": len(samples),
                 "theoretical_delta99_m": theoretical,
             })
     path = case_dir / "system" / "ramairVelocityProfiles"
-    path.write_text(_foam_header("ramairVelocityProfiles") + f"""
+    content = _foam_header("ramairVelocityProfiles") + f"""
 type                sets;
 libs                ("libsampling.so");
 writeControl        timeStep;
@@ -781,7 +802,9 @@ sets
 {{
 {chr(10).join(set_blocks)}
 }}
-""", encoding="utf-8")
+"""
+    if not path.exists() or path.read_text(encoding="utf-8") != content:
+        path.write_text(content, encoding="utf-8")
     return path, definitions
 
 
@@ -844,6 +867,8 @@ def _velocity_profile_cache_current(
     root = case_dir / "postProcessing" / "ramairVelocityProfiles"
     if source_mtime is None or not definitions:
         return False, []
+    control = case_dir/"system/ramairVelocityProfiles"
+    if control.exists(): source_mtime = max(source_mtime, control.stat().st_mtime)
     sources: list[str] = []
     for definition in definitions:
         candidates = [
@@ -1003,6 +1028,9 @@ def analyze_wall_boundary_layer(
     include_temporal_separation_history: bool = True,
 ) -> dict[str, Any]:
     """Create real wall y+ and normal velocity-profile products when data exist."""
+    if run_openfoam_tools:
+        from openfoam_environment import activate_openfoam_environment
+        activate_openfoam_environment()
     output_dir.mkdir(parents=True, exist_ok=True)
     case_inputs = _load_case_definition_json(case_dir, "case_input_summary.json")
     case_config = _load_case_definition_json(case_dir, "case_config.json")
@@ -1010,15 +1038,26 @@ def analyze_wall_boundary_layer(
     if not mesh_root.is_absolute():
         mesh_root = project_root / mesh_root
     mesh_config_path = mesh_root / "mesh_config_used.json"
+    if not mesh_config_path.is_file() and (mesh_root / "mesh_config.json").is_file():
+        mesh_config_path = mesh_root / "mesh_config.json"
     if not mesh_config_path.is_file():
         mesh_config_path = project_root / "CFD_2D" / "CFD_2D_inputs" / "config" / "cfd2d_mesh_config.json"
     mesh_config = json.loads(mesh_config_path.read_text(encoding="utf-8"))
     mesh_quality_path = mesh_root / "mesh_quality_report.json"
+    if not mesh_quality_path.is_file() and (mesh_root / "mesh_report.json").is_file():
+        mesh_quality_path = mesh_root / "mesh_report.json"
     mesh_quality = json.loads(mesh_quality_path.read_text(encoding="utf-8")) if mesh_quality_path.is_file() else {}
     manifest_path = project_root / "CFD_2D" / "CFD_2D_inputs" / "case_package" / variant / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else {}
     is_open = bool(manifest.get("has_ram_air_opening_feature", "open" in variant.lower()))
     prefix = "open" if is_open else "closed"
+    if isinstance(mesh_config.get("boundary_layer"), dict):
+        bl = mesh_config["boundary_layer"]
+        mesh_config = dict(mesh_config, target_y_plus=bl.get("target_y_plus", 1.),
+            **{f"{prefix}_boundary_layer_layers": bl.get("layers", 0), f"{prefix}_boundary_layer_growth": bl.get("growth_rate", 1.)})
+        actual_bl = mesh_quality.get("boundary_layer", {})
+        mesh_quality = dict(mesh_quality, boundary_layer_first_cell_height_m=actual_bl.get("first_cell_height_m", 0.),
+            boundary_layer_total_thickness_chord=actual_bl.get("total_thickness_chord", 0.))
     y1_use_yplus = bool(mesh_config.get(f"{prefix}_use_yplus_first_cell_height", True))
     comparison = boundary_layer_comparison(
         chord_m=float(case_inputs["chord_m"]),

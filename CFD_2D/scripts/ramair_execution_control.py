@@ -16,8 +16,32 @@ from typing import Any, Iterable
 
 PROCESS_RECORD = ".ramair_solver_process.json"
 STOP_REQUEST = ".ramair_stop_request.json"
+CAMPAIGN_PAUSE = ".ramair_campaign_pause.json"
 EXECUTION_STATE_RECORD = ".ramair_execution_state.json"
 _JSON_WRITE_LOCK = threading.RLock()
+
+
+def request_case_pause(case_dir: Path, *, campaign: bool = False) -> dict:
+    """Persist a clean write request without interrupting the parent orchestrator."""
+    import re
+    case_dir = Path(case_dir)
+    control = case_dir / "system/controlDict"
+    if not control.is_file(): raise FileNotFoundError(control)
+    text = control.read_text(encoding="utf-8")
+    for key, value in (("stopAt", "writeNow"), ("runTimeModifiable", "true")):
+        pattern = rf"\b{key}\s+\w+\s*;"
+        replacement = f"{key} {value};"
+        text = re.sub(pattern, replacement, text, count=1) if re.search(pattern, text) else text+"\n"+replacement+"\n"
+    temporary = control.with_name(f".controlDict.pause.{os.getpid()}.tmp")
+    temporary.write_text(text, encoding="utf-8")
+    os.replace(temporary, control)
+    request = {"mode": "writeNow", "requested_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "case_dir": str(case_dir.resolve())}
+    for name in ([STOP_REQUEST, CAMPAIGN_PAUSE] if campaign else [STOP_REQUEST]):
+        target = case_dir/name
+        temporary = target.with_name(target.name+".tmp")
+        temporary.write_text(json.dumps(request), encoding="utf-8")
+        os.replace(temporary, target)
+    return request
 
 
 class ExecutionState(str, Enum):
@@ -309,7 +333,15 @@ def pid_is_alive(pid: int | None, start_token: str | None = None) -> bool:
     except (OSError, ProcessLookupError, ValueError):
         return False
     if start_token and os.name != "nt":
-        return process_start_token(int(pid)) == str(start_token)
+        if process_start_token(int(pid)) != str(start_token):
+            return False
+    if os.name != "nt":
+        try:
+            raw = Path(f"/proc/{int(pid)}/stat").read_text()
+            if raw[raw.rfind(")")+2:].split()[0] == "Z":
+                return False
+        except (OSError, IndexError):
+            return False
     return True
 
 
@@ -442,9 +474,11 @@ def discover_live_solver_cases(project_root: Path) -> list[dict[str, Any]]:
     )
 
 
-def signal_solver_process(case_dir: Path, sig: int = signal.SIGINT) -> dict[str, Any]:
+def signal_solver_process(case_dir: Path, sig: int = signal.SIGINT, *, record: dict | None = None) -> dict[str, Any]:
     """Signal the recorded solver group only when PID identity still matches."""
-    record = load_solver_process(case_dir)
+    record = dict(record) if record is not None else load_solver_process(case_dir)
+    if record.get("case_dir") and Path(record["case_dir"]).resolve() != Path(case_dir).resolve():
+        raise ValueError("Process identity belongs to another case")
     pid = int(record.get("pid") or 0)
     token = str(record.get("pid_start_token") or "") or None
     if not pid_is_alive(pid, token):
@@ -452,7 +486,9 @@ def signal_solver_process(case_dir: Path, sig: int = signal.SIGINT) -> dict[str,
     if os.name == "nt":
         os.kill(pid, sig)
     else:
-        pgid = int(record.get("process_group_id") or process_group_id(pid) or pid)
+        pgid = int(process_group_id(pid) or pid)
+        if record.get("process_group_id") and pgid != int(record["process_group_id"]):
+            return {"status": "IDENTITY_CHANGED", "pid": pid, "signal": int(sig)}
         if pgid in {0, 1, os.getpgrp()}:
             raise RuntimeError(f"Refusing to signal unsafe process group {pgid}")
         os.killpg(pgid, sig)

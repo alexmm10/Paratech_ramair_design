@@ -68,7 +68,7 @@ from ramair_2d_urans_cases import (  # noqa: E402
 )
 
 
-BACKEND_API_VERSION = 27
+BACKEND_API_VERSION = 28
 SOLVER_CONFIG_SCHEMA_VERSION = 15
 
 
@@ -384,7 +384,7 @@ def sync_active_workcase_config(project_root: Path, name: str) -> list[Path]:
         revision_id = str(info.get("revision_id") or "unversioned")
         backup_root = (
             project_root
-            / "Previous Versions/Results Library Revision Backups"
+            / "Data Archive/Results Library Revision Backups"
             / case_name
             / stage
             / str(info.get("entity_id") or package)
@@ -1096,8 +1096,7 @@ def sweep_runner_command(
         command += ["--solver-config", solver_config_path]
     if resume_additional_time_star is not None and resume_additional_time_star > 0:
         command += ["--resume-additional-time-star", str(float(resume_additional_time_star))]
-    if not continue_after_timeout:
-        command.append("--no-continue-after-timeout")
+    command.append("--continue-after-timeout" if continue_after_timeout else "--no-continue-after-timeout")
     if not stop_when_force_stable:
         command.append("--no-stop-when-force-stable")
     if not stop_if_checkmesh_fails:
@@ -1110,8 +1109,7 @@ def sweep_runner_command(
         command.append("--no-cleanup-processor-directories")
     if postprocess_after_each:
         command.append("--postprocess-after-each")
-    if not continue_after_error:
-        command.append("--no-continue-after-error")
+    command.append("--continue-after-error" if continue_after_error else "--no-continue-after-error")
     if transient_phase_plan is not None:
         command += ["--transient-phase-plan", transient_phase_plan]
     return command
@@ -2383,19 +2381,12 @@ class JobManager:
     def poll(self, job: Job) -> Job:
         entry = self._processes.get(job.job_id)
         if entry is not None:
-            process, handle = entry
-            returncode = process.poll()
-            if returncode is not None and job.status == "RUNNING":
-                handle.flush()
-                handle.close()
-                self._processes.pop(job.job_id, None)
-                job.returncode = int(returncode)
-                if job.stop_requested_at:
-                    job.status = "PAUSED_RECOVERABLE"
-                else:
-                    job.status = "COMPLETED" if returncode == 0 else "FAILED"
-                job.finished_at = time.strftime("%Y-%m-%d %H:%M:%S")
-                self._write(job)
+            # Only the completion thread owns the handle and terminal write.
+            # Polling while it closes the log used to close/flush it twice.
+            try:
+                return self.load(Path(job.status_path))
+            except (OSError, ValueError):
+                pass
             return job
         # The monitor thread owns finalization. Streamlit fragments and tests
         # can still hold an older Job instance, so refresh it from disk before

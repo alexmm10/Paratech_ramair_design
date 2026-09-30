@@ -1168,6 +1168,7 @@ if selected_times:
                 nearfield_contour_final.relative_to(output_dir)
             )
             products["velocity_contours"].update({{
+                "status": "RENDERED",
                 "array": velocity_contour_name,
                 "association": "POINTS",
                 "isovalues_m_s": list(velocity_contours.Isosurfaces),
@@ -1256,7 +1257,7 @@ if selected_times:
         )
         if visual_vorticity_range is not None:
             visual_vorticity_upper = max(
-                1.0e-12, 0.07 * visual_vorticity_range[1]
+                1.0e-12, visual_vorticity_range[1]
             )
             GetColorTransferFunction("vorticity").RescaleTransferFunction(
                 0.0, visual_vorticity_upper
@@ -1284,7 +1285,7 @@ if selected_times:
                 robust_vorticity = robust_range(
                     vorticity_name, vorticity_field["association"], True
                 ) or vorticity_range
-                display_upper = max(1.0e-12, 0.07 * robust_vorticity[1])
+                display_upper = max(1.0e-12, vorticity_range[1])
                 if display_upper > max(0.0, robust_vorticity[0]):
                     vorticity_contours = Contour(
                         registrationName="VorticityMagnitudeContours",
@@ -1292,7 +1293,7 @@ if selected_times:
                     )
                     vorticity_contours.ContourBy = ["POINTS", "vorticityMagnitude"]
                     vorticity_contours.Isosurfaces = [
-                        display_upper * (i + 1) / 20.0 for i in range(20)
+                        display_upper * (10.0 ** (-4.0 + 4.0 * i / 119.0)) for i in range(120)
                     ]
                     vorticity_contours.UpdatePipeline(time=latest)
                     vorticity_contour_front = Transform(
@@ -1318,7 +1319,7 @@ if selected_times:
                     vorticity_contour_lut.RescaleTransferFunction(
                         0.0, display_upper
                     )
-                    vorticity_contour_display.LineWidth = 2.0
+                    vorticity_contour_display.LineWidth = 1.0
                     vorticity_contour_display.SetScalarBarVisibility(view, True)
                     style_scalar_bar(
                         vorticity_contour_lut, "|vorticity| [1/s]"
@@ -1539,6 +1540,41 @@ if selected_times:
                 display.Representation = "Surface"
             except Exception:
                 pass
+
+    # Local Reynolds uses the same fixed chord and molecular viscosity inside
+    # and outside. It is a velocity diagnostic, not a turbulence classifier.
+    try:
+        reynolds_config = {{}}
+        for parent in Path(foam_path).parents:
+            config_file = parent / "case_config.json"
+            if config_file.is_file():
+                reynolds_config = json.loads(config_file.read_text())
+                break
+        if "open" in str(reynolds_config.get("geometry_topology", "")).lower():
+            local_nu = float(reynolds_config.get("nu") or float(reynolds_config["mu"])/float(reynolds_config["rho"]))
+            if local_nu <= 0: raise ValueError("Invalid molecular viscosity")
+            local_re = Calculator(registrationName="LocalChordReynolds", Input=contour_plane)
+            local_re.ResultArrayName = "Re_local_c"
+            local_re.Function = "mag(U)*%.16g" % (chord_m/local_nu)
+            local_re.UpdatePipeline(time=latest)
+            Hide(visual_source, view)
+            re_display = Show(local_re, view)
+            ColorBy(re_display, ("POINTS", "Re_local_c"))
+            re_display.RescaleTransferFunctionToDataRange(False, True)
+            re_display.SetScalarBarVisibility(view, True)
+            style_scalar_bar(GetColorTransferFunction("Re_local_c"), "Re_local = |U| c / nu")
+            set_camera("nearfield")
+            show_airfoil_overlay(latest)
+            set_title("Local chord Reynolds: internal and external flow", latest)
+            Render(view)
+            re_image = output_dir / ("Reynolds_local_%s_final.png" % stage_slug)
+            SaveScreenshot(str(re_image), view, ImageResolution=[1600, 1000])
+            products["local_reynolds"] = {{"image":re_image.name,"definition":"|U(x,y,t)| c / nu", "nu_m2_s":local_nu,"length_m":chord_m,"interpretation":"Fixed-chord velocity diagnostic; not local transition or eddy-viscosity Reynolds."}}
+            re_display.SetScalarBarVisibility(view, False)
+            Hide(local_re, view)
+            Show(visual_source, view)
+    except Exception as exc:
+        products["local_reynolds_error"] = str(exc)
 
     set_streamline_visibility(False)
     color_velocity(instantaneous=True)

@@ -1481,11 +1481,8 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
             value=bool(rans_config.get("automatic_core_selection", True)),
             help="Objetivo 50k-200k celdas por proceso, limitado por MPI y por el máximo seleccionado.",
         )
-        rans_config["renumber_before_decompose"] = parallel_cols[1].toggle(
-            "Renumerar antes de descomponer",
-            value=bool(rans_config.get("renumber_before_decompose", True)),
-            help="Ejecuta renumberMesh -overwrite solo al iniciar un caso paralelo limpio.",
-        )
+        rans_config["renumber_before_decompose"] = False
+        parallel_cols[1].caption("Orden de celdas conservado: se descompone sin renumerar la malla.")
         policy_cols = st.columns(3)
         policy_cols[0].metric("Parada automática", "No")
         rans_config["continue_queue_after_nonconvergence"] = policy_cols[1].toggle(
@@ -1691,11 +1688,8 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
             value=bool(urans_config.get("automatic_core_selection", True)),
             help="Usa el recuento exacto de la malla y deja --n-cores como límite superior.",
         )
-        urans_config["renumber_before_decompose"] = st.toggle(
-            "Renumerar malla antes de la primera descomposición URANS",
-            value=bool(urans_config.get("renumber_before_decompose", True)),
-            help="No se repite al continuar fases o reanudar resultados existentes.",
-        )
+        urans_config["renumber_before_decompose"] = False
+        st.caption("URANS conserva la numeración de la malla asociada a sus campos RANS y transitorios.")
         active_cells = int(active_mesh_quality.get("cell_count") or 0)
         rank_plan = recommended_core_count(
             active_cells or None,
@@ -1986,10 +1980,12 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
                 "protegida frente a una ejecucion completa desde cero. Para "
                 "reiniciarla use Eliminar base activa y comenzar de nuevo."
             )
-        st.info(
-            "Una base con resultados existentes nunca se reinicia desde cero. "
-            "Para hacerlo debe usar la accion avanzada de eliminacion explicita."
-        )
+        st.caption("Continuar conserva la malla y los campos existentes. Empezar de cero archiva la ejecución completa y permite preparar una base nueva.")
+        restart_choice = st.radio("Acción sobre la base RANS", ["Continuar desde el último paso", "Archivar y empezar de cero"], key="rans-restart-choice")
+        if restart_choice == "Archivar y empezar de cero":
+            if st.button("Archivar base seleccionada y habilitar inicio desde cero", disabled=not rans_confirm, key="rans-archive-new"):
+                start_job("validation_lab_rans_archive", validation_study_command(root, "rans-delete", mesh_id=selected_checkpoint_mesh, confirm=True, archive_before_delete=True))
+            st.caption("Al finalizar el archivado, use Generar/continuar para iniciar la nueva base. Los resultados anteriores quedan en Data Archive/ValidationLab.")
         with st.expander("Opciones avanzadas"):
             preparation = st.columns(2)
             if preparation[0].button(
@@ -3019,6 +3015,8 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
                 disabled=not interval_enabled,
                 key=f"validation-urans-post-range-end-{case_id}",
             )
+            mark_spectral_peaks = st.toggle('Marcar picos y candidatos armónicos en espectros',
+                value=bool(_read_json(run_root/'frequency_display.json').get('mark_peaks',True)),key=f'spectral-peaks-{case_id}')
             actions = st.columns(4)
             if actions[0].button(
                 "Analizar resultado URANS",
@@ -3031,6 +3029,7 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
                         str(root / "CFD_2D/scripts/ramair_2d_urans_review.py"),
                         "--run-root",
                         str(run_root),
+                        '--mark-spectral-peaks' if mark_spectral_peaks else '--no-mark-spectral-peaks',
                     ],
                 )
             if actions[1].button(
@@ -3055,7 +3054,7 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
                         "--case-dir", str(case_path),
                         "--output-dir", str(run_root / "postprocess"),
                         "--variant", mesh_id,
-                        "--alpha", str(config.get("study_angle_deg", 8.0)),
+                        "--alpha", str(row.get("alpha_deg", config.get("study_angle_deg", 8.0))),
                         "--simulation-mode", "URANS",
                         "--no-include-rans-stage",
                         "--run-openfoam-postprocess",
@@ -3082,7 +3081,7 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
                         "--case-dir", str(case_path),
                         "--output-dir", str(run_root / "postprocess"),
                         "--variant", mesh_id,
-                        "--alpha", str(config.get("study_angle_deg", 8.0)),
+                        "--alpha", str(row.get("alpha_deg", config.get("study_angle_deg", 8.0))),
                         "--simulation-mode", "URANS",
                         "--no-include-rans-stage",
                         "--automatic-paraview-products",
@@ -3104,6 +3103,11 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
                 _plot_inventory(run_root / "plots")
                 review = _read_json(run_root / "review.json")
                 if review:
+                    decision = st.selectbox("Publicación de este análisis", ["publish-partial", "accept"],
+                        format_func=lambda value: "Comparación provisional de producción parcial" if value == "publish-partial" else "Aceptar para convergencia (requiere todos los controles)", key=f"urans-decision-{case_id}")
+                    if st.button("Publicar punto revisado", key=f"urans-publish-{case_id}"):
+                        start_job("validation_urans_publish", [sys.executable, str(root / "CFD_2D/scripts/ramair_2d_urans_review.py"), "--run-root", str(run_root), "--decision", decision, "--reason", "Revisión explícita desde la aplicación"])
+                    st.caption("La comparación provisional conserva sus limitaciones y no entra en el GCI aceptado. Recalcular el análisis invalida su publicación anterior.")
                     review_cols = st.columns(4)
                     review_cols[0].metric("Estado", str(review.get("status") or "-"))
                     review_cols[1].metric("Fase analizada", str((review.get("sampling_window") or {}).get("stage") or "-"))
@@ -3319,7 +3323,7 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
             )
         _json_panel(
             active
-            / "convergence/urans_space_time"
+            / "convergence/space_time"
             / selected_topology
             / "space_time_report.json",
             f"Informe espacio-tiempo {selected_topology}",
@@ -3332,6 +3336,15 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
         else:
             st.info("No hay resultados URANS reales suficientes.")
         _plot_inventory(active / "postprocess/spatial_temporal_urans")
+        convergence_root = active / "convergence/space_time" / selected_topology
+        with st.expander("Producción parcial revisada · comparación provisional", expanded=True):
+            _json_panel(convergence_root / "exploratory/report.json", "Ventanas y limitaciones")
+            partial_rows = _records(convergence_root / "exploratory/reviewed_runs.csv")
+            if partial_rows:
+                st.dataframe(partial_rows, hide_index=True, width="stretch")
+            _plot_inventory(convergence_root / "exploratory")
+        with st.expander("Análisis frecuencial por caso y comparación", expanded=True):
+            _plot_inventory(active / "postprocess/frequency" / selected_topology)
         if subsection == "Coste y precisión":
             _json_panel(
                 active / "reports/performance_hardware_audit.json",
@@ -3352,6 +3365,12 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
         with open_frequency:
             _plot_inventory(active / "postprocess/frequency/open")
         with combined_frequency:
+            with st.expander("Comparar dos casos · PSD en cuatro paneles"):
+                choices=[p.parent for p in (active/"runs").glob("*/*/*/review.json") if (p.parent/"plots/urans_review/frequency_complete/Cl_PSD.csv").is_file()]
+                chosen=st.multiselect("Dos casos con espectros calculados",choices,format_func=lambda p:p.name,key="paired-lift-psd")
+                if st.button("Generar comparación PSD / St de espesor",disabled=len(chosen)!=2):
+                    from ramair_frequency_analysis import paired_lift_psd_figure
+                    paired_lift_psd_figure(chosen,active/"postprocess/frequency/combined/paired_lift_psd.png")
             _plot_inventory(active / "postprocess/frequency/combined")
         st.info(
             "Una frecuencia se acepta con estacionariedad y al menos 10 ciclos "
@@ -3583,14 +3602,15 @@ def render_convergence_lab(root: Path, start_job: StartJob) -> None:
 
 
 def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
-    validation_tab, open_closed_tab, convergence_tab, performance_tab = st.tabs(
-        ["Validación", "Comparación abierto-cerrado", "Convergencia", "Rendimiento"]
+    module = st.radio("Sección del laboratorio",
+        ["Validación", "Comparación abierto-cerrado", "Convergencia", "Rendimiento"],
+        horizontal=True, key="validation-module",
     )
-    with validation_tab:
+    if module == "Validación":
         render_ls1_validation(root, start_job)
-    with open_closed_tab:
+    if module == "Comparación abierto-cerrado":
         render_open_closed_validation(root, start_job)
-    with convergence_tab:
+    if module == "Convergencia":
         render_convergence_lab(root, start_job)
         with st.expander("Paquete portátil de casos de convergencia", expanded=False):
             candidates = sorted(
@@ -3637,7 +3657,7 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
                     "--n-cores", str(int(remote_cores)),
                     "--case-timeout-min", "360",
                     "--automatic-core-selection",
-                    "--renumber-before-decompose",
+                    "--no-renumber-before-decompose",
                 ]
                 for label in selected_labels:
                     command += ["--case", str(labels[label])]
@@ -3666,5 +3686,5 @@ def render_validation_convergence_lab(root: Path, start_job: StartJob) -> None:
                         "--existing-action", "archive",
                     ],
                 )
-    with performance_tab:
+    if module == "Rendimiento":
         render_performance_report(root)

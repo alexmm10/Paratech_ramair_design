@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import gzip
 import importlib.util
 import json
 import math
@@ -25,7 +26,7 @@ from typing import Any
 
 from openfoam_environment import activate_openfoam_environment
 from openfoam_history import read_force_coefficient_history
-from ramair_execution_control import publish_solver_process
+from ramair_execution_control import publish_solver_process, request_case_pause
 from ramair_2d_parallel import (
     case_cell_count,
     configure_decompose_dictionary,
@@ -104,7 +105,27 @@ def write_status(cdir: Path, status: dict[str, Any]) -> None:
 
 def boundary_text(cdir: Path) -> str:
     p = cdir / "constant" / "polyMesh" / "boundary"
-    return p.read_text(encoding="utf-8", errors="ignore") if p.exists() else ""
+    if p.exists(): return p.read_text(encoding="utf-8", errors="ignore")
+    if p.with_name("boundary.gz").exists():
+        with gzip.open(p.with_name("boundary.gz"), "rt", errors="replace") as stream: return stream.read()
+    return ""
+
+
+def verify_restart_mesh(cdir: Path, restart: Path) -> dict[str, Any]:
+    """Prevent changing mesh ordering beneath existing RANS or URANS fields."""
+    from ramair_2d_checkpoint_integrity import checkpoint_mesh_identity
+    fields = ["U", "p"] + [name for name in ("nuTilda", "k", "omega", "epsilon")
+                              if (cdir/"0"/name).exists() or (cdir/"0"/(name+".gz")).exists()]
+    identity = checkpoint_mesh_identity(cdir, restart, required_fields=fields)
+    if identity["status"] != "READY":
+        raise RuntimeError("Unsafe restart: missing/ambiguous mesh or fields. Restore the matching checkpoint; no files were replaced. " + str(identity))
+    ledger = cdir / ".ramair_restart_mesh.json"
+    previous = read_json(ledger, {}) or {}
+    if previous.get("poly_mesh_hash") and previous["poly_mesh_hash"] != identity["poly_mesh_hash"]:
+        raise RuntimeError("Unsafe restart: mesh ordering changed since the recorded run. Restore its matching mesh and fields or start an archived new attempt.")
+    write_json_atomic(ledger, {"poly_mesh_hash": identity["poly_mesh_hash"], "renumber_allowed": False,
+                              "checked_restart": str(restart), "verified_at": time.strftime("%Y-%m-%d %H:%M:%S")})
+    return identity
 
 
 def validate_openfoam_case_path(cdir: Path) -> Path:
@@ -198,9 +219,10 @@ def prepare_resume(cdir: Path, additional_time_star: float | None = None) -> dic
     """Restart from the latest reconstructed time and optionally extend endTime."""
     positive = [(float(name), name) for name in numeric_time_dirs(cdir) if float(name) > 0.0]
     reconstruction: dict[str, Any] = {"status": "NOT_REQUIRED"}
-    if not positive:
+    processor_dirs = [p for p in cdir.glob("processor*") if p.is_dir() and re.fullmatch(r"processor\d+", p.name)]
+    if processor_dirs:
         processor_times: list[set[float]] = []
-        for processor in sorted(cdir.glob("processor*")):
+        for processor in sorted(processor_dirs):
             if not processor.is_dir():
                 continue
             processor_times.append({
@@ -209,7 +231,7 @@ def prepare_resume(cdir: Path, additional_time_star: float | None = None) -> dic
                 if float(name) > 0.0
             })
         common = set.intersection(*processor_times) if processor_times else set()
-        if common:
+        if common and max(common) > max((value for value, _ in positive), default=0.0):
             latest_processor = max(common)
             executable = shutil.which("reconstructPar")
             if executable is None:
@@ -217,7 +239,7 @@ def prepare_resume(cdir: Path, additional_time_star: float | None = None) -> dic
                     "RESUME_NOT_AVAILABLE: processor-only positive time exists "
                     "but reconstructPar is not available"
                 )
-            command = [executable, "-time", f"{latest_processor:g}"]
+            command = [executable, "-time", f"{latest_processor:.12g}"]
             completed = subprocess.run(
                 command,
                 cwd=str(cdir),
@@ -250,6 +272,7 @@ def prepare_resume(cdir: Path, additional_time_star: float | None = None) -> dic
             "or common processor time directory"
         )
     latest_time, latest_name = max(positive)
+    verify_restart_mesh(cdir, cdir/latest_name)
     path = cdir / "system" / "controlDict"
     text = path.read_text(encoding="utf-8", errors="ignore")
     end_match = re.search(r"\bendTime\s+([0-9.eE+-]+)\s*;", text)
@@ -574,7 +597,21 @@ def run_script_with_timeout(
         poll = getattr(proc, "poll", None)
         if not callable(poll):
             return
+        last_numerical_check = 0.0
         while poll() is None:
+            if time.monotonic() - last_numerical_check > 5.0:
+                last_numerical_check = time.monotonic()
+                solver_log = cdir / "log.foamRun"
+                try:
+                    with solver_log.open("rb") as stream:
+                        stream.seek(max(0, solver_log.stat().st_size-131072))
+                        tail = stream.read().decode("utf-8", errors="replace")
+                    event = classify_openfoam_log(tail)
+                    if "ADAPTIVE_TIMESTEP_COLLAPSE" in event.fatal_markers:
+                        (cdir / "numerical_guard.json").write_text(json.dumps(event.as_dict(), indent=2), encoding="utf-8")
+                        request_case_pause(cdir, campaign=True)
+                except (OSError, ValueError):
+                    pass
             if not external_stop_path.is_file():
                 time.sleep(0.5)
                 continue
@@ -641,10 +678,10 @@ def run_script_with_timeout(
             if solver_log.is_file() else "",
             returncode=proc.returncode,
         )
-        if outcome in {"stopped_partial", "stopped_forced", "timeout_partial"}:
-            status = "PAUSED_RECOVERABLE"
-        elif event.numerical_divergence or event.setup_error or event.solver_failure:
+        if event.numerical_divergence or event.setup_error or event.solver_failure:
             status = "FAILED"
+        elif outcome in {"stopped_partial", "stopped_forced", "timeout_partial"}:
+            status = "PAUSED_RECOVERABLE"
         else:
             status = "COMPLETED" if int(proc.returncode or 0) == 0 else "FAILED"
         publish_solver_process(
@@ -1239,11 +1276,10 @@ def run_case(
             reconstruction_mode=reconstruction_mode,
             reconstruction_time_range=reconstruction_time_range,
             reconstruction_fields=reconstruction_fields,
-            renumber_before_decompose=(
-                bool(renumber_before_decompose)
-                and effective_start_mode == FRESH_FROM_CHECKPOINT
-                and not any(float(name) > 0.0 for name in numeric_time_dirs(cdir))
-            ),
+            # A prepared case may already contain nonuniform RANS fields in 0/.
+            # Keep its global ordering for every execution, including phase A.
+            # Mesh renumbering belongs to mesh preparation before attaching fields.
+            renumber_before_decompose=False,
         )
     print(
         f"Run script {'written' if script_state['changed'] else 'unchanged'}: "
@@ -1346,6 +1382,9 @@ def run_case(
             )
     if effective_start_mode == RESUME_EXISTING:
         resume_report = prepare_resume(cdir, resume_additional_time_star)
+    else:
+        restart_name = max(positive_times, key=float) if positive_times else "0"
+        verify_restart_mesh(cdir, cdir/restart_name)
     started = time.strftime("%Y-%m-%d %H:%M:%S")
     log_path = cdir / f"log.{solver}"
     control_path = cdir / "system" / "controlDict"
@@ -1462,6 +1501,8 @@ def run_case(
             "stage_returncodes": stage_evidence.get("stage_returncodes", {}),
             "openfoam_event": log_event,
         }
+        if log_event.get("numerical_divergence"):
+            status.update(status="RUN_DIVERGED", divergence_detected=True, recovery_requires_earlier_checkpoint=True)
         write_status(cdir, status)
         print("")
         if run_outcome == "converged_partial":
@@ -1479,6 +1520,8 @@ def run_case(
         print(status["solver_log_tail"])
         if is_timeout and fail_on_timeout:
             raise TimeoutError(f"OpenFOAM solver timed out after {timeout_min:g} min; inspect {log_path}")
+        if log_event.get("numerical_divergence"):
+            raise RuntimeError(f"Numerical guard stopped the solver; diagnose the hotspot and recover an earlier stable checkpoint: {log_path}")
         return
     try:
         if completed_returncode != 0:

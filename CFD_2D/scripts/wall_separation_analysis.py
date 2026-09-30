@@ -116,6 +116,15 @@ def _orient_le_to_te(branch: pd.DataFrame) -> pd.DataFrame:
 
 def split_connected_wall_branches(data: pd.DataFrame, chord_m: float) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Split connected wall patches into named LE/lip-to-TE branches."""
+    if 'topology_branch_order' in data and data.topology_branch_order.notna().all():
+        branches=[]
+        for (side,surface,component),part in data.groupby(['wall_side','surface','component_id']):
+            part=part.sort_values('topology_branch_order').copy()
+            part['branch_id']=f'{surface}_{side}'
+            part['s_m']=np.hypot(part.x_m.diff(),part.y_m.diff()).fillna(0).cumsum()
+            part['s_over_c']=part.s_m/max(float(chord_m),1e-30)
+            branches.append(part)
+        return pd.concat(branches,ignore_index=True), {'status':'RESOLVED','method':'oriented_baffle_face_connectivity','branches':[str(p.branch_id.iloc[0]) for p in branches]}
     branches: list[pd.DataFrame] = []
     diagnostics: dict[str, Any] = {"method": "face_edge_connectivity", "patches": {}}
     for patch, patch_frame in data.groupby("patch", sort=True):

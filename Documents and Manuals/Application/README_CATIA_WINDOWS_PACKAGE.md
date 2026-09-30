@@ -40,8 +40,8 @@ variable named `RAMAIR_CATIA_INPUTS` to the full extracted
 - `CATIA_exports`: intended CAD export destination.
 - `logs`: preprocessor/package logs.
 - `reports`: static package verification.
-- `CFD_2D\scripts\ramair_profile_utils.py`: the only shared Python helper
-  required by this standalone preprocessor.
+- `CFD_2D\scripts`: shared helpers for profiles, geometry, crossports,
+  suspension, manual connections and diagnostics. All are included together.
 
 `VERIFY_CATIA_PACKAGE.py` performs static checks only. It does not launch CATIA.
 The ZIP manifest includes SHA-256 hashes for the critical source and generated

@@ -1,0 +1,93 @@
+{
+  "schema_version": 3,
+  "name": "open_urans_refine_20260901_body2150_manual_mild_bump",
+  "geometry": {
+    "spanwise_thickness_chord": 0.01
+  },
+  "boundary_layer": {
+    "layers": 75,
+    "growth_rate": 1.1,
+    "distribution_mode": "beta_law",
+    "thickness_safety_factor": 1.2,
+    "target_y_plus": 0.6666666666666666,
+    "wall_nodes_target": 1000,
+    "minimum_tangential_size_chord": 0.0003,
+    "maximum_tangential_size_chord": 0.005,
+    "wall_bump_coefficient": 0.45,
+    "te_cap_nodes": 40,
+    "inlet_nodes": 140,
+    "inlet_bump_coefficient": 1.0,
+    "lip_fan_elements": 0,
+    "minimum_profile_point_spacing_chord": 1e-06,
+    "continue_over_base_inlet": true,
+    "unstructured_lip_length_chord": 0.01,
+    "base_inlet_blend_length_chord": 0.035,
+    "base_inlet_tangent_scale": 1.0,
+    "leading_edge_curvature_fraction": 0.5,
+    "prefer_exact_base_inlet": true,
+    "automatic_bump_matching": false,
+    "manual_four_segment_bump_enabled": true,
+    "segment_divisions": {
+      "te": 44,
+      "upper": 990,
+      "leading_or_inlet": 220,
+      "lower": 896
+    },
+    "manual_bump_coefficients": {
+      "te": 1.8,
+      "upper": 0.35,
+      "leading_or_inlet": 1.0001,
+      "lower": 0.35
+    },
+    "bump_maximum_growth_ratio": 1.1,
+    "bump_maximum_size_percent_chord": 0.25,
+    "te_segment_early_start_enabled": false,
+    "te_segment_start_x_over_c": 0.98,
+    "te_geometry_points": 35
+  },
+  "external_volume": {
+    "domain_radius_chord": 50.0,
+    "interface_size_mode": "tangential_match",
+    "interface_size_chord": 3.5e-05,
+    "interface_tangential_factor": 0.4,
+    "farfield_size_chord": 5.0,
+    "radial_growth_rate": 0.12,
+    "mesh_algorithm": 6,
+    "automatic_extend_enabled": true,
+    "extend_distance_max_chord": 20.0,
+    "extend_power": 0.5,
+    "extend_size_max_chord": 5.0,
+    "extend_interface_guard_enabled": true,
+    "extend_interface_transition_chord": 0.1
+  },
+  "internal_volume": {
+    "inlet_size_factor": 0.45,
+    "core_size_chord": 0.011,
+    "inlet_fine_distance_chord": 0.0008,
+    "transition_distance_chord": 0.04,
+    "inner_wall_size_chord": 0.0016,
+    "inner_wall_transition_distance_chord": 0.04,
+    "te_internal_size_chord": 0.0005,
+    "te_internal_transition_distance_chord": 0.008,
+    "automatic_extend_enabled": false,
+    "extend_distance_max_chord": 0.1,
+    "extend_power": 0.5,
+    "extend_size_max_chord": 0.01
+  },
+  "execution": {
+    "gmsh_threads": 12,
+    "openfoam_timeout_s": 900,
+    "post_generation_optimization": "relocate2d",
+    "post_generation_optimization_iterations": 5,
+    "mesh_smoothing": 1,
+    "analyse_mesh_quality": false
+  },
+  "topology": "open",
+  "source_evidence": {
+    "revision": "open_urans_refine_20260901_body2150_manual_mild_bump",
+    "path": "CFD_2D/experimental_meshes/open_reference_from_scratch/revisions/open_urans_refine_20260901_body2150_manual_mild_bump",
+    "checkMesh_status": "OK",
+    "qualification": "historical_geometry_only_requires_regeneration",
+    "path_role": "historical provenance; not required to generate this preset"
+  }
+}

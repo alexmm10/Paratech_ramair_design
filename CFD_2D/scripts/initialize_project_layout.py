@@ -28,13 +28,8 @@ REQUIRED_FILES = [
 
 REQUIRED_DIRECTORIES = [
     *LAYOUT.values(),
-    Path("Documents and Manuals/General"),
-    Path("Documents and Manuals/CATIA"),
+    Path("Documents and Manuals/Current"),
     Path("Documents and Manuals/CFD 2D"),
-    Path("Documents and Manuals/Gmsh"),
-    Path("Documents and Manuals/OpenFOAM"),
-    Path("Documents and Manuals/PyFoam"),
-    Path("Documents and Manuals/XFOIL and XFLR5"),
     Path("Results"),
     Path("CFD_2D/CFD_2D_inputs/config"),
     Path("CFD_2D/meshes"),

@@ -27,7 +27,7 @@ COMPARISON_STUDY = "open_closed_polar_M0p15_Re1p9e6"
 POINT_COLUMNS = [
     "alpha_deg", "Cl", "Cd", "Cm", "L_D", "reynolds", "mach",
     "result_dir", "status", "published_incomplete", "publication_warning",
-    "updated_at",
+    "updated_at", "stage",
 ]
 VARIABLES = {
     "Cl": (r"$C_L$", "Lift coefficient"),
@@ -138,13 +138,16 @@ def nondimensionalization_audit(project_root: Path, alpha: float = 8.0) -> dict[
     }
 
 
-def _mean_record(project_root: Path, variant: str, alpha: float) -> tuple[dict[str, Any] | None, str | None]:
+def _mean_record(project_root: Path, variant: str, alpha: float, stage: str = "URANS") -> tuple[dict[str, Any] | None, str | None]:
     name = alpha_directory(alpha)
     result = project_root / "CFD_2D/results" / variant / name
     case = project_root / "CFD_2D/openfoam_cases" / variant / name
     cfg = _read_json(case / "case_config.json", {}) or {}
     summary = _read_json(result / "case_summary.json", {}) or {}
     mean_path = result / "forceCoeffs_mean.csv"
+    if stage == "RANS":
+        summary = _read_json(result / "RANS/stage_summary.json", {}) or summary.get("rans_stage") or {}
+        mean_path = result / "RANS/forceCoeffs_RANS_mean.csv"
     try:
         row = pd.read_csv(mean_path).iloc[0]
         cl, cd, cm = (float(row[key]) for key in ("Cl", "Cd", "Cm"))
@@ -155,18 +158,18 @@ def _mean_record(project_root: Path, variant: str, alpha: float) -> tuple[dict[s
     run_status = str((summary.get("run_status") or {}).get("status") or "").upper()
     if run_status in {"RUN_DIVERGED", "NUMERICAL_DIVERGENCE", "SOLVER_FAILED"}:
         return None, f"El promedio pertenece a una ejecución divergida ({run_status})"
-    if max(abs(cl), abs(cd), abs(cm)) > 100.0:
+    if not all(math.isfinite(v) for v in (cl, cd, cm)) or max(abs(cl), abs(cd), abs(cm)) > 100.0:
         return None, "Los coeficientes exceden el límite físico de publicación; revise divergencia"
     staged = _read_json(case / "staged_run_status.json", {}) or {}
     staged_status = str(staged.get("status") or "NOT_STAGED").upper()
-    complete = staged_status in {"TRANSIENT_STAGE_FINISHED", "TRANSIENT_STAGE_CONVERGED"}
+    complete = stage == "RANS" or staged_status in {"TRANSIENT_STAGE_FINISHED", "TRANSIENT_STAGE_CONVERGED"}
     return {
-        "alpha_deg": float(alpha), "Cl": cl, "Cd": cd, "Cm": cm,
+        "alpha_deg": float(alpha), "Cl": cl, "Cd": cd, "Cm": cm, "stage": stage,
         "L_D": cl / cd if abs(cd) > 1.0e-15 else float("nan"),
         "reynolds": reynolds, "mach": mach, "result_dir": str(result),
-        "status": str(summary.get("status") or staged_status),
+        "status": "RANS_MANUALLY_REVIEWED" if stage == "RANS" else str(summary.get("status") or staged_status),
         "published_incomplete": not complete,
-        "publication_warning": "" if complete else "Punto provisional: la fase transitoria no ha finalizado.",
+        "publication_warning": "Solo RANS: revisión manual; sin validación temporal URANS." if stage == "RANS" else "" if complete else "Punto provisional: la fase transitoria no ha finalizado.",
         "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }, None
 
@@ -176,10 +179,11 @@ def publish_open_point(
     alpha: float,
     *,
     allow_incomplete: bool = False,
+    stage: str = "URANS",
 ) -> Path:
     output = comparison_output(project_root)
     output.mkdir(parents=True, exist_ok=True)
-    record, error = _mean_record(project_root, OPEN_VARIANT, alpha)
+    record, error = _mean_record(project_root, OPEN_VARIANT, alpha, stage)
     if record is None:
         raise RuntimeError(error or "Resultado abierto no disponible")
     audit = nondimensionalization_audit(project_root, alpha)
@@ -465,6 +469,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--action", choices=["refresh", "publish", "remove"], default="refresh")
     parser.add_argument("--alpha", type=float)
     parser.add_argument("--allow-incomplete", action="store_true")
+    parser.add_argument("--stage", choices=["RANS", "URANS"], default="URANS")
     return parser.parse_args()
 
 
@@ -473,7 +478,7 @@ def main() -> None:
     root = args.project_root.resolve()
     if args.action == "publish":
         if args.alpha is None: raise SystemExit("--alpha is required for publish")
-        path = publish_open_point(root, args.alpha, allow_incomplete=args.allow_incomplete)
+        path = publish_open_point(root, args.alpha, allow_incomplete=args.allow_incomplete, stage=args.stage)
     elif args.action == "remove":
         if args.alpha is None: raise SystemExit("--alpha is required for remove")
         path = remove_open_point(root, args.alpha)

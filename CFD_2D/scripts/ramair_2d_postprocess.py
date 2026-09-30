@@ -806,6 +806,7 @@ def prepare_steady_stage_results(
     manual_scales: dict[str, tuple[float, float]],
     average_tail_samples: int,
     alpha_deg: float,
+    average_start_iteration: float | None = None,
 ) -> dict[str, Any]:
     """Expose the latest SIMPLE stage separately from physical URANS time."""
     stage_dir = out_dir / "RANS"
@@ -827,7 +828,12 @@ def prepare_steady_stage_results(
             target = stage_dir / name
             shutil.copy2(source, target)
             copied.append(str(target))
-    if (
+    archived_view = archive / "paraview_case"
+    archived_latest = max([t for t, _ in numeric_time_dirs(archived_view)] or [0.0]) if archived_view.is_dir() else 0.0
+    direct_latest = max([t for t, _ in numeric_time_dirs(case_dir)] or [0.0])
+    if archived_latest > 0 and (str(simulation_mode).upper() != "RANS" or archived_latest >= direct_latest):
+        paraview_case = archived_view
+    elif (
         str(simulation_mode).upper() == "RANS"
         and (case_dir / "system" / "controlDict").is_file()
     ):
@@ -841,12 +847,21 @@ def prepare_steady_stage_results(
             else archive
         )
     records, force_sources = read_force_coefficient_history(archive, include_processor0=True)
+    if str(simulation_mode).upper() == "RANS" and archive != case_dir:
+        live_records, live_sources = read_force_coefficient_history(case_dir, include_processor0=True)
+        records = [*records, *live_records]
+        force_sources = [*force_sources, *live_sources]
     force_summary: dict[str, Any] = {"status": "NOT_AVAILABLE"}
     if records:
         force_history = pd.DataFrame(records).drop_duplicates(subset=["Time"], keep="last")
         force_history = force_history.sort_values("Time").reset_index(drop=True)
         tail_count = min(max(1, int(average_tail_samples)), len(force_history))
         force_window = force_history.tail(tail_count).copy()
+        if average_start_iteration is not None:
+            force_window=force_history[force_history.Time>=float(average_start_iteration)].copy()
+            if len(force_window)<2:
+                raise ValueError('The selected RANS averaging interval contains fewer than two samples')
+            tail_count=len(force_window)
         columns = [name for name in ("Cl", "Cd", "Cm") if name in force_window.columns]
         mean = force_window[columns].mean().to_frame("mean").T
         std = force_window[columns].std().to_frame("std").T
@@ -905,6 +920,7 @@ def prepare_steady_stage_results(
             "time_semantics": "SIMPLE iteration counter; not physical seconds",
             "history_samples": int(len(force_history)),
             "averaging_tail_samples_requested": int(average_tail_samples),
+            "averaging_start_iteration_requested": average_start_iteration,
             "averaging_tail_samples_used": int(tail_count),
             "averaging_start_iteration": float(force_window["Time"].min()),
             "averaging_end_iteration": float(force_window["Time"].max()),
@@ -914,6 +930,10 @@ def prepare_steady_stage_results(
             "aerodynamic_efficiency": efficiency,
             "solver_log": rans_solver_meta,
         }
+        source_status = str((read_json(archive / "run_status.json", {}) or {}).get("status", "")).upper()
+        if any(flag in source_status for flag in ("DIVERGED", "NUMERICAL_DIVERGENCE", "RUN_FAILED", "SOLVER_FAILED")):
+            force_summary["status"] = "RANS_DIVERGED_OR_FAILED"
+        force_summary["source_solver_status"] = source_status or "UNKNOWN"
         (stage_dir / "RANS_force_summary.json").write_text(
             json.dumps(force_summary, indent=2) + "\n", encoding="utf-8"
         )
@@ -1223,6 +1243,7 @@ def postprocess(
     direct_output_dir: Path | None = None,
     simulation_mode: str = "URANS",
     rans_average_tail_samples: int = 500,
+    rans_average_start_iteration: float | None = None,
     include_rans_stage: bool = True,
 ) -> Path:
     postprocess_started = time.monotonic()
@@ -1452,6 +1473,7 @@ def postprocess(
             robust_percentiles=robust_percentiles,
             manual_scales=manual_scales,
             average_tail_samples=max(1, int(rans_average_tail_samples)),
+            average_start_iteration=rans_average_start_iteration,
             alpha_deg=alpha,
         ) if include_rans_stage else {
             "status": "DISABLED",
@@ -1621,6 +1643,15 @@ def postprocess(
                 "case_dir": str(case_dir),
                 "error": str(exc),
             }
+    if str(simulation_mode).upper() == "RANS" and summary.get("rans_stage", {}).get("force_summary", {}).get("status") == "AVAILABLE":
+        force_summary = summary["rans_stage"]["force_summary"]
+        summary.update(status="PROCESSED_RANS", mean=force_summary["mean"], std=force_summary["std"],
+                       reason="real_archived_or_current_RANS_history", averaging_window={
+                           "start_iteration":force_summary["averaging_start_iteration"],
+                           "end_iteration":force_summary["averaging_end_iteration"]})
+        for source_name,target_name in (("forceCoeffs_RANS_mean.csv","forceCoeffs_mean.csv"),
+                                       ("forceCoeffs_RANS_std.csv","forceCoeffs_std.csv")):
+            shutil.copy2(out_dir/"RANS"/source_name,out_dir/target_name)
     if case_dir.exists() and str(simulation_mode).upper() == "URANS":
         urans_stage = mirror_urans_stage_results(out_dir, case_dir)
     else:
@@ -1769,6 +1800,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip scalar/final-field reconstruction and render only the bounded ParaView animations.",
     )
+    p.add_argument("--rans-average-start-iteration", type=float, default=None, help="Average from this absolute SIMPLE iteration through the last force sample.")
     p.add_argument("--paraview-maximum-frames", type=int, default=24, help="Maximum number of written times rendered per automatic animation.")
     p.add_argument(
         "--paraview-time-range-s",
@@ -1841,6 +1873,7 @@ def main() -> None:
         direct_case_dir=args.case_dir,
         direct_output_dir=args.output_dir,
         rans_average_tail_samples=max(1, int(args.rans_average_tail_samples)),
+        rans_average_start_iteration=args.rans_average_start_iteration,
         simulation_mode=args.simulation_mode,
         include_rans_stage=args.include_rans_stage,
     )

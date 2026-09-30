@@ -193,7 +193,7 @@ def backup_existing_case_package(case_root: Path, output_dir: Path, variant_requ
         raise RuntimeError(f"Refusing to archive output_dir outside generated CFD inputs: {resolved_output}") from exc
     if resolved_output == generated_root:
         raise RuntimeError(f"Refusing to archive the whole CFD inputs root: {resolved_output}")
-    backup_root = project_root / "Previous Versions" / "cfd2d_case_package_backups"
+    backup_root = project_root / "Data Archive" / "cfd2d_case_package_backups"
     backup_root.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d_%H%M%S")
     safe_variant = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in variant_request)

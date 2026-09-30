@@ -18,11 +18,11 @@ def poly_mesh_digest(poly_mesh: Path) -> str:
     root = Path(poly_mesh)
     digest = hashlib.sha256()
     for name in POLYMESH_FILES:
-        path = root / name
-        if not path.is_file():
-            raise FileNotFoundError(f"Required polyMesh file is missing: {path}")
+        path = _field_path(root,name)
+        if path is None:
+            raise FileNotFoundError(f"Required polyMesh file is missing: {root/name}")
         digest.update(name.encode("ascii"))
-        with path.open("rb") as stream:
+        with (gzip.open(path,"rb") if path.suffix == ".gz" else path.open("rb")) as stream:
             for chunk in iter(lambda: stream.read(4 * 1024 * 1024), b""):
                 digest.update(chunk)
     return digest.hexdigest()
@@ -53,7 +53,7 @@ def internal_field_count(path: Path) -> int | None:
 
 
 def boundary_patch_contract(boundary: Path) -> list[dict[str, str]]:
-    text = Path(boundary).read_text(encoding="utf-8", errors="replace")
+    text = _read_field_text(Path(boundary))
     rows: list[dict[str, str]] = []
     pattern = re.compile(
         r"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\n\s*\{(?P<body>.*?)^\s*\}",
@@ -76,9 +76,11 @@ def checkpoint_mesh_identity(
     case = Path(checkpoint_case).resolve()
     zero = Path(restart_zero).resolve()
     poly_mesh = case / "constant/polyMesh"
-    missing_mesh = [name for name in POLYMESH_FILES if not (poly_mesh / name).is_file()]
+    missing_mesh = [name for name in POLYMESH_FILES if _field_path(poly_mesh,name) is None]
+    ambiguous_mesh = [name for name in POLYMESH_FILES if (poly_mesh/name).is_file() and (poly_mesh/(name+".gz")).is_file()]
     fields: dict[str, dict[str, Any]] = {}
     missing_fields: list[str] = []
+    ambiguous_fields = [str(name) for name in required_fields if (zero/str(name)).is_file() and (zero/(str(name)+".gz")).is_file()]
     nonuniform_counts: dict[str, int] = {}
     for name in required_fields:
         path = _field_path(zero, str(name))
@@ -94,7 +96,7 @@ def checkpoint_mesh_identity(
     count_mismatch = len(unique_counts) > 1
     digest = None if missing_mesh else poly_mesh_digest(poly_mesh)
     patches = (
-        boundary_patch_contract(poly_mesh / "boundary")
+        boundary_patch_contract(_field_path(poly_mesh,"boundary"))
         if not missing_mesh
         else []
     )
@@ -105,7 +107,7 @@ def checkpoint_mesh_identity(
     return {
         "status": (
             "READY"
-            if not missing_mesh and not missing_fields and not count_mismatch and front_and_back_empty
+            if not missing_mesh and not ambiguous_mesh and not missing_fields and not ambiguous_fields and not count_mismatch and front_and_back_empty
             else "INVALID"
         ),
         "mesh_source": "RANS_CHECKPOINT",
@@ -119,7 +121,9 @@ def checkpoint_mesh_identity(
         "patches": patches,
         "frontAndBack_empty": front_and_back_empty,
         "missing_mesh_files": missing_mesh,
+        "ambiguous_mesh_files": ambiguous_mesh,
         "missing_fields": missing_fields,
+        "ambiguous_fields": ambiguous_fields,
         "field_count_mismatch": count_mismatch,
     }
 
@@ -133,5 +137,5 @@ def copied_checkpoint_matches(source_identity: dict[str, Any], target_case: Path
         "source_poly_mesh_hash": expected,
         "target_poly_mesh_hash": target_hash,
         "target_poly_mesh": str(target_poly),
-        "patches": boundary_patch_contract(target_poly / "boundary"),
+        "patches": boundary_patch_contract(_field_path(target_poly,"boundary")),
     }

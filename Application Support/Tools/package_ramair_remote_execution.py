@@ -14,6 +14,8 @@ import time
 import zipfile
 from pathlib import Path
 from typing import Any
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from release_identity import release_identity
 
 
 REMOTE_REQUIREMENTS = ["numpy", "pandas", "matplotlib", "scipy", "pillow", "psutil", "PyFoam"]
@@ -43,7 +45,9 @@ def case_identity(case: Path) -> tuple[str, float]:
         match = re.search(r"alpha_([mp]?\d+p\d+)", case.name)
         if not match:
             raise ValueError(f"Cannot infer alpha from {case}")
-        alpha = float(match.group(1).replace("m", "-").replace("p", "."))
+        token = match.group(1)
+        sign = -1 if token.startswith("m") else 1
+        alpha = sign * float(token.lstrip("mp").replace("p", "."))
     return variant, float(alpha)
 
 
@@ -58,6 +62,7 @@ def copy_case(source: Path, destination: Path) -> None:
             ".pytest_cache",
             ".validation_monitor_*",
             "validation_live_monitor_*.json",
+            ".ramair_solver_process.json",
         ),
     )
 
@@ -101,7 +106,8 @@ def main() -> int:
     parser.add_argument("--steady-initialization", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--continue-transient-after-steady-timeout", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--automatic-core-selection", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--renumber-before-decompose", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--renumber-before-decompose", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--steady-additional-iterations", type=int, default=500)
     parser.add_argument("--transient-phase-plan", type=Path)
     parser.add_argument("--package-scope", choices=("generic", "validation", "convergence"), default="generic")
     parser.add_argument(
@@ -141,7 +147,8 @@ def main() -> int:
                 raise FileNotFoundError(f"Invalid OpenFOAM case: {case}")
             variant, alpha = case_identity(case)
             case_id = f"{index + 1:03d}_{variant}_{case.name}"
-            relative = Path("CFD_2D/openfoam_cases") / variant / case.name
+            source_relative = case.relative_to(project) if case.is_relative_to(project) else Path("external")
+            relative = source_relative if source_relative.parts[0] == "Workspaces" else Path("CFD_2D/openfoam_cases") / variant / case.name
             copy_case(case, stage / relative)
             package_source = project / "CFD_2D/CFD_2D_inputs/case_package" / variant
             if package_source.is_dir():
@@ -153,6 +160,7 @@ def main() -> int:
                 "alpha_deg": alpha,
                 "solver": "auto",
                 "execution_mode": args.execution_mode,
+                "steady_additional_iterations": max(1, args.steady_additional_iterations),
                 "n_cores": max(1, int(args.n_cores)),
                 "timeout_min": max(1.0, float(args.timeout_min)),
                 "steady_initialization": bool(args.steady_initialization),
@@ -163,6 +171,7 @@ def main() -> int:
                 "renumber_before_decompose": bool(args.renumber_before_decompose),
                 "transient_phase_plan": packaged_phase_plan.as_posix() if packaged_phase_plan else None,
                 "resume_additional_time_star": max(0.0, float(args.resume_additional_time_star)),
+                "workflow_test": bool(read_json(case.parent.parent / "solver_config.json").get("workflow_test")),
             })
         queue = {
             "schema_version": 2,
@@ -170,10 +179,18 @@ def main() -> int:
             "package_scope": args.package_scope,
             "created_at": time.time(),
             "continue_after_error": bool(args.continue_after_error),
+            "original_project_root": str(project),
+            "release": release_identity(project),
             "cases": entries,
         }
         (stage / "remote_queue.json").write_text(json.dumps(queue, indent=2) + "\n", encoding="utf-8")
-        (stage / "requirements-remote.txt").write_text("\n".join(REMOTE_REQUIREMENTS) + "\n", encoding="utf-8")
+        pinned = project / "CFD_2D/app/requirements-cfd2d-app.txt"
+        lines = pinned.read_text(encoding="utf-8").splitlines() if pinned.is_file() else REMOTE_REQUIREMENTS
+        allowed = {item.lower() for item in REMOTE_REQUIREMENTS}
+        lines = [line for line in lines if re.split(r"[=<>!~]", line.strip())[0].lower() in allowed]
+        if not any(line.lower().startswith("psutil") for line in lines):
+            lines.append("psutil==7.2.2")
+        (stage / "requirements-remote.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
         wheelhouse = stage / "wheelhouse"
         if args.wheelhouse_dir:
             shutil.copytree(args.wheelhouse_dir.resolve(), wheelhouse)
@@ -185,14 +202,17 @@ def main() -> int:
             path.write_text(launcher_text(action), encoding="utf-8", newline="\n")
             path.chmod(0o755)
         for name in ("run", "resume", "stop", "force_stop", "monitor", "postprocess", "collect_results"):
+            script_name = "collect_results.sh" if name == "collect_results" else f"{name}_remote.sh"
             (stage / f"{name}_remote.bat").write_text(
-                f'@echo off\r\nwsl.exe bash -lc "cd \'$(wslpath \'%~dp0\')\' && bash {name}_remote.sh"\r\n',
+                f'@echo off\r\nwsl.exe --cd "%~dp0." bash {script_name}\r\n',
                 encoding="ascii",
             )
         readme = """# RamAir remote OpenFOAM execution\n\n1. Extract on the Linux filesystem (for example `~/ramair_remote`).\n2. Install OpenFOAM Foundation 14, MPI and Python 3. ParaView is optional because final post-processing can run on the main workstation.\n3. Run `bash run_remote.sh`. Use `bash monitor_remote.sh` from another terminal.\n4. `bash stop_remote.sh` requests `stopAt writeNow`; `force_stop_remote.sh` is only the escalation fallback.\n5. Continue retained fields with `bash resume_remote.sh`. The frozen queue runs RANS and then its packaged URANS phase plan.\n6. Run `bash collect_results.sh` after completion or a recoverable stop. Transfer the resulting `RamAir_Remote_Return_*.zip` to the main application and import it there.\n\nThe package uses native OpenFOAM and stores fields, logs, lifecycle metadata and the core-selection profile beside each case. Python wheels are installed offline when the wheelhouse is included. Status, stop and result collection use system Python only and do not create the scientific virtual environment.\n"""
+        readme = readme.replace("The frozen queue runs RANS and then its packaged URANS phase plan.",
+            "Execution mode: `"+args.execution_mode+"`. In rans_only mode URANS is never launched; resume preserves the existing checkpoint and cell ordering.")
         (stage / "README_REMOTE_EXECUTION.md").write_text(readme, encoding="utf-8")
         files = sorted(path for path in stage.rglob("*") if path.is_file())
-        manifest = {"schema_version": 2, "package_id": package_id, "package_scope": args.package_scope, "created_at": time.time(), "openfoam_required": "Foundation 14", "files": {path.relative_to(stage).as_posix(): {"sha256": sha256(path), "bytes": path.stat().st_size} for path in files}}
+        manifest = {"schema_version": 2, "package_id": package_id, "package_scope": args.package_scope, "created_at": time.time(), "release": queue["release"], "openfoam_required": "Foundation 14", "files": {path.relative_to(stage).as_posix(): {"sha256": sha256(path), "bytes": path.stat().st_size} for path in files}}
         (stage / "REMOTE_PACKAGE_MANIFEST.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
         with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
             for path in sorted(stage.rglob("*")):

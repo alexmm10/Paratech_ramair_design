@@ -102,6 +102,11 @@ def classify_openfoam_log(
     maximum_courant = max(courant_values, default=None)
     if maximum_courant is not None and maximum_courant >= float(hard_max_courant):
         divergence_markers.append("CATASTROPHIC_COURANT_GROWTH")
+    # Courant limiting can mask a runaway local velocity by driving deltaT to
+    # zero. A successful linear solve is then not physical time advancement.
+    dts = [float(s) for s in re.findall(r"(?m)^deltaT\s*=\s*([0-9.eE+\-]+)\s*$", filtered)]
+    if len(dts) >= 8 and max(dts[-4:]) < max(dts)*1e-8 and all(a>b>0 for a,b in zip(dts[-4:], dts[-3:])):
+        divergence_markers.append("ADAPTIVE_TIMESTEP_COLLAPSE")
 
     warnings: list[str] = []
     if re.search(r"bounding\s+(?:nut|nuTilda),\s*min:\s*-", filtered, re.IGNORECASE):
@@ -117,6 +122,8 @@ def classify_openfoam_log(
         status = "SETUP_FAILED"
     elif numerical_divergence:
         status = "NUMERICAL_DIVERGENCE"
+    elif returncode == 124:
+        status = "TIMEOUT_PARTIAL"
     elif nonzero:
         status = "SOLVER_FAILED"
     elif _NORMAL_END.search(filtered):
@@ -130,7 +137,7 @@ def classify_openfoam_log(
         normal_sigfpe_banner=normal_sigfpe,
         setup_error=setup_error,
         numerical_divergence=numerical_divergence,
-        solver_failure=bool(nonzero and not setup_error and not numerical_divergence),
+        solver_failure=bool(nonzero and returncode != 124 and not setup_error and not numerical_divergence),
         fatal_markers=tuple(dict.fromkeys((*setup_markers, *divergence_markers))),
         warning_markers=tuple(dict.fromkeys(warnings)),
         maximum_courant=maximum_courant,

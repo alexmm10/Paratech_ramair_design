@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 import streamlit as st
+from mesh_workspace_controls import general_controls, exact_quality, quality_atlas, front_controls, reset_mesh_editor_state
+from ramair_workspace import bind_mesh_config
 
 from experimental_mesh_comparison import render_mesh_quality_comparator
 
@@ -120,11 +122,12 @@ def render_open_experimental_mesh(
     root: Path,
     start_job: StartJob,
     open_mesh: Callable[[Path, Path, str], int],
+    workspace_geometry: Path | None = None,
 ) -> None:
-    experiment = root / "CFD_2D/experimental_meshes" / EXPERIMENT_ID
-    revisions_root = experiment / "revisions"
+    experiment = workspace_geometry / "Meshes" if workspace_geometry else root / "CFD_2D/experimental_meshes" / EXPERIMENT_ID
+    revisions_root = experiment if workspace_geometry else experiment / "revisions"
     revisions = sorted(
-        [path for path in revisions_root.iterdir() if path.is_dir()],
+        [path for path in revisions_root.iterdir() if path.is_dir() and (path / "mesh_config.json").is_file()],
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     ) if revisions_root.is_dir() else []
@@ -132,7 +135,7 @@ def render_open_experimental_mesh(
     if not draft_path.is_file():
         _write_json(draft_path, _default_config(root))
 
-    with st.expander("Experimental: malla abierta híbrida desde cero", expanded=False):
+    with st.expander("Malla abierta · capa límite exterior y cavidad conectada", expanded=True):
         st.info(
             "Este laboratorio no reutiliza la arquitectura del mallador abierto anterior. Genera una "
             "capa límite exterior, un campo triangular exterior hasta 50c y una cavidad triangular "
@@ -141,13 +144,16 @@ def render_open_experimental_mesh(
         selected: Path | None = None
         if revisions:
             labels = [path.name for path in revisions]
-            selected_name = st.selectbox("Malla experimental existente", labels, key="open-exp-existing")
+            selected_name = st.selectbox("Malla existente", labels, key="open-exp-existing")
             selected = revisions[labels.index(selected_name)]
             report = _read_json(selected / "mesh_report.json", {}) or {}
+            with st.expander("checkMesh · métricas y recomendaciones"):
+                exact_quality(selected)
+            quality_atlas(root, selected, start_job)
             metrics = st.columns(4)
             metrics[0].metric("Estado", str(report.get("status", "-")))
             metrics[1].metric("Celdas 2D", str(report.get("mesh_level_extrusion_surface_cells", "-")))
-            metrics[2].metric("minSICN", f"{float(report.get('minimum_gmsh_minSICN', 0.0)):.3g}")
+            metrics[2].metric("Tipo", "OPEN")
             metrics[3].metric("checkMesh", str(report.get("checkMesh_status", "no ejecutado")))
             actions = st.columns(4)
             if actions[0].button("Abrir malla", disabled=not (selected / "mesh_final.msh").is_file()):
@@ -155,6 +161,7 @@ def render_open_experimental_mesh(
             if actions[1].button("Cargar sus ajustes"):
                 loaded = _read_json(selected / "mesh_config.json", {}) or {}
                 _write_json(draft_path, loaded)
+                reset_mesh_editor_state("open")
                 st.success("Ajustes cargados como borrador editable; la revisión guardada no ha cambiado.")
                 st.rerun()
             check_mesh_ok = str(report.get("checkMesh_status")) == "OK"
@@ -256,18 +263,20 @@ def render_open_experimental_mesh(
             with st.expander("Informe completo de la malla seleccionada"):
                 st.json(report)
         else:
-            st.warning("Todavía no existe una revisión experimental generada.")
+            st.info("Genera la primera malla para esta geometría.")
 
         config = _read_json(draft_path, {}) or _default_config(root)
-        with st.expander("Generación y parámetros editables", expanded=not revisions):
+        if workspace_geometry:
+            config = bind_mesh_config(config, workspace_geometry)
+        with st.expander("Generación y parámetros editables", expanded=not revisions or st.session_state.get("open-show-loaded-editor", False)):
             st.caption(
                 "Puedes partir de los defaults o cargar arriba una revisión. Guardar modifica solo el "
                 "borrador; generar crea una revisión nueva o archiva la anterior del mismo nombre."
             )
             geometry = dict(config.get("geometry") or {})
             geometry_cols = st.columns(2)
-            open_variants = _geometry_variants(root, open_only=True)
-            base_variants = _geometry_variants(root, open_only=False)
+            open_variants = (["profile"] if workspace_geometry else _geometry_variants(root, open_only=True))
+            base_variants = (["base"] if workspace_geometry else _geometry_variants(root, open_only=False))
             current_open = str(geometry.get("open_variant", "open_ramair_validation_1m"))
             current_base = str(geometry.get("base_variant", "reference_uncut_validation_1m"))
             if current_open not in open_variants:
@@ -290,12 +299,54 @@ def render_open_experimental_mesh(
                 ),
             )
             config["geometry"] = geometry
-            bl_tab, external_tab, internal_tab = st.tabs(
-                ["Capa límite", "Volumen externo", "Volumen interno"]
-            )
             boundary = dict(config.get("boundary_layer") or {})
             external = dict(config.get("external_volume") or {})
             internal = dict(config.get("internal_volume") or {})
+            general_tab, bl_tab, external_tab, internal_tab = st.tabs(
+                ["General", "Capa límite", "Volumen externo", "Volumen interno"]
+            )
+            with general_tab:
+                general_controls(config, "open-general-")
+                geometry.update(config["geometry"])
+                execution = config.setdefault("execution", {})
+                numeric_cols = st.columns(2)
+                external["mesh_algorithm"] = numeric_cols[0].selectbox(
+                    "Algoritmo 2D",
+                    [6, 5],
+                    index=0 if int(external.get("mesh_algorithm", 6)) == 6 else 1,
+                    format_func=lambda value: "Frontal-Delaunay (6)" if value == 6 else "Delaunay (5)",
+                )
+                execution["mesh_smoothing"] = numeric_cols[1].number_input(
+                    "Mesh.Smoothing", 0, 10,
+                    int(execution.get("mesh_smoothing", 1)),
+                    help="Número de pasadas de suavizado Gmsh; 1 es el default experimental.",
+                )
+                execution["post_generation_optimization"] = st.selectbox(
+                    "Optimización 2D posterior",
+                    ["off", "laplace2d", "relocate2d", "laplace2d_then_relocate2d"],
+                    index=["off", "laplace2d", "relocate2d", "laplace2d_then_relocate2d"].index(
+                        execution.get("post_generation_optimization", "off")
+                        if execution.get("post_generation_optimization", "off") in {"off", "laplace2d", "relocate2d", "laplace2d_then_relocate2d"}
+                        else "off"
+                    ),
+                    format_func=lambda value: {
+                        "off": "Desactivada", "laplace2d": "Laplace2D",
+                        "relocate2d": "Relocate2D",
+                        "laplace2d_then_relocate2d": "Laplace2D → Relocate2D",
+                    }[value],
+                    help=(
+                        "Mueve nodos después del mallado 2D y antes de exportar/checkMesh. "
+                        "Debe comprobarse siempre en una malla nueva."
+                    ),
+                )
+                if execution["post_generation_optimization"] != "off":
+                    execution["post_generation_optimization_iterations"] = st.number_input(
+                        "Iteraciones Laplace2D", 1, 50,
+                        int(execution.get("post_generation_optimization_iterations", 5)),
+                    )
+                    if selected is not None:
+                        execution["optimization_base_revision"] = selected.name
+                config["execution"] = execution
             with bl_tab:
                 common = st.columns(3)
                 boundary["distribution_mode"] = common[0].selectbox(
@@ -772,9 +823,9 @@ def render_open_experimental_mesh(
                 )
                 external["interface_size_mode"] = cols[1].selectbox(
                     "Primer triángulo tras BL",
-                    ["tangential_match", "fixed"],
-                    index=0 if external.get("interface_size_mode", "tangential_match") == "tangential_match" else 1,
-                    format_func=lambda value: "Automático desde discretización tangencial" if value == "tangential_match" else "Tamaño fijo",
+                    ["tangential_match", "fixed", "sampled_front"],
+                    index=["tangential_match", "fixed", "sampled_front"].index(external.get("interface_size_mode", "tangential_match")),
+                    format_func=lambda value: {"tangential_match":"Media tangencial", "fixed":"Tamaño fijo", "sampled_front":"Frente BL muestreado"}[value],
                     help=(
                         "Se aplica también con Extend. El modo automático parte del espaciado "
                         "tangencial de las curvas; el fijo permite imponer una transición aún más fina."
@@ -797,6 +848,7 @@ def render_open_experimental_mesh(
                           "y ahorran celdas, pero pueden empeorar la calidad. El valor no puede "
                           "saltarse el tamaño del farfield porque la ley se evalúa de forma continua."),
                 )
+                front_controls(external, "open-front-")
                 if external["automatic_extend_enabled"]:
                     extend_cols = st.columns(3)
                     external["extend_distance_max_chord"] = extend_cols[0].number_input(
@@ -873,44 +925,7 @@ def render_open_experimental_mesh(
                     "crecimiento al 12 %, y el mayor farfield retrasa la meseta hasta el exterior."
                 )
                 execution = dict(config.get("execution") or {})
-                numeric_cols = st.columns(2)
-                external["mesh_algorithm"] = numeric_cols[0].selectbox(
-                    "Algoritmo 2D",
-                    [6, 5],
-                    index=0 if int(external.get("mesh_algorithm", 6)) == 6 else 1,
-                    format_func=lambda value: "Frontal-Delaunay (6)" if value == 6 else "Delaunay (5)",
-                )
-                execution["mesh_smoothing"] = numeric_cols[1].number_input(
-                    "Mesh.Smoothing", 0, 10,
-                    int(execution.get("mesh_smoothing", 1)),
-                    help="Número de pasadas de suavizado Gmsh; 1 es el default experimental.",
-                )
-                execution["post_generation_optimization"] = st.selectbox(
-                    "Optimización 2D posterior (experimental)",
-                    ["off", "laplace2d", "relocate2d", "laplace2d_then_relocate2d"],
-                    index=["off", "laplace2d", "relocate2d", "laplace2d_then_relocate2d"].index(
-                        execution.get("post_generation_optimization", "off")
-                        if execution.get("post_generation_optimization", "off") in {"off", "laplace2d", "relocate2d", "laplace2d_then_relocate2d"}
-                        else "off"
-                    ),
-                    format_func=lambda value: {
-                        "off": "Desactivada", "laplace2d": "Laplace2D",
-                        "relocate2d": "Relocate2D",
-                        "laplace2d_then_relocate2d": "Laplace2D → Relocate2D",
-                    }[value],
-                    help=(
-                        "Mueve nodos después del mallado 2D y antes de exportar/checkMesh. "
-                        "No es estándar y debe probarse siempre en una revisión nueva."
-                    ),
-                )
-                if execution["post_generation_optimization"] != "off":
-                    execution["post_generation_optimization_iterations"] = st.number_input(
-                        "Iteraciones Laplace2D", 1, 50,
-                        int(execution.get("post_generation_optimization_iterations", 5)),
-                    )
-                    if selected is not None:
-                        execution["optimization_base_revision"] = selected.name
-                config["execution"] = execution
+
             with internal_tab:
                 internal["automatic_extend_enabled"] = st.toggle(
                     "Control automático interior Gmsh Extend",
@@ -1060,5 +1075,5 @@ def render_open_experimental_mesh(
 
         with st.expander("Comparar calidad de revisiones", expanded=False):
             render_mesh_quality_comparator(
-                experiment, topology="open", key_prefix="open-experimental-quality-compare",
+                experiment, direct_revisions=bool(workspace_geometry), topology="open", key_prefix="open-experimental-quality-compare",
             )

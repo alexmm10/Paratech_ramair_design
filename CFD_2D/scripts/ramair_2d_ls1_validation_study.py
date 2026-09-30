@@ -226,7 +226,7 @@ def initialize(project_root: Path, archive_old: bool = False, refresh_solver_pro
 
     archived = None
     if archive_old and old.is_dir():
-        archive_root = root / "Previous Versions/Retired Work Cases"
+        archive_root = root / "Data Archive/Retired Work Cases"
         archive_root.mkdir(parents=True, exist_ok=True)
         archived = archive_root / f"{OLD_WORKCASE}_{time.strftime('%Y%m%d_%H%M%S')}"
         shutil.move(str(old), str(archived))

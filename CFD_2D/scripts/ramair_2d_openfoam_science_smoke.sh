@@ -4,7 +4,7 @@ set -euo pipefail
 source_root=${1:?"usage: ramair_2d_openfoam_science_smoke.sh SOURCE_ROOT WSL_RUNTIME [OUTPUT_JSON]"}
 runtime_root=${2:?"usage: ramair_2d_openfoam_science_smoke.sh SOURCE_ROOT WSL_RUNTIME [OUTPUT_JSON]"}
 output_json=${3:-/tmp/ramair_t06_openfoam_smoke.json}
-openfoam_bashrc=${RAMAIR_OPENFOAM_BASHRC:-/home/alejm/.local/opt/openfoam14/etc/bashrc}
+openfoam_bashrc=${RAMAIR_OPENFOAM_BASHRC:-$HOME/.local/opt/openfoam14/etc/bashrc}
 variant=open_ramair_validation_1m_coarse
 
 # OpenFOAM's interactive bashrc probes optional shell variables and may return

@@ -1,0 +1,72 @@
+{
+  "schema_version": 3,
+  "name": "closed_urans_final_20260831_tangent1800_interface055",
+  "topology": "closed",
+  "geometry": {
+    "spanwise_thickness_chord": 0.01
+  },
+  "boundary_layer": {
+    "layers": 75,
+    "growth_rate": 1.1,
+    "distribution_mode": "beta_law",
+    "thickness_safety_factor": 1.2,
+    "target_y_plus": 0.6666666666666666,
+    "wall_nodes_target": 1200,
+    "minimum_tangential_size_chord": 0.0003,
+    "maximum_tangential_size_chord": 0.005,
+    "wall_bump_coefficient": 0.45,
+    "leading_edge_nodes": 70,
+    "te_cap_nodes": 35,
+    "minimum_profile_point_spacing_chord": 1e-06,
+    "automatic_bump_matching": false,
+    "segment_divisions": {
+      "te": 90,
+      "upper": 810,
+      "leading_or_inlet": 150,
+      "lower": 750
+    },
+    "manual_bump_coefficients": {
+      "te": 1.0,
+      "upper": 0.55,
+      "leading_or_inlet": 1.00007,
+      "lower": 0.5
+    },
+    "bump_maximum_growth_ratio": 1.2,
+    "bump_maximum_size_percent_chord": 1.0,
+    "leading_edge_curvature_fraction": 0.2,
+    "te_transition_extension_chord": 0.0,
+    "te_segment_early_start_enabled": false,
+    "te_segment_start_x_over_c": 0.98,
+    "te_geometry_points": 35
+  },
+  "external_volume": {
+    "domain_radius_chord": 50.0,
+    "interface_size_mode": "tangential_match",
+    "interface_size_chord": 0.00035,
+    "interface_tangential_factor": 0.55,
+    "farfield_size_chord": 5.0,
+    "radial_growth_rate": 0.12,
+    "mesh_algorithm": 6,
+    "automatic_extend_enabled": true,
+    "extend_distance_max_chord": 35.0,
+    "extend_power": 0.35,
+    "extend_size_max_chord": 5.0,
+    "extend_interface_guard_enabled": true,
+    "extend_interface_transition_chord": 0.1
+  },
+  "execution": {
+    "gmsh_threads": 12,
+    "openfoam_timeout_s": 900,
+    "post_generation_optimization": "off",
+    "post_generation_optimization_iterations": 5,
+    "mesh_smoothing": 3,
+    "analyse_mesh_quality": false
+  },
+  "source_evidence": {
+    "revision": "closed_urans_final_20260831_tangent1800_interface055",
+    "path": "CFD_2D/experimental_meshes/closed_reference_from_scratch/revisions/closed_urans_final_20260831_tangent1800_interface055",
+    "checkMesh_status": "OK",
+    "qualification": "historical_geometry_only_requires_regeneration",
+    "path_role": "historical provenance; not required to generate this preset"
+  }
+}

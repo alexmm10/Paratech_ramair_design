@@ -39,7 +39,7 @@ def effective_case_status(
     """Expose the aerodynamic run outcome instead of only the wrapper stage."""
     staged = str(staged_status.get("status") or "").upper()
     solver = str(run_status.get("status") or "").upper()
-    if staged.startswith("STEADY_"):
+    if staged.startswith("STEADY_") or "PARTIAL" in staged or "FAILED" in staged:
         return staged
     if solver:
         return solver
@@ -179,7 +179,12 @@ def run_with_case_timeout(
     timeout_min: float,
     stop_grace_min: float,
 ) -> tuple[subprocess.CompletedProcess[str], bool]:
-    """Run one staged angle with a real wall-clock bound and recoverable stop."""
+    """Bound the whole angle and drain independently sessioned MPI children.
+
+    The staged controller and MPI launcher have separate process groups. Killing
+    only the controller used to orphan MPI and allow the next angle to overlap.
+    """
+    from ramair_execution_control import request_case_pause, discover_live_solver_cases, signal_solver_process
     kwargs: dict[str, Any] = {"cwd": str(cwd), "text": True}
     if os.name != "nt":
         kwargs["start_new_session"] = True
@@ -189,15 +194,14 @@ def run_with_case_timeout(
         returncode = process.wait(timeout=max(60.0, float(timeout_min) * 60.0))
     except subprocess.TimeoutExpired:
         timed_out = True
-        if os.name != "nt":
-            os.killpg(process.pid, signal.SIGINT)
-        else:
-            process.send_signal(signal.SIGTERM)
+        request_case_pause(cwd, campaign=True)
         try:
             returncode = process.wait(
                 timeout=max(10.0, float(stop_grace_min) * 60.0)
             )
         except subprocess.TimeoutExpired:
+            for record in discover_live_solver_cases(cwd):
+                signal_solver_process(Path(record["case_dir"]), signal.SIGINT, record=record)
             if os.name != "nt":
                 os.killpg(process.pid, signal.SIGTERM)
             else:
@@ -210,6 +214,25 @@ def run_with_case_timeout(
                 else:
                     process.kill()
                 returncode = process.wait()
+    # Also recover a crashed controller: no next angle while a child is alive.
+    remaining = discover_live_solver_cases(cwd)
+    if remaining:
+        request_case_pause(cwd, campaign=True)
+        deadline = time.monotonic() + max(10.0, float(stop_grace_min)*60.0)
+        while remaining and time.monotonic() < deadline:
+            time.sleep(.5)
+            remaining = discover_live_solver_cases(cwd)
+        for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGKILL):
+            if not remaining: break
+            for record in remaining:
+                signal_solver_process(Path(record["case_dir"]), sig, record=record)
+            deadline = time.monotonic()+10.0
+            while remaining and time.monotonic() < deadline:
+                time.sleep(.5)
+                remaining = discover_live_solver_cases(cwd)
+        if remaining:
+            raise RuntimeError("Queue paused: a solver child remains alive in " + str(cwd))
+        returncode = returncode or 1
     return subprocess.CompletedProcess(command, int(returncode)), timed_out
 
 
@@ -253,11 +276,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--solver-config", type=Path, default=None)
     parser.add_argument("--resume-additional-time-star", type=float, default=None)
     parser.add_argument("--skip-completed", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--continue-after-timeout", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--continue-after-timeout", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument(
         "--continue-after-error",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
         help="Record a failed angle and continue. The failed case can be inspected or resumed after the sweep.",
     )
     parser.add_argument("--stop-when-force-stable", action=argparse.BooleanOptionalAction, default=True)
@@ -284,6 +307,14 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    from ramair_2d_run_lease import acquire_run_lease
+    with acquire_run_lease(args.case_root.resolve()/"CFD_2D/app_state/locks",
+                           study_id="sequential_sweep", run_id=args.variant, mode="queue",
+                           command=sys.argv):
+        return run_sweep(args)
+
+
+def run_sweep(args) -> int:
     args.case_root = args.case_root.resolve()
     if args.restart_existing and args.resume_existing:
         raise ValueError("--restart-existing and --resume-existing are mutually exclusive")
@@ -316,6 +347,11 @@ def main() -> int:
             stopped_by_user = True
             break
         case_dir = base / safe_alpha_dir(alpha)
+        from ramair_execution_control import discover_live_solver_cases
+        if discover_live_solver_cases(base):
+            raise RuntimeError("Sequential queue cannot start: an existing solver is still running in this variant")
+        if args.run:
+            (case_dir / ".ramair_campaign_pause.json").unlink(missing_ok=True)
         fresh_case: dict[str, Any] | None = None
         if args.restart_existing and args.run:
             fresh_case = regenerate_case_from_approved_mesh(args, alpha)
@@ -353,7 +389,7 @@ def main() -> int:
         )
         case_complete = (
             staged_campaign_complete
-            if args.steady_initialization
+            if args.steady_initialization or staged_prior or args.transient_phase_plan is not None
             else prior_status in {"RUN_COMPLETED", "CONVERGED_STATISTICALLY"}
         )
         if args.skip_completed and case_complete and not pending_path.is_file():
@@ -435,7 +471,7 @@ def main() -> int:
         elif args.postprocess_after_each and stop_requested_before_postprocess:
             row["postprocess_status"] = "DEFERRED_BY_QUEUE_STOP_REQUEST"
         rows.append(row)
-        is_timeout = status in {"TIMEOUT", "TIMEOUT_PARTIAL", "CASE_TIMEOUT_PARTIAL"}
+        is_timeout = "TIMEOUT" in status or "PARTIAL" in status
         is_error = completed.returncode != 0 or status in {
             "RUN_FAILED", "TRANSIENT_STAGE_FAILED", "STEADY_STAGE_FAILED",
             "STEADY_STAGE_DIVERGED", "STEADY_AWAITING_USER_DECISION",

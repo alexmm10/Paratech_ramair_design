@@ -533,7 +533,7 @@ def migrate_case_manifest(
     if changed and not dry_run:
         backup = (
             project_root
-            / "Previous Versions/Results Library Manifest Backups"
+            / "Data Archive/Results Library Manifest Backups"
             / manifest_path.parent.name
             / f"{time.strftime('%Y%m%d_%H%M%S')}_case_manifest_schema{int(current.get('schema_version') or 1)}.json"
         )

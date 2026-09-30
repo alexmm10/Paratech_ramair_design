@@ -9,6 +9,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from openfoam_history import read_force_coefficient_history
 
 from ramair_2d_convergence_analysis import (
     signal_summary,
@@ -29,6 +30,7 @@ URANS_DECISIONS = {
     "accept": "URANS_ACCEPTED",
     "extend": "URANS_EXTENSION_REQUIRED",
     "reject": "URANS_REJECTED",
+    "publish-partial": "URANS_PARTIAL_REVIEWED",
 }
 
 
@@ -107,18 +109,24 @@ def review_urans_signals(
             hard_failures.append(f"INSUFFICIENT_{canonical.upper()}_SAMPLES")
             continue
         try:
+            from ramair_frequency_analysis import uniform_signals
+            spectral_time, spectral_signals, resampling = uniform_signals(time_s[finite], {canonical:values[finite]})
             spectrum = welch_spectrum(
-                time_s[finite],
-                values[finite],
+                spectral_time,
+                spectral_signals[canonical],
                 chord_m=chord_m,
                 velocity_m_s=velocity_m_s,
                 reference_length_m=reference_length_m,
             )
+            spectrum["resampling"] = resampling
         except (RuntimeError, ValueError) as exc:
             spectrum = {"status": "NOT_AVAILABLE", "reason": str(exc)}
         frequency = float(spectrum.get("dominant_frequency_hz") or 0.0)
         duration = float(time_s[finite][-1] - time_s[finite][0])
         cycles = duration * frequency if frequency > 0.0 else 0.0
+        spectrum["frequency_resolved"] = bool(cycles >= minimum_cycles and not spectrum.get("peak_at_first_bin", False))
+        if not spectrum["frequency_resolved"]:
+            spectrum["interpretation"] = "Unresolved peak: insufficient cycles or first positive bin (possible drift); do not infer a physical shedding frequency"
         stationarity = stationarity_blocks(
             values[finite],
             blocks=4,
@@ -132,7 +140,7 @@ def review_urans_signals(
             "cycles_observed": cycles,
             "minimum_cycles": int(minimum_cycles),
             "preferred_cycles": int(preferred_cycles),
-            "sufficient_cycles": cycles >= minimum_cycles,
+            "sufficient_cycles": bool(spectrum["frequency_resolved"]),
         }
     all_stationary = bool(signals) and all(
         bool(row["stationarity"].get("passed")) for row in signals.values()
@@ -198,7 +206,7 @@ def _select_analysis_window(
     plan: dict[str, Any],
     metadata: dict[str, Any],
 ) -> tuple[str, float, float | None, int]:
-    """Use E only when it contains enough data; otherwise use uniform stage D."""
+    """Prefer production; a D-only diagnostic must never be called production."""
     for stage_name in ("E", "D"):
         selected = _stage_window(frame, plan, stage_name)
         if selected is not None and len(selected[0]) >= 16:
@@ -207,7 +215,42 @@ def _select_analysis_window(
         metadata.get("sampling_start_s") or plan.get("sampling_start_s") or 0.0
     )
     selected = _sampling_frame(frame, fallback_start, None)
-    return "E", fallback_start, None, int(len(selected))
+    return "UNCLASSIFIED", fallback_start, None, int(len(selected))
+
+
+def longest_stationary_tail(frame: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Predeclared longest-suffix search; retain failed evidence when none passes.
+
+    Search at 1% increments, keeping at least 20% and 64 samples. No interior
+    interval may be cherry-picked. All three force signals must pass the same
+    four-block mean/fluctuation-RMS test. Cycle sufficiency is assessed separately.
+    """
+    columns = [_column(frame, name) for name in ("Cl", "Cd", "Cm")]
+    tested = []
+    mean_stable = None
+    minimum = max(64, int(math.ceil(len(frame) * .2)))
+    for start in sorted(set(np.linspace(0, max(0, len(frame)-minimum), 81, dtype=int))):
+        selected = frame.iloc[start:]
+        assessments = {}
+        for column in columns:
+            values = selected[column].to_numpy(dtype=float)
+            result = stationarity_blocks(values)
+            result["mean_stable"] = result["passed"]
+            blocks = np.array_split(values, 4)
+            rms = np.asarray([np.std(block) for block in blocks])
+            variation = 100 * float(np.ptp(rms)) / max(float(np.mean(rms)), 1e-12)
+            result.update(fluctuation_rms_variation_percent=variation)
+            result["passed"] = bool(result["passed"] and variation < 5.)
+            assessments[column] = result
+        passed = all(item["passed"] for item in assessments.values())
+        tested.append({"discarded_samples": int(start), "passed": passed, "signals": assessments})
+        if mean_stable is None and all(item["mean_stable"] for item in assessments.values()):
+            mean_stable = selected
+        if passed:
+            return selected, {"status": "STATIONARY_TAIL_FOUND", "selection": "longest tested suffix", "trials": tested}
+    if mean_stable is not None:
+        return mean_stable, {"status": "MEAN_STABLE_ONLY", "selection": "longest suffix passing mean/total-RMS tests; fluctuating RMS not stationary", "trials": tested}
+    return frame, {"status": "NO_STATIONARY_TAIL", "selection": "full available window, diagnostic only", "trials": tested}
 
 
 def _maximum_normal_thickness(points: pd.DataFrame) -> tuple[float, float] | None:
@@ -329,10 +372,56 @@ def _write_review_plots(
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from ramair_scientific_plot_style import apply_scientific_style
+    apply_scientific_style()
 
     output = run_root / "plots/urans_review"
     output.mkdir(parents=True, exist_ok=True)
     products: list[str] = []
+    t = sampled[_column(sampled, "Time", "time_s")].to_numpy(dtype=float)
+    spacing = np.diff(t)
+    if len(t) >= 16 and np.allclose(spacing, np.median(spacing), rtol=.001, atol=1e-12):
+        fig, axes = plt.subplots(3, 2, figsize=(12, 9))
+        fft_table = {}
+        for index, name in enumerate(("Cl", "Cd", "Cm")):
+            y = sampled[_column(sampled, name)].to_numpy(dtype=float)
+            window = np.hanning(len(y))
+            frequency = np.fft.rfftfreq(len(y), np.median(spacing))
+            amplitude = 2 * np.abs(np.fft.rfft((y-y.mean()) * window)) / window.sum()
+            amplitude[0] *= .5
+            if len(y) % 2 == 0:
+                amplitude[-1] *= .5
+            fft_table.update(frequency_hz=frequency, **{name: amplitude})
+            axes[index, 0].plot(t, y, lw=.8)
+            axes[index, 0].set(xlabel="Time [s]", ylabel=name)
+            axes[index, 1].plot(frequency[1:], amplitude[1:], lw=.8)
+            axes[index, 1].set(xlabel="Frequency [Hz]", ylabel=f"{name} FFT amplitude", xscale="log")
+        fig.suptitle("Production signal and Hann FFT — partial evidence")
+        fig.tight_layout()
+        target = output / "signals_fft.png"
+        fig.savefig(target, dpi=180)
+        plt.close(fig)
+        pd.DataFrame(fft_table).to_csv(run_root / "fft_coefficients.csv", index=False)
+        products.append(str(target))
+    fig, axes = plt.subplots(2, 3, figsize=(12, 6.4), constrained_layout=True)
+    for row, (coefficient, symbol) in enumerate((("Cl", r"$C_L$"), ("Cd", r"$C_D$"))):
+        spectrum = report.get("signals", {}).get(coefficient, {}).get("spectrum", {})
+        f = np.asarray(spectrum.get("frequency_hz") or [], dtype=float)
+        psd = np.asarray(spectrum.get("psd") or [], dtype=float)
+        st = np.asarray(spectrum.get("strouhal") or [], dtype=float)
+        for axis, x, label in zip(axes[row], (f, st, 2*np.pi*st),
+                (r"Frequency, $f$ [Hz]", r"Strouhal number, $St=fL/U_\infty$", r"Convective wavenumber, $kL=2\pi fL/U_\infty$")):
+            if len(x) == len(psd):
+                mask = np.isfinite(x) & np.isfinite(psd) & (x > 0) & (psd > 0)
+                axis.loglog(x[mask], psd[mask], lw=1, color="#246680" if row == 0 else "#b45926")
+            axis.set(xlabel=label, ylabel=symbol+r" PSD [Hz$^{-1}$]")
+            axis.grid(alpha=.2, which="both")
+    fig.suptitle("Lift and drag spectra — Welch/Hann; frequency density on all axes")
+    target = output / "lift_drag_spectral_analysis.png"
+    for extension in ("png", "pdf", "svg"):
+        fig.savefig(target.with_suffix("."+extension), dpi=220)
+    plt.close(fig)
+    products.append(str(target))
     cl_spectrum = (report.get("signals", {}).get("Cl") or {}).get("spectrum") or {}
     frequency = np.asarray(cl_spectrum.get("frequency_hz") or [], dtype=float)
     density = np.asarray(cl_spectrum.get("psd") or [], dtype=float)
@@ -341,7 +430,7 @@ def _write_review_plots(
     for name, x, label in (
         ("lift_psd_frequency.png", frequency, "Frequency, f [Hz]"),
         ("lift_psd_strouhal.png", strouhal, "Strouhal number, St [-]"),
-        ("lift_psd_wave_number.png", wave, "Wave number, 1/St [-]"),
+        ("lift_psd_wave_number.png", wave, "Inverse Strouhal number, 1/St [-]"),
     ):
         mask = np.isfinite(x) & np.isfinite(density) & (x > 0.0)
         if not np.any(mask):
@@ -395,7 +484,60 @@ def _write_review_plots(
     return products
 
 
-def review_run(run_root: Path) -> dict[str, Any]:
+def executed_analysis_plan(plan, journal, frame):
+    """Executed journal phases take precedence over subsequently edited plans."""
+    phases = [p for p in journal.get("phases", []) if p.get("solver_started")
+              and p.get("actual_start_s") is not None and p.get("phase") in ("D", "E")]
+    if not phases:
+        return plan, "configured_plan_fallback"
+    observed_end = float(frame[_column(frame, "Time", "time_s", "time")].max())
+    stages = []
+    last_phase = phases[-1]["phase"]
+    for name in ("D", "E"):
+        rows = [p for p in phases if p["phase"] == name]
+        if not rows:
+            continue
+        # A failed reconstruction can leave the journal end at its input checkpoint.
+        # Native force history still records the steps executed in the last phase.
+        end = max(float(p.get("actual_end_s") or observed_end) for p in rows)
+        if name == last_phase:
+            end = max(end, observed_end)
+        stages.append({"stage": name, "start_s": min(float(p["actual_start_s"]) for p in rows),
+                       "end_s": end,
+                       "dt_s": rows[-1].get("deltaT_s"), "scheme": rows[-1].get("scheme")})
+    return {**plan, "stages": stages}, "executed_stage_journal"
+
+
+def restore_serialized_uniform_times(frame, expected_dt):
+    """Recover a verified fixed-dt grid rounded by six-significant-digit output.
+
+    Coefficients and raw export are untouched. Missing samples or deviations
+    beyond timestamp quantization are rejected rather than interpolated.
+    """
+    result = {"status": "UNCHANGED"}
+    if not expected_dt or len(frame) < 16:
+        return frame, result
+    key = _column(frame, "Time", "time_s", "time")
+    t = frame[key].to_numpy(dtype=float)
+    dt = float(expected_dt)
+    grid = np.arange(len(t))*dt
+    origin = float(np.median(t-grid))
+    ideal = origin+grid
+    quantum = 10.0**(math.floor(math.log10(max(np.max(np.abs(t)), 1e-12)))-5)
+    error = float(np.max(np.abs(t-ideal)))
+    if quantum <= .05*dt and error <= max(.51*quantum, dt*1e-8):
+        frame = frame.copy()
+        frame[key] = ideal
+        result = {"status": "FIXED_DT_CONFIRMED_WITHIN_SERIALIZATION_PRECISION",
+                  "dt_s": dt, "timestamp_quantum_s": quantum, "max_time_adjustment_s": error,
+                  "coefficient_interpolation": False}
+    return frame, result
+
+
+def review_run(run_root: Path, *, mark_spectral_peaks: bool | None = None) -> dict[str, Any]:
+    display=read_json(run_root / 'frequency_display.json', {}) or {}
+    if mark_spectral_peaks is None:mark_spectral_peaks=bool(display.get('mark_peaks',True))
+    write_json_atomic(run_root / 'frequency_display.json', {'mark_peaks':mark_spectral_peaks})
     run_root = Path(run_root)
     metadata = read_json(run_root / "case_metadata.json", {}) or {}
     plan = read_json(run_root / "stage_plan.json", {}) or {}
@@ -406,24 +548,39 @@ def review_run(run_root: Path) -> dict[str, Any]:
         run_root / "force_coeffs.csv",
         run_root / "case/postProcessing/forceCoeffs.csv",
     )
+    records, sources = read_force_coefficient_history(run_root / "case")
     source = next((path for path in candidates if path.is_file()), None)
-    if source is None:
-        raise FileNotFoundError("No real URANS force-coefficient CSV was found")
-    frame = pd.read_csv(source)
+    if records:
+        frame = pd.DataFrame(records)
+        source = run_root / "postprocess/URANS/forceCoeffs_raw.csv"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        frame.to_csv(source, index=False)
+    elif source is not None:
+        frame = pd.read_csv(source)
+        sources = [str(source)]
+    else:
+        raise FileNotFoundError("No native OpenFOAM forceCoeffs history or exported coefficient CSV exists in this run")
+    plan, stage_source = executed_analysis_plan(plan, read_json(run_root / "stage_journal.json", {}) or {}, frame)
     sampling_stage, sampling_start, sampling_end, available_samples = _select_analysis_window(
         frame, plan, metadata
     )
+    available = _sampling_frame(frame, sampling_start, sampling_end)
+    selected_stage = next((p for p in plan.get("stages", []) if p.get("stage") == sampling_stage), {})
+    available, time_serialization = restore_serialized_uniform_times(available, selected_stage.get("dt_s"))
+    available, selection = longest_stationary_tail(available)
+    time_column = _column(available, "time_s", "time", "Time")
+    sampling_start, sampling_end = float(available[time_column].iloc[0]), float(available[time_column].iloc[-1])
     condition = metadata.get("operating_condition") or {}
     chord_m = float(condition.get("chord_m") or metadata.get("chord_m") or 1.0)
     velocity_m_s = float(condition.get("velocity_m_s") or metadata.get("U_inf_m_s") or 1.0)
-    alpha_deg = float(condition.get("alpha_deg") or metadata.get("alpha_deg") or 0.0)
+    alpha_deg = float(metadata.get("alpha_deg", condition.get("alpha_deg", 0.0)))
     thickness_m, thickness_source = _profile_thickness_m(metadata, chord_m)
     alpha_rad = math.radians(alpha_deg)
     projected_length_m = abs(
         thickness_m * math.cos(alpha_rad) + chord_m * math.sin(alpha_rad)
     )
     report = review_urans_signals(
-        frame,
+        available,
         sampling_start_s=sampling_start,
         sampling_end_s=sampling_end,
         chord_m=chord_m,
@@ -432,6 +589,15 @@ def review_run(run_root: Path) -> dict[str, Any]:
         sampling_stage=sampling_stage,
     )
     report["sampling_window"]["available_samples_before_analysis"] = available_samples
+    report["window_selection"] = selection
+    report["stage_source"] = stage_source
+    report["time_serialization"] = time_serialization
+    report["native_history_sources"] = sources
+    report["partial_duration"] = sampling_end < float(plan.get("sampling_end_s") or sampling_end)
+    import hashlib
+    report["analysis_sha256"] = hashlib.sha256(available.to_csv(index=False).encode()).hexdigest()
+    if selection["status"] != "STATIONARY_TAIL_FOUND" or sampling_stage != "E":
+        report.update(status="URANS_PARTIAL", recommendation="STABLE_PRODUCTION_REQUIRED")
     report["frequency_method"] = {
         "source_signal": "time-accurate lift coefficient (normal-force proxy)",
         "estimator": "Welch PSD",
@@ -444,6 +610,8 @@ def review_run(run_root: Path) -> dict[str, Any]:
         "projected_reference_length_m": projected_length_m,
         "alpha_deg": alpha_deg,
         "velocity_m_s": velocity_m_s,
+        "wavenumber_convention": "kL=2*pi*f*L/U_inf assumes convection at U_inf; 1/St is inverse Strouhal, not wavenumber",
+        "spectral_density_axes": "PSD per Hz retained when horizontal coordinates are St or kL; no density Jacobian applied",
     }
     report["mean_force_stability"] = {
         name: {
@@ -457,11 +625,12 @@ def review_run(run_root: Path) -> dict[str, Any]:
         (row for row in plan.get("stages", []) if str(row.get("stage")) == sampling_stage),
         {},
     )
+    spacings = np.diff(available[time_column].to_numpy(dtype=float))
     report["time_step"] = {
         "stage": sampling_stage,
-        "minimum_s": stage.get("dt_s"),
-        "maximum_s": stage.get("dt_s"),
-        "fixed_within_analysis_window": stage.get("dt_s") is not None,
+        "minimum_s": float(spacings.min()) if len(spacings) else None,
+        "maximum_s": float(spacings.max()) if len(spacings) else None,
+        "fixed_within_analysis_window": bool(len(spacings) and np.allclose(spacings, np.median(spacings), rtol=.001, atol=1e-12)),
     }
     residual_candidates = (
         run_root / "postprocess/URANS/solver_residuals.csv",
@@ -530,8 +699,14 @@ def review_run(run_root: Path) -> dict[str, Any]:
         if isinstance(wave_number, list) and len(wave_number) == len(psd):
             psd["wave_number_1_over_st"] = wave_number
         psd.to_csv(run_root / f"psd_{name}.csv", index=False)
-    sampled = _sampling_frame(frame, sampling_start, sampling_end)
+    sampled = _sampling_frame(available, sampling_start, sampling_end)
     report["plots"] = _write_review_plots(run_root, sampled, report)
+    from ramair_frequency_analysis import export_frequency_analysis
+    frequency_report = export_frequency_analysis(run_root / "plots/urans_review/frequency_complete",
+        sampled[_column(sampled, "Time", "time_s", "time")],
+        {k:sampled[_column(sampled,k)] for k in ("Cl","Cd")},chord_m,projected_length_m,velocity_m_s,mark_peaks=mark_spectral_peaks)
+    report["frequency_analysis_complete"] = frequency_report
+    report["plots"].extend(frequency_report["plots"])
     write_json_atomic(run_root / "review.json", report)
     return report
 
@@ -555,6 +730,13 @@ def set_review_decision(
         raise RuntimeError(
             "The current evidence is not eligible for URANS acceptance"
         )
+    if decision == "publish-partial" and (
+        report.get("sampling_window", {}).get("stage") != "E"
+        or report.get("window_selection", {}).get("status") not in {"STATIONARY_TAIL_FOUND", "MEAN_STABLE_ONLY"}
+        or report.get("hard_failures")
+        or not report.get("time_step", {}).get("fixed_within_analysis_window")
+    ):
+        raise RuntimeError("Partial comparison requires real production with stable means and usable signals")
     history = list(report.get("decision_history") or [])
     history.append(
         {
@@ -575,7 +757,8 @@ def set_review_decision(
             "review_status": URANS_DECISIONS[decision],
             "allowed_uses": {
                 "space_time_convergence": decision == "accept",
-                "frequency_analysis": decision == "accept",
+                "exploratory_comparison": decision in {"accept", "publish-partial"},
+                "frequency_analysis": decision in {"accept", "publish-partial"},
             },
             "updated_at": utc_stamp(),
         }
@@ -603,6 +786,7 @@ def parse_args() -> argparse.Namespace:
         choices=tuple(URANS_DECISIONS),
     )
     parser.add_argument("--reason")
+    parser.add_argument('--mark-spectral-peaks',action=argparse.BooleanOptionalAction,default=None)
     return parser.parse_args()
 
 
@@ -615,7 +799,7 @@ def main() -> int:
             reason=args.reason,
         )
     else:
-        result = review_run(args.run_root)
+        result = review_run(args.run_root,mark_spectral_peaks=args.mark_spectral_peaks)
     print(result)
     return 0
 

@@ -22,7 +22,7 @@
     "enable_variable_chord": false,
     "chord_mode": "elliptic",
     "tip_chord_factor": 0.55,
-    "chord_anchor": "quarter_chord",
+    "chord_anchor": "custom",
     "chord_anchor_fraction": 0.5,
     "quasi_elliptic_exponent": 0.65,
     "enable_variable_cell_span": false,
@@ -72,7 +72,11 @@
     "ellipse_orientation": "horizontal",
     "count": 3,
     "position_mode": "standard_3",
-    "x_positions_chord": [0.25, 0.45, 0.65],
+    "x_positions_chord": [
+      0.25,
+      0.45,
+      0.65
+    ],
     "x_start_chord": 0.25,
     "x_end_chord": 0.7,
     "width_fraction_chord": 0.08,
@@ -109,11 +113,12 @@
     "export_iges": true,
     "export_dxf": true,
     "export_full_assembly_iges": true,
-    "export_full_assembly_step": false,
+    "export_full_assembly_step": true,
     "export_component_manifest": true,
     "exports_subfolder": "../Exports",
     "export_canopy_filename": "ramair_canopy_geometry.igs",
-    "export_full_filename": "ramair_full_assembly.igs"
+    "export_full_filename": "ramair_full_assembly.igs",
+    "export_canopy_step": true
   },
   "optional_modules": {
     "enable_canopy_stabilizers": false,
@@ -137,6 +142,11 @@
   },
   "debug_plots": {
     "write_chord_distribution_plot": true,
-    "write_2d_profile_previews": true
+    "write_2d_profile_previews": true,
+    "write_crossports_plot": true,
+    "write_stabilizer_plot": true,
+    "write_suspension_plot": true,
+    "write_cell_span_plot": true,
+    "write_anhedral_plot": true
   }
 }

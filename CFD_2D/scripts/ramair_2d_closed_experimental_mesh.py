@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from ramair_mesh_runtime import gmsh_deadline, add_wake_field
 import pandas as pd
 
 from ramair_2d_mesh_builder import (
@@ -159,7 +160,7 @@ def _merge_config(path: Path | None) -> dict[str, Any]:
 
 def load_closed_geometry(root: Path, config: dict[str, Any]) -> dict[str, Any]:
     variant = str(config["geometry"]["closed_variant"])
-    path = root / "CFD_2D/CFD_2D_inputs/geometry" / variant / "profile_points.csv"
+    path = Path(config["geometry"].get("input_directory") or root / "CFD_2D/CFD_2D_inputs/geometry") / variant / "profile_points.csv"
     if not path.is_file():
         raise FileNotFoundError(f"Missing closed experimental profile: {path}")
     frame = pd.read_csv(path)
@@ -256,6 +257,9 @@ def load_closed_geometry(root: Path, config: dict[str, Any]) -> dict[str, Any]:
         lower[-1], upper[0], lower[-2], upper[1], chord,
         max(5, int(config["boundary_layer"].get("te_geometry_points", 35)) - 2),
     )
+    if config["geometry"].get("preserve_processed_te"):
+        cap_internal = branch("TE_ROUNDED_CAP")
+        cap_info = {"method": "stored_processed_TE", "applied": True}
     te_cap = np.vstack([
         lower[lower_anchor:],
         cap_internal,
@@ -514,6 +518,8 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
                         "bump_maximum_size_percent_chord", 0.50
                     )),
                 )
+        if split_report is not None:
+            split_report.setdefault("curved_bump_coefficients", curved_bumps)
         for (label, points, loop_sign), length in zip(polylines, lengths):
             ids = [point_tag(point) for point in points]
             curve = geo.addSpline(ids)
@@ -730,6 +736,7 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
                     external.get("extend_interface_guard_enabled", True)
                 ),
             }
+        size_law = add_wake_field(gmsh, size_law, config, chord)
         gmsh.model.mesh.field.setAsBackgroundMesh(size_law)
         generation_started = time.perf_counter()
         if automatic_report is not None or split_report is not None:
@@ -758,7 +765,13 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
                 split_report["gmsh_1d_verification"] = real_segments
             elif automatic_report is not None:
                 automatic_report["gmsh_1d_verification"] = real_segments
+        from ramair_front_sizing import install_front_size_callback
+        external_size_report["sampled_front"] = install_front_size_callback(gmsh, curves, fluid_surface, layer, external, chord, preserve_background=bool(config.get("wake_refinement", {}).get("enabled")))
+        from ramair_curve_curvature import audit_wall_curvature
+        audit_wall_curvature(gmsh, loop_curves, float(layer["total_thickness_m"]), revision / "GeometryAudit")
+        gmsh.write(str(revision / "GeometryAudit/geometry.geo_unrolled"))
         gmsh.model.mesh.generate(2)
+        gmsh.model.mesh.removeSizeCallback()
         optimization = str(config.get("execution", {}).get("post_generation_optimization", "off"))
         optimization_iterations = max(
             1, int(config["execution"].get("post_generation_optimization_iterations", 5))
@@ -808,18 +821,23 @@ def build_2d_mesh(root: Path, revision: Path, config: dict[str, Any]) -> dict[st
         gmsh.finalize()
 
 
-def generate(root: Path, config_path: Path | None, name: str | None, check_mesh: bool) -> dict[str, Any]:
+def generate(root: Path, config_path: Path | None, name: str | None, check_mesh: bool, output_dir: Path | None = None) -> dict[str, Any]:
     config = _merge_config(config_path)
     revision_name = re.sub(
         r"[^A-Za-z0-9_.-]+", "_", name or str(config.get("name") or DEFAULT_NAME),
     ).strip("_")
-    experiment = root / "CFD_2D/experimental_meshes" / EXPERIMENT_ID
-    revision = experiment / "revisions" / revision_name
+    experiment = output_dir or root / "CFD_2D/experimental_meshes" / EXPERIMENT_ID
+    revision = (experiment if output_dir else experiment / "revisions") / revision_name
     if revision.exists():
+        if output_dir and any((revision / "OpenFOAM").glob("*/solver_setup.json")):
+            raise ValueError("Esta malla ya tiene casos OpenFOAM. Usa un nombre nuevo para regenerarla.")
         history = experiment / "history" / f"{revision_name}_{time.strftime('%Y%m%d_%H%M%S')}"
         history.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(revision), str(history))
     revision.mkdir(parents=True)
+    if config.get("_context"):
+        from ramair_workspace import bind_mesh_config
+        config = bind_mesh_config(config, Path(config["_context"]["geometry_dir"]))
     config["name"] = revision_name
     write_json_atomic(revision / "mesh_config.json", config)
     report: dict[str, Any] = {
@@ -829,7 +847,14 @@ def generate(root: Path, config_path: Path | None, name: str | None, check_mesh:
     }
     started = time.perf_counter()
     try:
-        report.update(build_2d_mesh(root, revision, config))
+        with gmsh_deadline(int(config.get("execution", {}).get("gmsh_timeout_s", 900))):
+            report.update(build_2d_mesh(root, revision, config))
+        cell_count = int(report.get("total_2d_cells", report.get("surface_cells", 0)) or 0)
+        if config.get("_context"):
+            audit = audit_boundary_layer_mesh(revision / "mesh_2d.msh")
+            cell_count = int(audit.get("cell_counts_2d", {}).get("total", 0))
+            if cell_count > 2_000_000:
+                raise RuntimeError(f"Mesh exceeds the 2,000,000-cell guard: {cell_count}")
         extrusion = extrude_msh2_surface_one_cell(
             revision / "mesh_2d.msh", revision / "mesh_final.msh",
             float(config["geometry"]["chord_m"]) * float(config["geometry"]["spanwise_thickness_chord"]),
@@ -848,7 +873,7 @@ def generate(root: Path, config_path: Path | None, name: str | None, check_mesh:
         base_name = str(config.get("execution", {}).get("optimization_base_revision") or "")
         if base_name and base_name != revision_name:
             base_report = read_json(
-                experiment / "revisions" / base_name / "mesh_report.json", {}
+                (experiment if output_dir else experiment / "revisions") / base_name / "mesh_report.json", {}
             ) or {}
             if base_report:
                 report["optimization_comparison"] = compare_openfoam_quality(
@@ -871,20 +896,26 @@ def generate(root: Path, config_path: Path | None, name: str | None, check_mesh:
     return report
 
 
-def approve(root: Path, name: str) -> dict[str, Any]:
-    experiment = root / "CFD_2D/experimental_meshes" / EXPERIMENT_ID
-    revision = experiment / "revisions" / name
+def approve(root: Path, name: str, output_dir: Path | None = None) -> dict[str, Any]:
+    experiment = output_dir or root / "CFD_2D/experimental_meshes" / EXPERIMENT_ID
+    revision = (experiment if output_dir else experiment / "revisions") / name
     report = read_json(revision / "mesh_report.json", {}) or {}
     if str(report.get("checkMesh_status")) != "OK":
         raise RuntimeError("Only a closed experimental mesh with checkMesh OK can be approved")
     payload = {"status": "APPROVED", "revision": name, "approved_at": time.strftime("%Y-%m-%d %H:%M:%S")}
+    if not (revision / "mesh_final.msh").is_file():
+        raise FileNotFoundError(revision / "mesh_final.msh")
+    if output_dir:
+        from ramair_workspace import mesh_evidence
+        payload["content_evidence"] = mesh_evidence(revision)
+    write_json_atomic(revision / "MESH_APPROVED.flag", payload)
     write_json_atomic(revision / "approval.json", payload)
     write_json_atomic(experiment / "approved.json", payload)
     return payload
 
 
-def quality_study(root: Path, name: str) -> dict[str, Any]:
-    revision = root / "CFD_2D/experimental_meshes" / EXPERIMENT_ID / "revisions" / name
+def quality_study(root: Path, name: str, output_dir: Path | None = None) -> dict[str, Any]:
+    revision = (output_dir or root / "CFD_2D/experimental_meshes" / EXPERIMENT_ID / "revisions") / name
     report = read_json(revision / "mesh_report.json", {}) or {}
     if str(report.get("checkMesh_status")) != "OK":
         raise RuntimeError("Quality distributions require checkMesh OK")
@@ -954,6 +985,7 @@ def quality_study(root: Path, name: str) -> dict[str, Any]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-root", type=Path, required=True)
+    parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--config", type=Path)
     parser.add_argument("--name")
     parser.add_argument("--generate", action="store_true")
@@ -966,13 +998,13 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     if args.approve:
-        result = approve(args.project_root.resolve(), args.approve)
+        result = approve(args.project_root.resolve(), args.approve, args.output_dir)
     elif args.quality_study:
-        result = quality_study(args.project_root.resolve(), args.quality_study)
+        result = quality_study(args.project_root.resolve(), args.quality_study, args.output_dir)
     elif args.generate:
         result = generate(
             args.project_root.resolve(), args.config.resolve() if args.config else None,
-            args.name, bool(args.check_mesh),
+            args.name, bool(args.check_mesh), args.output_dir,
         )
     else:
         result = {"default_config": default_closed_config()}

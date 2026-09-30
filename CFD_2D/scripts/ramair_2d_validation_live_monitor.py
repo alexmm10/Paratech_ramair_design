@@ -387,10 +387,28 @@ def build_monitor_snapshot(
         remaining = max(0, int(steps_planned) - steps_done) * float(
             performance["median_s_per_step"]
         )
+    process_status = case_manifest.get("execution_outcome")
+    run_state = read_json(case / "run_status.json", {}) or {}
+    staged_state = read_json(case / "staged_run_status.json", {}) or {}
+    if (case / "steadyInitialization/pending_stage.json").is_file():
+        process_status = "PAUSED_RECOVERABLE"
+    elif not process_status:
+        process_status = staged_state.get("status") or run_state.get("status")
+    if run_state.get("status") == "RUN_COMPLETED" and process_status in {None, "RUNNING", "RUN_COMPLETED"}:
+        process_status = "COMPLETED"
+    process_file = case / ".ramair_solver_process.json"
+    if process_file.is_file():
+        from ramair_execution_control import load_solver_process, pid_is_alive
+        process = load_solver_process(case)
+        alive = pid_is_alive(process.get("pid"), process.get("pid_start_token"))
+        if alive:
+            process_status = "RUNNING"
+        elif process_status == "RUNNING":
+            process_status = "INTERRUPTED_CHECKPOINT_AVAILABLE"
     snapshot = {
         "schema_version": 1,
         "status": (
-            str(case_manifest.get("execution_outcome") or "RUNNING")
+            str(process_status or "STATUS_UNKNOWN")
             if log is not None
             else "WAITING_FOR_SOLVER_LOG"
         ),

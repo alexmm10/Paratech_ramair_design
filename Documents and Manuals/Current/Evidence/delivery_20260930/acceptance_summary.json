@@ -1,0 +1,123 @@
+{
+  "status": "PASS",
+  "automated_tests": {
+    "passed": 427,
+    "skipped": [
+      {
+        "name": "test_crashed_controller_drains_independent_child_and_preserves_write",
+        "reason": "Independent Unix MPI process groups"
+      }
+    ],
+    "failures": 0
+  },
+  "menus": [
+    {
+      "page": "Inicio",
+      "exceptions": [],
+      "errors": [],
+      "warnings": [],
+      "duration_s": 0.389
+    },
+    {
+      "page": "Casos de trabajo",
+      "exceptions": [],
+      "errors": [],
+      "warnings": [],
+      "duration_s": 0.452
+    },
+    {
+      "page": "Perfiles 2D",
+      "exceptions": [],
+      "errors": [],
+      "warnings": [],
+      "duration_s": 0.778
+    },
+    {
+      "page": "Geometría CATIA",
+      "exceptions": [],
+      "errors": [],
+      "warnings": [],
+      "duration_s": 6.96
+    },
+    {
+      "page": "Caso CFD",
+      "exceptions": [],
+      "errors": [],
+      "warnings": [],
+      "duration_s": 0.384
+    },
+    {
+      "page": "Mallado",
+      "exceptions": [],
+      "errors": [],
+      "warnings": [],
+      "duration_s": 2.258
+    },
+    {
+      "page": "Caso OpenFOAM",
+      "exceptions": [],
+      "errors": [],
+      "warnings": [],
+      "duration_s": 0.462
+    },
+    {
+      "page": "Ejecución",
+      "exceptions": [],
+      "errors": [],
+      "warnings": [],
+      "duration_s": 6.346
+    },
+    {
+      "page": "Postproceso",
+      "exceptions": [],
+      "errors": [],
+      "warnings": [],
+      "duration_s": 0.983
+    },
+    {
+      "page": "Validation & Convergence Lab",
+      "exceptions": [],
+      "errors": [],
+      "warnings": [
+        "Una ejecución nueva siempre realiza RANS antes de A-B-C-D-E. Activa continuar solo para reanudar una fase transitoria previamente detenida.",
+        "Resolución de pared insuficiente para SA integrado: y+ máximo = 3.41 (> 1). Revise la primera altura y las zonas de aceleración antes de aceptar el punto."
+      ],
+      "duration_s": 7.516
+    },
+    {
+      "page": "Archivos y logs",
+      "exceptions": [],
+      "errors": [],
+      "warnings": [],
+      "duration_s": 0.378
+    }
+  ],
+  "desktop": {
+    "width": 1366,
+    "horizontal_document_overflow": false,
+    "broken_images": 0
+  },
+  "narrow": {
+    "width": 390,
+    "horizontal_document_overflow": false,
+    "broken_images": 0,
+    "table_scroll": "horizontal inside table"
+  },
+  "CAD": "Python preparation and topology validation only; CATIA not launched",
+  "CFD": "2 meshes x 2 angles; diagnostic RANS only; no scientific acceptance",
+  "relocation": "fresh environment, import, real checkMesh and approval, 11 menus in separate Linux path",
+  "pending_company_reception": [
+    "licensed CATIA installation",
+    "actual company server and its policies"
+  ],
+  "Unix_recovery_tests": {
+    "passed": 3,
+    "skipped": 0
+  },
+  "CAD_responsive_review": {
+    "desktop": 870,
+    "narrow": 390,
+    "broken_images": 0,
+    "document_overflow": false
+  }
+}

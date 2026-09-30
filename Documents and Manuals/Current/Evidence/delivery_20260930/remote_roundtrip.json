@@ -1,0 +1,12 @@
+{
+  "status": "PASS",
+  "environment": "isolated WSL; enterprise server not tested",
+  "start": 42.0,
+  "paused_checkpoint": 62.0,
+  "resumed_checkpoint": 82.0,
+  "mesh_order_preserved": true,
+  "URANS_launched": false,
+  "return_archive_verified": true,
+  "imported_postprocess": "PROCESSED_PARTIAL",
+  "postprocess_in_return": true
+}

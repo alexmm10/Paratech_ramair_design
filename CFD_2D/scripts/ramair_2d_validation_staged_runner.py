@@ -143,6 +143,11 @@ def configure_stage(
     preserve_temporal_history: bool = False,
 ) -> dict[str, Any]:
     """Apply one frozen phase without modifying its scientific target."""
+    from ramair_production_capture import capture_policy
+    capture = capture_policy(case, stage)
+    if capture:
+        stage = {**stage, **capture}
+        write_json_atomic(case / "production_capture_applied.json", capture)
     effective = normalize_start_mode(start_mode)
     from_latest = effective in {CONTINUE_STAGE, RESUME_EXISTING}
     stage_steps = int(stage.get("steps") or 1)
@@ -177,7 +182,7 @@ def configure_stage(
     else:
         control = _replace_entry(control, "writeControl", "timeStep")
     boundary_target_index: int | None = None
-    if preserve_temporal_history:
+    if preserve_temporal_history and not capture:
         write_interval = 1
     else:
         write_interval, boundary_target_index = _phase_boundary_write_interval(
@@ -188,7 +193,13 @@ def configure_stage(
         )
     effective_write_interval_s: float | None = None
     if adaptive:
-        if preserve_temporal_history:
+        if stage.get("write_policy") == "configured_interval":
+            requested_decimal = Decimal(str(stage["write_interval_s"]))
+            if requested_decimal <= 0:
+                raise ValueError("The configured write interval must be positive")
+            alignment_intervals = max(1, int((intended_end / requested_decimal).to_integral_value(rounding=ROUND_CEILING)))
+            requested_write = float(intended_end / Decimal(alignment_intervals))
+        elif preserve_temporal_history:
             requested_write = float(stage.get("write_interval_s", stage["dt_s"]))
             requested_write = min(requested_write, float(delta_t) * write_interval)
             # adjustableRunTime schedules against absolute time. Choose a
@@ -217,13 +228,17 @@ def configure_stage(
             control, "writeInterval", f"{effective_write_interval_s:.12g}",
         )
     else:
+        if capture:
+            # Retain the final checkpoint and the closest compatible cadence.
+            requested_steps=max(1,round(float(capture['write_interval_s'])/float(delta_t)))
+            write_interval=math.gcd(boundary_target_index or stage_steps, requested_steps)
         control = _replace_entry(control, "writeInterval", str(write_interval))
     requested_purge = stage.get("purge_write")
     effective_purge: int | None = None
     if requested_purge is not None:
         effective_purge = max(0, int(requested_purge))
-    if preserve_temporal_history:
-        effective_purge = max(3, int(effective_purge or 0))
+    if preserve_temporal_history and effective_purge not in (None, 0):
+        effective_purge = max(3, effective_purge)
     if effective_purge is not None:
         if re.search(r"(?m)^\s*purgeWrite\s+[^;]+;", control):
             control = _replace_entry(control, "purgeWrite", str(effective_purge))
@@ -281,6 +296,9 @@ def configure_stage(
         "start_mode": effective,
         "write_interval_steps": write_interval,
         "write_interval_s": effective_write_interval_s,
+        "write_policy": stage.get("write_policy", "restart_history" if preserve_temporal_history else "phase_boundary"),
+        "requested_write_interval_s": stage.get("write_interval_s"),
+        "production_capture": capture,
         "boundary_target_time_index": boundary_target_index,
         "retains_temporal_history": preserve_temporal_history,
         "purge_write_latest_states": effective_purge,
@@ -485,7 +503,9 @@ def _bootstrap_backward_history(
             preserve_temporal_history=False,
         )
         ramp_log = _log_file(case)
-        ramp_offset = ramp_log.stat().st_size if ramp_log.is_file() else 0
+        # run_case.sh truncates log.foamRun for each launch. The previous log's
+        # length would hide End and falsely fail the C→D Euler ramp.
+        ramp_offset = 0
         ramp_started = time.monotonic()
         ramp_command = runner_command(
             case,
@@ -1311,6 +1331,9 @@ def execute(
                     end = Decimal(str(applied["decimal_end_s"]))
                     dt = Decimal(str(stage["dt_s"]))
                     reconstruct_times = [float(end - 2 * dt), float(end - dt), float(end)]
+            if applied.get("production_capture"):
+                reconstruct_times = None
+                reconstruction_mode = "all"
             log = _log_file(case)
             byte_start = 0
             publish_runtime(

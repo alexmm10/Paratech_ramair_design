@@ -1,0 +1,124 @@
+{
+  "status": "PASS",
+  "study": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Convergence/RANS/Final_Delivery_2x2",
+  "postprocess": {
+    "Meshes/Delivery_coarse/OpenFOAM/Final_Delivery_RANS": [
+      {
+        "alpha": 0.0,
+        "status": "PROCESSED_PARTIAL",
+        "result": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_coarse/OpenFOAM/Final_Delivery_RANS/Angles/alpha_p0p000/Postprocess"
+      },
+      {
+        "alpha": 8.0,
+        "status": "PROCESSED_PARTIAL",
+        "result": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_coarse/OpenFOAM/Final_Delivery_RANS/Angles/alpha_p8p000/Postprocess"
+      }
+    ],
+    "Meshes/Delivery_medium/OpenFOAM/RANS_Final_Delivery_2x2_1790782808808213238": [
+      {
+        "alpha": 0.0,
+        "status": "PROCESSED_PARTIAL",
+        "result": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_medium/OpenFOAM/RANS_Final_Delivery_2x2_1790782808808213238/Angles/alpha_p0p000/Postprocess"
+      },
+      {
+        "alpha": 8.0,
+        "status": "PROCESSED_PARTIAL",
+        "result": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_medium/OpenFOAM/RANS_Final_Delivery_2x2_1790782808808213238/Angles/alpha_p8p000/Postprocess"
+      }
+    ]
+  },
+  "matrix": [
+    {
+      "mesh": "Delivery_coarse",
+      "alpha": 0.0,
+      "state": "postprocesado",
+      "reason": "",
+      "cells": 108104,
+      "quality": "OK",
+      "setup": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_coarse/OpenFOAM/Final_Delivery_RANS",
+      "case": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_coarse/OpenFOAM/Final_Delivery_RANS/Angles/alpha_p0p000",
+      "Cl": -0.015175093762418603,
+      "Cd": 0.04214498233651163,
+      "Cm": 0.0012324787510465116,
+      "source": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_coarse/OpenFOAM/Final_Delivery_RANS/Angles/alpha_p0p000/Postprocess/RANS/stage_summary.json",
+      "source_sha256": "86ad11fbbd2e1ac0c2566d2481c6cb1389f81f42eb0be80a9943744875ac5c66",
+      "scientific_accepted": false,
+      "executed_iteration": 42.0,
+      "Cl/Cd": -0.36006881296689747,
+      "diagnostic": true,
+      "iteration": 42
+    },
+    {
+      "mesh": "Delivery_coarse",
+      "alpha": 8.0,
+      "state": "postprocesado",
+      "reason": "",
+      "cells": 108104,
+      "quality": "OK",
+      "setup": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_coarse/OpenFOAM/Final_Delivery_RANS",
+      "case": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_coarse/OpenFOAM/Final_Delivery_RANS/Angles/alpha_p8p000",
+      "Cl": 0.06574185413588372,
+      "Cd": 0.04855216949930233,
+      "Cm": 0.005382822054627907,
+      "source": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_coarse/OpenFOAM/Final_Delivery_RANS/Angles/alpha_p8p000/Postprocess/RANS/stage_summary.json",
+      "source_sha256": "eefdcb98899cdc7239fc4cc548053bec394e23137b232096ba1bceebb7b14632",
+      "scientific_accepted": false,
+      "executed_iteration": 42.0,
+      "Cl/Cd": 1.3540456546813713,
+      "diagnostic": true,
+      "iteration": 42
+    },
+    {
+      "mesh": "Delivery_medium",
+      "alpha": 0.0,
+      "state": "postprocesado",
+      "reason": "",
+      "cells": 155824,
+      "quality": "OK",
+      "setup": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_medium/OpenFOAM/RANS_Final_Delivery_2x2_1790782808808213238",
+      "case": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_medium/OpenFOAM/RANS_Final_Delivery_2x2_1790782808808213238/Angles/alpha_p0p000",
+      "Cl": -0.010678347105703704,
+      "Cd": 0.05606311084345679,
+      "Cm": 0.00276926966447037,
+      "source": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_medium/OpenFOAM/RANS_Final_Delivery_2x2_1790782808808213238/Angles/alpha_p0p000/Postprocess/RANS/stage_summary.json",
+      "source_sha256": "f3edabe5276012885e3cce28abdbcf01b0bec06ba8a6ab24178e31221da5c161",
+      "scientific_accepted": false,
+      "executed_iteration": 80.0,
+      "Cl/Cd": -0.19047011386008364,
+      "diagnostic": true,
+      "iteration": 80
+    },
+    {
+      "mesh": "Delivery_medium",
+      "alpha": 8.0,
+      "state": "postprocesado",
+      "reason": "",
+      "cells": 155824,
+      "quality": "OK",
+      "setup": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_medium/OpenFOAM/RANS_Final_Delivery_2x2_1790782808808213238",
+      "case": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_medium/OpenFOAM/RANS_Final_Delivery_2x2_1790782808808213238/Angles/alpha_p8p000",
+      "Cl": 0.10139519699611109,
+      "Cd": 0.06429936897419754,
+      "Cm": 0.003009687222098765,
+      "source": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Company_Delivery_20260924/CFD_2D/Re1900000_M015/Geometries/LS1_closed/Meshes/Delivery_medium/OpenFOAM/RANS_Final_Delivery_2x2_1790782808808213238/Angles/alpha_p8p000/Postprocess/RANS/stage_summary.json",
+      "source_sha256": "683c4a3e04af458cc5185d6370b4d9f3701fcd1e243e3e511c5c837a55aa7fb3",
+      "scientific_accepted": false,
+      "executed_iteration": 80.0,
+      "Cl/Cd": 1.5769236714717931,
+      "diagnostic": true,
+      "iteration": 80
+    }
+  ],
+  "scientific_acceptance": false,
+  "GCI": {
+    "0.0": {
+      "eligible": false,
+      "reason": "Requiere tres mallas distintas, convergencia iterativa demostrada y revisión; excluye pruebas breves."
+    },
+    "8.0": {
+      "eligible": false,
+      "reason": "Requiere tres mallas distintas, convergencia iterativa demostrada y revisión; excluye pruebas breves."
+    }
+  },
+  "plots": 12
+}

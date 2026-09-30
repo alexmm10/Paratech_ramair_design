@@ -1,0 +1,25 @@
+{
+  "status": "PASS",
+  "archives": [
+    {
+      "archive": "C:\\Users\\alejm\\Desktop\\PRACTICAS_INVICSA\\3D design\\RamAir Studio Development Archive\\20260930\\Windows",
+      "inventoried_files": 500,
+      "hash_verification": "PASS"
+    },
+    {
+      "archive": "\\\\wsl.localhost\\Ubuntu-22.04\\home\\alejm\\ramair_cfd\\Development_Archive\\20260930",
+      "inventoried_files": 185,
+      "hash_verification": "PASS"
+    }
+  ],
+  "documentation_broken_links": 0,
+  "credential_pattern_matches": 0,
+  "application_files": 396,
+  "preserved": [
+    "Workspaces",
+    "Results",
+    "Data Archive",
+    "CFD checkpoints"
+  ],
+  "history": "Retained in Git and external archives; absent from delivery tree"
+}

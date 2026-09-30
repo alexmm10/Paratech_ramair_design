@@ -176,7 +176,8 @@ def signal_summary(
     mean = float(np.mean(array))
     std = float(np.std(array, ddof=1))
     centered = array - mean
-    correlation = np.correlate(centered, centered, mode="full")[array.size - 1 :]
+    from scipy.signal import correlate
+    correlation = correlate(centered, centered, mode="full", method="fft")[array.size - 1 :]
     if correlation[0] > 0.0:
         correlation = correlation / correlation[0]
         non_positive = np.flatnonzero(correlation <= 0.0)
@@ -310,7 +311,9 @@ def welch_spectrum(
         "nperseg": segment,
         "noverlap": overlap,
         "duration_s": float(time[-1] - time[0]),
-        "frequency_resolution_hz": 1.0 / float(time[-1] - time[0]),
+        "frequency_resolution_hz": 1.0 / (segment * median_dt),
+        "record_resolution_hz": 1.0 / float(time[-1] - time[0]),
+        "peak_at_first_bin": peak_index == 0,
         "nyquist_hz": 0.5 / median_dt,
         "normalization": "density",
         "window": "hann",

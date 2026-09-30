@@ -952,6 +952,9 @@ def _plot_rans_spatial_suite(
     if not selected:
         return products
 
+    from ramair_report_figures import rans_grid_figures
+    products.extend(rans_grid_figures(selected, output))
+
     def save(name: str, title: str, x_key: str, y_value, y_label: str) -> None:
         figure, axes = plt.subplots(2, 2, figsize=(11.2, 7.2), constrained_layout=True)
         for axis, (metric, label) in zip(axes.flat, _RANS_SCALAR_METRICS.items()):

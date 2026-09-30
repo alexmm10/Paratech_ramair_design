@@ -119,7 +119,7 @@ TIP_CHORD_FACTOR = 0.55          # chord_tip / chord_center if variable chord is
 #   mid_chord     -> chord reduction is split symmetrically around mid-chord
 #   quarter_chord -> 25% chord line remains fixed
 #   custom        -> uses CHORD_ANCHOR_FRACTION directly, 0=LE, 1=TE
-CHORD_ANCHOR_MODE: Literal["leading_edge", "trailing_edge", "mid_chord", "quarter_chord", "custom"] = "quarter_chord"
+CHORD_ANCHOR_MODE: Literal["leading_edge", "trailing_edge", "mid_chord", "quarter_chord", "custom"] = "custom"
 CHORD_ANCHOR_FRACTION = 0.5      # Used only if CHORD_ANCHOR_MODE = "custom"
 QUASI_ELLIPTIC_EXPONENT = 0.65   # <1 keeps more chord near the tips; 1 is closer to ellipse
 
@@ -486,6 +486,7 @@ class Config:
     suspension_line_cad_strategy: str
     export_full_assembly_iges: bool
     export_full_assembly_step: bool
+    export_canopy_step: bool
     export_component_manifest: bool
     export_subfolder_name: str
     export_canopy_filename: str
@@ -594,6 +595,7 @@ def build_config_from_user_settings() -> Config:
         suspension_line_cad_strategy=SUSPENSION_LINE_CAD_STRATEGY,
         export_full_assembly_iges=EXPORT_FULL_ASSEMBLY_IGES,
         export_full_assembly_step=EXPORT_FULL_ASSEMBLY_STEP,
+        export_canopy_step=True,
         export_component_manifest=EXPORT_COMPONENT_MANIFEST,
         export_subfolder_name=EXPORT_SUBFOLDER_NAME,
         export_canopy_filename=EXPORT_CANOPY_FILENAME,
@@ -1033,6 +1035,26 @@ def make_crossport_table(cfg: Config, upper: pd.DataFrame, lower: pd.DataFrame) 
     if not cfg.enable_crossports:
         return pd.DataFrame(columns=columns)
 
+    if cfg.crossport_position_mode == "custom_table":
+        from ramair_crossports import explicit_hole_loop
+        rows = []
+        seen = set()
+        for i, spec in enumerate(cfg.crossport_custom_specs, 1):
+            name = str(spec.get("hole_id", f"CP{i}"))
+            if name in seen:
+                raise ValueError(f"Crossport ID duplicado: {name}")
+            seen.add(name)
+            loop, meta = explicit_hole_loop(spec, upper[["x", "y"]].to_numpy(float),
+                                            lower[["x", "y"]].to_numpy(float), cfg.crossport_points_per_loop)
+            for k, (x, z) in enumerate(loop, 1):
+                rows.append(dict(crossport_id=i, loop_id=i, point_order=k,
+                    shape=spec["shape"], orientation=f"{meta['angle_deg']:g}deg",
+                    x_center_norm=meta["x"], z_center_norm=meta["z"], z_center_fraction=meta["z_fraction"],
+                    width_chord_norm=meta["width"], height_chord_norm=meta["height"],
+                    x_chord_norm=x, z_chord_norm=z, apply_to=cfg.crossport_apply_to,
+                    cut_mode=cfg.crossport_cut_mode, notes=f"Explicit table hole {name}; exact dimensions, no auto resizing."))
+        return pd.DataFrame(rows, columns=columns)
+
     specs = _base_crossport_specs(cfg)
     rows = []
     loop_id = 1
@@ -1189,6 +1211,7 @@ def write_params_csv(cfg: Config, out_dir: Path, rib_df: pd.DataFrame) -> None:
         ["export_iges", int(cfg.export_iges), "0/1", "Requested CATIA IGES export."],
         ["export_full_assembly_iges", int(cfg.export_full_assembly_iges), "0/1", "Requested CATIA full visible assembly IGES export."],
         ["export_full_assembly_step", int(cfg.export_full_assembly_step), "0/1", "Requested CATIA full visible assembly STEP export."],
+        ["export_canopy_step", int(cfg.export_canopy_step), "0/1", "Export canopy STEP before adding optional assembly modules."],
         ["exports_subfolder", cfg.export_subfolder_name, "folder", "Export folder relative to BASE_FOLDER; CATIA will create it if needed."],
         ["force_export_to_base_folder", int(cfg.force_export_to_base_folder), "0/1", "1 exports to BASE_FOLDER\\ramair_canopy_3D.igs regardless of CSV path."],
         ["anhedral_section_orientation", cfg.anhedral_section_orientation, "text", "focus_inward or legacy_outward."],
@@ -1447,6 +1470,7 @@ def parse_args() -> argparse.Namespace:
         description="Generate CATIA input CSVs for a parametric ram-air canopy model.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
+    parser.add_argument("--cad-only", action="store_true", help="Generate only the named CAD model, without CFD inputs or reference profiles.")
     parser.add_argument("--config", type=Path, default=None, help="Optional project JSON config, e.g. Application Support/Configurations/default_case_config.json")
     parser.add_argument("input_csv", nargs="?", type=Path, default=None, help="Input normalized profile CSV/DAT with x,y,z or x,z columns")
     parser.add_argument("--input-csv", dest="input_csv_option", type=Path, default=None, help="Alternative explicit input profile path; useful for Ubuntu scripts/profiles folders")
@@ -1711,6 +1735,7 @@ def _apply_default_case_config(cfg: Config, args: argparse.Namespace) -> Config:
         "export_dxf": "export_dxf",
         "export_full_assembly_iges": "export_full_assembly_iges",
         "export_full_assembly_step": "export_full_assembly_step",
+        "export_canopy_step": "export_canopy_step",
         "export_component_manifest": "export_component_manifest",
         "exports_subfolder": "export_subfolder_name",
         "export_canopy_filename": "export_canopy_filename",
@@ -1771,7 +1796,7 @@ def _apply_default_case_config(cfg: Config, args: argparse.Namespace) -> Config:
 
     cfd = data.get("cfd_2d", {})
     workflow_path = config_root / "CFD_2D/CFD_2D_inputs/config/cfd2d_workflow_config.json"
-    if workflow_path.is_file():
+    if workflow_path.is_file() and ENABLE_2D_CAE_EXPORTS:
         try:
             workflow_data = json.loads(workflow_path.read_text(encoding="utf-8-sig"))
             active_conditions = workflow_data.get("case_conditions") or {}
@@ -1947,6 +1972,9 @@ def default_system_config(cells: int = NUM_CELLS) -> dict:
     JSON without touching Python.
     """
     return {
+        "suspension_schema_version": 2,
+        "brake_selection": {"mode": "outer_fraction", "symmetric": True, "fraction_L": .33, "fraction_R": .33, "cells_L": [], "cells_R": []},
+        "cascade_layout": {"template": "chordwise", "fraction": .45, "span_group_size": 2, "span_fraction": .7},
         "suspension": {
             "enabled": True,
             "derive_anhedral_from_R_over_b": True
@@ -2094,7 +2122,7 @@ def default_system_config(cells: int = NUM_CELLS) -> dict:
             "surface_reference": "lower",
             "triangular_anchor_edge_mode": "lower_perimeter_by_x",
             "attach_to_loaded_ribs": True,
-            "attach_tip_lines_to_stabilizer": False,
+            "attach_tip_lines_to_stabilizer": True,
             "description": "Independent side panel on the two external ribs. For line anchors, this is the single main switch: set this true to move external structural tip anchors to the stabilizer edge. Default triangular panel uses UP_LE and UP_TE on the external rib plus an apex controlled by apex_x_c and height_mm. Lines are distributed along UP_LE-apex-UP_TE according to bank x/c, not collapsed at the apex. height_direction: rib_down, global_down, span_outward."
         },
         "tip_side_bulge": {
@@ -2150,6 +2178,8 @@ def _load_system_json(out_dir: Path, cells: int) -> dict:
     loaded = json.loads(cfg_path.read_text(encoding="utf-8"))
     if not isinstance(loaded, dict):
         raise TypeError(f"CATIA system configuration must contain a JSON object: {cfg_path}")
+    from ramair_suspension_layout import migrate
+    loaded = migrate(loaded)
     # Keep the exact configuration used beside the CATIA inputs for provenance,
     # without making that generated snapshot the editable source of truth.
     snapshot = Path(out_dir) / "ramair_suspension_config.json"
@@ -2192,6 +2222,8 @@ def maybe_apply_suspension_beta_to_canopy_cfg(cfg: Config) -> Config:
     except Exception:
         return cfg
     if not _deep_get(line_cfg, ["suspension", "enabled"], True):
+        return cfg
+    if _deep_get(line_cfg, ["suspension", "positioning_mode"], "automatic") == "manual":
         return cfg
     if not _deep_get(line_cfg, ["suspension", "derive_anhedral_from_R_over_b"], False):
         return cfg
@@ -2408,7 +2440,7 @@ class StabilizerGeometry:
         self.warnings: list[str] = []
 
     def active(self) -> bool:
-        return bool(self.cfg.get("active", False) or ENABLE_CANOPY_STABILIZERS)
+        return bool(self.cfg.get("active", False))
 
     @staticmethod
     def _unit(v) -> np.ndarray:
@@ -2469,7 +2501,24 @@ class StabilizerGeometry:
         shape = str(self.cfg.get("shape", "triangular")).lower()
         p_up_le, p_up_te, e_chord, e_down = self._local_basis(side, rib, x1, x2)
 
-        if shape == "triangular":
+        if shape == "custom":
+            edge = self.cfg.get("lower_edge_points", [])
+            if len(edge) < 2:
+                raise ValueError("Un estabilizador personalizado requiere al menos dos puntos de borde inferior.")
+            xs = [float(row["x_c"]) for row in edge]
+            if any(not math.isfinite(x) for x in xs) or any(b <= a for a, b in zip(xs, xs[1:])):
+                raise ValueError("Los puntos del borde inferior deben tener x/c finito y estrictamente creciente.")
+            if xs[0] < x1 or xs[-1] > x2:
+                raise ValueError("El borde inferior debe estar entre inicio y final del estabilizador.")
+            lower = []
+            for i, row in enumerate(edge):
+                down = float(row["down_mm"])
+                if not math.isfinite(down) or down <= 0:
+                    raise ValueError("Las alturas del borde inferior deben ser positivas y finitas.")
+                point = self._surface_point(xs[i], rib) + down * e_down
+                lower.append((f"CUSTOM_{i:03d}", point))
+            pts = [("UP_LE", p_up_le), ("UP_TE", p_up_te), *reversed(lower)]
+        elif shape == "triangular":
             # Default recommended side-stabilizer: top edge attached to external rib,
             # one adjustable apex.  Apex x/c controls where the triangular point sits
             # along the chord; height controls its distance from the external rib.
@@ -2489,6 +2538,14 @@ class StabilizerGeometry:
                 p_low_te = p_up_te + sweep * e_chord + height * e_down
             pts = [("UP_LE", p_up_le), ("UP_TE", p_up_te), ("LOW_TE", p_low_te), ("LOW_LE", p_low_le)]
 
+        # The sewn top edge follows the transformed outer rib, including its
+        # actual profile breakpoints. A chord between the endpoints leaves a
+        # gap/overlap even though the untrimmed panel is nominally triangular.
+        start_x = apex_x if shape == "partial_te" else x1
+        profile_x = self.canopy.profile["x_chord_norm"].to_numpy(dtype=float)
+        top_x = sorted(set(float(x) for x in profile_x if start_x < x < x2))
+        pts = [pts[0], *[(f"UP_CONTOUR_{i:04d}", self._surface_point(x, rib))
+                        for i, x in enumerate(top_x)], *pts[1:]]
         ids = []
         for name, p in pts:
             nid = f"STAB_{side}_{name}"
@@ -2511,6 +2568,13 @@ class StabilizerGeometry:
         to the stabilizer boundary.
         """
         x = float(x_c)
+        if self.cfg.get("shape") == "custom":
+            edge = self.cfg.get("lower_edge_points", [])
+            if not edge:
+                return None
+            xs = np.asarray([float(row["x_c"]) for row in edge])
+            pts = np.asarray([self.nodes[f"STAB_{side}_CUSTOM_{i:03d}"].p for i in range(len(edge))])
+            return np.array([np.interp(x, xs, pts[:, j]) for j in range(3)])
         # Quadrilateral lower edge.
         if f"STAB_{side}_LOW_LE" in self.nodes and f"STAB_{side}_LOW_TE" in self.nodes:
             p1 = self.nodes[f"STAB_{side}_LOW_LE"].p
@@ -2815,12 +2879,23 @@ class AnchorGenerator:
     def generate(self) -> dict[str, Node]:
         nodes = {}
         ribs = self.selected_ribs()
+        structural_ids = set(int(v) for v in ribs["rib_id"])
+        brake_ids = structural_ids
+        selection = self.cfg.get("brake_selection", {})
+        if selection.get("mode", "legacy") != "legacy":
+            from ramair_suspension_layout import select_brake_cells
+            all_ribs = self.canopy.boundary_rib_rows()
+            selection_report = select_brake_cells(all_ribs.to_dict("records"), selection)
+            self.cfg["brake_selection_effective"] = selection_report
+            brake_ids = set(selection_report["rib_ids"])
+            ribs = all_ribs[all_ribs["rib_id"].isin(structural_ids | brake_ids)]
         z_off = float(_deep_get(self.cfg, ["anchors", "z_offset_mm"], 0.0))
         fmt = _deep_get(self.cfg, ["anchors", "name_format"], "{bank}_rib{rib_id:02d}_{side}")
         if ribs.empty:
             self.warnings.append("No ribs selected for suspension anchors.")
             return nodes
-        ymin, ymax = float(ribs["Y_flat_mm"].min()), float(ribs["Y_flat_mm"].max())
+        boundaries = self.canopy.boundary_rib_rows()
+        ymin, ymax = float(boundaries["Y_flat_mm"].min()), float(boundaries["Y_flat_mm"].max())
         # v15 simplification: only one user-facing switch is needed.
         # Recommended use: set stabilizers.active=True and stabilizers.attach_tip_lines_to_stabilizer=True.
         # anchors.tip_anchor_mode can override this only when needed:
@@ -2846,6 +2921,8 @@ class AnchorGenerator:
             for bank in self._enabled_banks():
                 bank_name = str(bank["name"]).upper()
                 line_type = str(bank.get("type", "structural")).lower()
+                if rib_id not in (brake_ids if line_type == "brake" else structural_ids):
+                    continue
                 x_c = float(bank.get("x_c", 0.5))
                 if line_type == "brake":
                     x_c = float(_deep_get(self.cfg, ["brakes", "brake_anchor_x_c"], x_c))
@@ -3100,6 +3177,16 @@ class LineNetwork:
         self.surfaces.extend(extra_surfaces)
         for s in extra_segments:
             self._add_prebuilt_segment(s)
+        if _deep_get(self.cfg, ["suspension", "positioning_mode"], "automatic") == "manual":
+            from ramair_manual_rigging import apply_manual_network
+            apply_manual_network(self, Node)
+            self._compute_segment_drag()
+            return self
+        if self.cfg.get("cascade_layout", {}).get("template", "legacy") != "legacy":
+            from ramair_suspension_layout import build_network
+            build_network(self, Node)
+            self._compute_segment_drag()
+            return self
         banks = [b for b in self.cfg.get("banks", []) if b.get("enabled", True)]
         if not _deep_get(self.cfg, ["brakes", "active"], True):
             banks = [b for b in banks if str(b.get("type", "structural")).lower() != "brake"]
@@ -3142,6 +3229,17 @@ class LineNetwork:
                             self.add_segment(child, node_id, bank_name, side, level, line_type, f"seg:{bank_name}:L{level}:G{group_index:02d}:child{self.nodes[child].pair_index}")
                         new_current.append(node_id)
                     current = new_current
+                if line_type == "brake" and len(current) > 1 and _deep_get(self.cfg, ["brakes", "single_trunk_per_side"], True):
+                    fraction = float(_deep_get(self.cfg, ["brakes", "trunk_fraction_to_target"], .75))
+                    if not 0 < fraction < 1:
+                        raise ValueError("La fracción de confluencia de frenos debe estar entre 0 y 1.")
+                    centroid = np.mean([self.nodes[n].p for n in current], axis=0)
+                    point = centroid + fraction * (self.nodes[target].p-centroid)
+                    nid = f"{bank_name}_TRUNK_{side}"
+                    self.nodes[nid] = Node(nid, "cascade", *point, bank_name, side, "", 98, line_type, "brake:trunk", "trunk", nid)
+                    for child in current:
+                        self.add_segment(child, nid, bank_name, side, 98, line_type, "brake:trunk:"+str(self.nodes[child].pair_index))
+                    current = [nid]
                 for child in current:
                     self.add_segment(child, target, bank_name, side, 99, line_type, f"seg:{bank_name}:to_target:{self.nodes[child].pair_index}")
         self._compute_segment_drag()
@@ -3203,12 +3301,17 @@ class LineNetwork:
         initial = _deep_get(self.cfg, ["risers", "initial_slider_distance_mm"], None)
         if initial is None:
             initial = target
+        if _deep_get(self.cfg, ["suspension", "positioning_mode"], "automatic") == "manual":
+            self.build_for_distance(float(initial))
+            return float(initial)
         if not _deep_get(self.cfg, ["constraints", "auto_solve_R"], True):
             self.build_for_distance(float(initial))
             return float(initial)
 
         def mean_for(h):
             self.build_for_distance(h)
+            if _deep_get(self.cfg, ["constraints", "R_definition"], "straight_anchor_to_central_confluence") == "mean_path_length":
+                return self._mean_path_length()[0]
             return self._mean_straight_R_to_confluence()[0]
 
         lo, hi = 0.0, max(3.0 * target, 1000.0)
@@ -3488,6 +3591,10 @@ class ValidationReport:
     def __init__(self, canopy: CanopyGeometry, cfg: dict, network: LineNetwork, solved_distance_mm: float, stabs: StabilizerGeometry):
         self.canopy, self.cfg, self.network, self.stabs = canopy, cfg, network, stabs
         self.solved_distance_mm = float(solved_distance_mm)
+        from ramair_suspension_layout import validate_network
+        self.graph_validation = validate_network(network)
+        if not self.graph_validation["valid"]:
+            raise ValueError("Red de suspensión inválida: " + "; ".join(self.graph_validation["errors"]))
         self.sym = network.check_left_right_symmetry()
         self.warnings = list(dict.fromkeys(network.warnings + stabs.warnings + self.sym.get("warnings", [])))
         self._checks()
@@ -3651,6 +3758,8 @@ def write_suspension_outputs(out_dir: Path, network: LineNetwork, report: Valida
     _surfaces_to_df(network.surfaces).to_csv(out_dir / "ramair_suspension_surfaces.csv", index=False)
     rep = pd.DataFrame(report.rows())
     rep.to_csv(out_dir / "ramair_suspension_validation_report.csv", index=False)
+    (out_dir / "ramair_suspension_graph_validation.json").write_text(
+        json.dumps(report.graph_validation, indent=2) + "\n", encoding="utf-8")
     (out_dir / "ramair_suspension_validation_report.txt").write_text("\n".join(["Ram-air suspension-line validation report", "========================================", ""] + [f"{r['metric']}: {r['value']}" for r in report.rows()]), encoding="utf-8")
     if _deep_get(cfg, ["outputs", "write_json_used"], True):
         (out_dir / "ramair_suspension_config_used.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
@@ -5207,11 +5316,13 @@ def record_last_successful_preprocessor_config(args: argparse.Namespace) -> Path
 def main() -> None:
     args = parse_args()
     cfg = _apply_default_case_config(build_config_from_user_settings(), args)
-    _apply_2d_reference_cli_overrides(args)
+    if not args.cad_only:
+        _apply_2d_reference_cli_overrides(args)
     cfg = config_with_cli_overrides(cfg, args)
     cfg = maybe_apply_suspension_beta_to_canopy_cfg(cfg)
     preprocess_profile(cfg)
-    write_2d_cae_exports(cfg)
+    if not args.cad_only:
+        write_2d_cae_exports(cfg)
 
     # Root-level plot requested for quick visual inspection before CATIA.
     if WRITE_CHORD_DISTRIBUTION_PLOT:
@@ -5221,7 +5332,8 @@ def main() -> None:
     # by ENABLE_CANOPY_STABILIZERS, ENABLE_TIP_SIDE_BULGE and ENABLE_SUSPENSION_LINES.
     system_cfg = _load_system_json(cfg.out_dir, cfg.cells)
     append_json_control_params(cfg.out_dir, system_cfg)
-    write_fabric_property_outputs(cfg.out_dir, cfg, system_cfg)
+    if not args.cad_only:
+        write_fabric_property_outputs(cfg.out_dir, cfg, system_cfg)
 
     stabs = None
     if bool(_deep_get(system_cfg, ["stabilizers", "active"], False)):
@@ -5238,6 +5350,12 @@ def main() -> None:
         write_tip_side_bulge_outputs(cfg.out_dir, tip)
 
     network, report = _generate_suspension_after_canopy(cfg, system_cfg, stabs)
+    from ramair_cad_diagnostics import diagnostic_plots
+    plot_controls = {}
+    if args.config:
+        import json
+        plot_controls = json.loads(_resolve_project_path(args.config).read_text(encoding="utf-8-sig")).get("debug_plots", {})
+    diagnostic_plots(cfg.out_dir, CanopyGeometry(cfg.out_dir), stabs, network, plot_controls)
     write_full_design_summary(cfg.out_dir, cfg, system_cfg, stabs, tip, network, report)
     write_cad_export_manifest(cfg.out_dir, cfg)
     _write_system_template(Path(cfg.out_dir) / "ramair_suspension_config_template_v19.json", cfg.cells)
@@ -5245,7 +5363,7 @@ def main() -> None:
     # Final step: group input CSVs into folders and update ramair_global_inputs.csv.
     # The CATScript v19 reads these relative paths directly.
     organize_output_folders(cfg.out_dir)
-    saved_config = record_last_successful_preprocessor_config(args)
+    saved_config = None if args.cad_only else record_last_successful_preprocessor_config(args)
     print(f"Generated CATIA input files in: {Path(cfg.out_dir).resolve()}")
     if saved_config is not None:
         print(f"Saved successful preprocessor configuration: {saved_config}")

@@ -27,7 +27,7 @@ LAYOUT = {
     "documents": Path("Documents and Manuals"),
     "application_documents": Path("Documents and Manuals/Application"),
     "results_library": Path("Results"),
-    "previous_versions": Path("Previous Versions"),
+    "previous_versions": Path("Data Archive"),
     "cfd2d": Path("CFD_2D"),
 }
 

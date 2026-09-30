@@ -24,9 +24,10 @@ def _json(path: Path) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+@st.cache_data(ttl=60, show_spinner=False)
 def _measured_runs(root: Path) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
-    for path in (root / "CFD_2D").rglob("measured_step_performance.json"):
+    for path in (p for folder in (root/"CFD_2D", root/"Workspaces") for p in folder.rglob("measured_step_performance.json")):
         if any(part.startswith("processor") for part in path.parts):
             continue
         data = _json(path)
@@ -52,10 +53,23 @@ def _measured_runs(root: Path) -> pd.DataFrame:
 
 
 def render_performance_report(root: Path) -> None:
+    from ramair_hardware import hardware_snapshot
+    @st.cache_data(ttl=10, show_spinner=False)
+    def current_hardware(path): return hardware_snapshot(path)
+    host = current_hardware(root)
+    hardware = st.columns(5)
+    hardware[0].metric("CPU", f"{host['physical_cores']} cores / {host['logical_cores']} hilos", help=host["cpu_model"])
+    hardware[1].metric("RAM disponible", f"{host['ram_available_gib']:.1f} / {host['ram_total_gib']:.1f} GiB")
+    hardware[2].metric("MPI", host["mpi"])
+    hardware[3].metric("OpenFOAM instalado", host["openfoam"])
+    hardware[4].metric("Espacio libre", f"{host['disk_free_gib']:.1f} GiB", help=host["storage"]+" · "+host["root"])
+    st.caption(f"Dispositivo actual: {host['cpu_model']} · CPU en uso {host['cpu_percent']:.0f}% · {host['platform']}")
+    current_report = root/"Documents and Manuals/Current/PERFORMANCE_CURRENT.md"
+    if current_report.exists(): st.markdown(current_report.read_text(encoding="utf-8"))
     report_path = root / "CFD_2D/reports/OPENFOAM_PERFORMANCE_AUDIT_20260907.md"
     stability_report_path = (
         root
-        / "Documents and Manuals/Application/manuals/OPEN_URANS_STABILITY_DIAGNOSIS_20260909.md"
+        / "Documents and Manuals/Current/OPEN_URANS_STABILITY.md"
     )
     stability_data = _json(
         root / "CFD_2D/reports/open_medium_a08_dt_stability_diagnostic_20260908.json"
@@ -68,16 +82,7 @@ def render_performance_report(root: Path) -> None:
     cache_path = root / "CFD_2D/app_state/parallel_execution_profiles.json"
     cache = _json(cache_path)
 
-    st.info(
-        "Rendimiento medido con OpenFOAM Foundation 14 sobre el Ryzen 7 4800H. "
-        "Los ensayos conservan malla, física, esquemas, tolerancias y estado inicial."
-    )
-    hardware = st.columns(5)
-    hardware[0].metric("CPU", "8 cores / 16 hilos")
-    hardware[1].metric("RAM WSL", "7.5 GiB")
-    hardware[2].metric("MPI", "Open MPI 4.1.2")
-    hardware[3].metric("OpenFOAM", "Foundation 14")
-    hardware[4].metric("Almacenamiento", "WSL ext4")
+    st.caption("Evidencia histórica: Ryzen 7 4800H, OpenFOAM Foundation 14. Las recomendaciones medidas corresponden a ese equipo y a las mallas indicadas; los monitores superiores corresponden al dispositivo actual.")
 
     st.markdown("### Escalado fuerte medido")
     rows = scaling.get("rows") or []

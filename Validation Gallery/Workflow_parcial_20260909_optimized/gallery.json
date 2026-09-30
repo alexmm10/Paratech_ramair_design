@@ -1,0 +1,54 @@
+{
+  "name": "Workflow parcial 20260909 optimized",
+  "figures": [
+    {
+      "file": "Cl_Cd_Cm_history_3fca02102047.png",
+      "sha256": "3fca021020477284a299d291a136c5e39c4869afe9cbf7be8630220353865454",
+      "source": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Workflow_Validation_20260909/CFD_2D/SL_Re1900000_M015/Geometries/LS1_optimized/Meshes/validation_medium_01/OpenFOAM/Workflow_smoke_Co1/Angles/alpha_p8p000/Postprocess/URANS/Cl_Cd_Cm_history.png",
+      "source_status": "PROCESSED_PARTIAL",
+      "workflow_test": {
+        "purpose": "bounded software integration; partial aerodynamics",
+        "rans_iterations": 50,
+        "adjustment": "maxCo=1 for open-lip startup after observed runaway at 50",
+        "physical_conditions_preserved": true
+      }
+    },
+    {
+      "file": "aerodynamic_efficiency_03241e7f1b3f.png",
+      "sha256": "03241e7f1b3f7a4c526b0d1b77991ba6f523b276e34aef83f2f069d1cc9d7d42",
+      "source": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Workflow_Validation_20260909/CFD_2D/SL_Re1900000_M015/Geometries/LS1_optimized/Meshes/validation_medium_01/OpenFOAM/Workflow_smoke_Co1/Angles/alpha_p8p000/Postprocess/URANS/aerodynamic_efficiency.png",
+      "source_status": "PROCESSED_PARTIAL",
+      "workflow_test": {
+        "purpose": "bounded software integration; partial aerodynamics",
+        "rans_iterations": 50,
+        "adjustment": "maxCo=1 for open-lip startup after observed runaway at 50",
+        "physical_conditions_preserved": true
+      }
+    },
+    {
+      "file": "boundary_layer_thickness_comparison_9ffead7dadb8.png",
+      "sha256": "9ffead7dadb8d7ec762fbb0560a4fe3da7732c41b6e82e7f5b0a807e9340418b",
+      "source": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Workflow_Validation_20260909/CFD_2D/SL_Re1900000_M015/Geometries/LS1_optimized/Meshes/validation_medium_01/OpenFOAM/Workflow_smoke_Co1/Angles/alpha_p8p000/Postprocess/URANS/boundary_layer_thickness_comparison.png",
+      "source_status": "PROCESSED_PARTIAL",
+      "workflow_test": {
+        "purpose": "bounded software integration; partial aerodynamics",
+        "rans_iterations": 50,
+        "adjustment": "maxCo=1 for open-lip startup after observed runaway at 50",
+        "physical_conditions_preserved": true
+      }
+    },
+    {
+      "file": "boundary_layer_thickness_comparison_a4b7f27b3efd.png",
+      "sha256": "a4b7f27b3efdb290878e7da62e686cdfc2e45be93b947eb440b7f0fb9f727583",
+      "source": "/home/alejm/ramair_cfd/DESIGN_APP/Workspaces/Workflow_Validation_20260909/CFD_2D/SL_Re1900000_M015/Geometries/LS1_optimized/Meshes/validation_medium_01/OpenFOAM/Workflow_smoke_Co1/Angles/alpha_p8p000/Postprocess/URANS/boundary_layer_thickness_comparison.png",
+      "source_status": "PROCESSED_PARTIAL",
+      "workflow_test": {
+        "purpose": "bounded software integration; partial aerodynamics",
+        "rans_iterations": 50,
+        "adjustment": "maxCo=1 for open-lip startup after observed runaway at 50",
+        "physical_conditions_preserved": true
+      }
+    }
+  ],
+  "scope": "selected final figures only; source validity is retained"
+}

@@ -1,0 +1,113 @@
+{
+  "status": "PASS",
+  "root": "/home/alejm/ramair_cfd/Delivery_Test_20260930/Relocated/App",
+  "installation": "Fresh Python environment, clean separate WSL path",
+  "import": {
+    "workspace": "/home/alejm/ramair_cfd/Delivery_Test_20260930/Relocated/App/Workspaces/Delivery_Imported",
+    "status": "EXISTING_ACCEPTANCE_COPY"
+  },
+  "meshes": [
+    {
+      "mesh": "Delivery_coarse",
+      "status": "OK",
+      "checkMesh_returncode": 0,
+      "cells": 108104,
+      "approval": "APPROVED"
+    },
+    {
+      "mesh": "Delivery_medium",
+      "status": "OK",
+      "checkMesh_returncode": 0,
+      "cells": 155824,
+      "approval": "APPROVED"
+    }
+  ],
+  "UI": {
+    "status": "PASS",
+    "pages": [
+      {
+        "page": "Inicio",
+        "exceptions": [],
+        "errors": [],
+        "warnings": [],
+        "duration_s": 0.073
+      },
+      {
+        "page": "Casos de trabajo",
+        "exceptions": [],
+        "errors": [],
+        "warnings": [],
+        "duration_s": 0.075
+      },
+      {
+        "page": "Perfiles 2D",
+        "exceptions": [],
+        "errors": [],
+        "warnings": [],
+        "duration_s": 0.428
+      },
+      {
+        "page": "Geometr\u00eda CATIA",
+        "exceptions": [],
+        "errors": [],
+        "warnings": [],
+        "duration_s": 7.865
+      },
+      {
+        "page": "Caso CFD",
+        "exceptions": [],
+        "errors": [],
+        "warnings": [],
+        "duration_s": 0.103
+      },
+      {
+        "page": "Mallado",
+        "exceptions": [],
+        "errors": [],
+        "warnings": [],
+        "duration_s": 1.681
+      },
+      {
+        "page": "Caso OpenFOAM",
+        "exceptions": [],
+        "errors": [],
+        "warnings": [],
+        "duration_s": 0.138
+      },
+      {
+        "page": "Ejecuci\u00f3n",
+        "exceptions": [],
+        "errors": [],
+        "warnings": [
+          "Los resultados han cambiado. Recalcula el an\u00e1lisis antes de usar las figuras."
+        ],
+        "duration_s": 5.222
+      },
+      {
+        "page": "Postproceso",
+        "exceptions": [],
+        "errors": [],
+        "warnings": [],
+        "duration_s": 0.777
+      },
+      {
+        "page": "Validation & Convergence Lab",
+        "exceptions": [],
+        "errors": [],
+        "warnings": [],
+        "duration_s": 0.75
+      },
+      {
+        "page": "Archivos y logs",
+        "exceptions": [],
+        "errors": [],
+        "warnings": [],
+        "duration_s": 0.065
+      }
+    ],
+    "solver_launched": false,
+    "CATIA_launched": false
+  },
+  "physical_second_device": false,
+  "CATIA_executed": false
+}

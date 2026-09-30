@@ -450,7 +450,7 @@ def test_root_entrypoints_and_archives_exist() -> None:
     assert PREPROCESSOR_MAIN.exists()
     assert CATIA_SCRIPT_MAIN.exists()
     assert TECH_SPEC.exists()
-    assert (PROJECT_ROOT / "Previous Versions").exists()
+    assert (PROJECT_ROOT / "Data Archive").exists()
 
 
 def test_preprocessor_generates_new_layout(generated_project: Path) -> None:
@@ -565,7 +565,7 @@ def test_case_builder_overwrite_archives_previous_package(generated_project: Pat
         "--overwrite",
         "--validate",
     ])
-    backups = sorted((generated_project / "Previous Versions" / "cfd2d_case_package_backups").glob("reference_uncut_*"))
+    backups = sorted((generated_project / "Data Archive" / "cfd2d_case_package_backups").glob("reference_uncut_*"))
     assert backups
     assert (backups[-1] / "stale_marker.txt").exists()
     assert (backups[-1] / "case_package_backup_manifest.json").exists()
@@ -1149,7 +1149,7 @@ def test_case_writer_does_not_create_empty_polymesh(generated_project: Path) -> 
     assert (case_dir / "system" / "fvSchemes").read_text(encoding="utf-8").find("wallDist") >= 0
     assert json.loads((case_dir / "case_config.json").read_text(encoding="utf-8"))["mesh_status"] == "MESH_NOT_CONVERTED"
     applied = json.loads((case_dir / "applied_solver_configuration.json").read_text(encoding="utf-8"))
-    assert applied["solver_config_schema_version"] == 15
+    assert applied["solver_config_schema_version"] == 16
     assert applied["physical_override_allowed"] is False
     assert applied["scalar_histories_retained_independently_of_purgeWrite"] is True
     summary = json.loads((case_dir / "case_input_summary.json").read_text(encoding="utf-8"))
@@ -1178,7 +1178,7 @@ def test_case_writer_overwrite_archives_previous_case(generated_project: Path) -
         "--write-case",
         "--overwrite",
     ])
-    backups = sorted((generated_project / "Previous Versions" / "openfoam_case_backups").glob("closed_reference_alpha_p4p000_*"))
+    backups = sorted((generated_project / "Data Archive" / "openfoam_case_backups").glob("closed_reference_alpha_p4p000_*"))
     assert backups
     assert (backups[-1] / "stale_case_marker.txt").exists()
     assert (backups[-1] / "case_backup_manifest.json").exists()

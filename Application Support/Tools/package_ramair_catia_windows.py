@@ -39,7 +39,10 @@ CONFIG_FILES = (
     *tuple(path for path in SOURCE_TO_PACKAGE_FILES.values() if path.startswith("configs/")),
     LAST_RUN_CONFIG,
 )
-HELPER_FILES = ("CFD_2D/scripts/ramair_profile_utils.py",)
+HELPER_FILES = tuple("CFD_2D/scripts/" + name + ".py" for name in (
+    "ramair_profile_utils", "ramair_geometry_workspace", "ramair_crossports",
+    "ramair_manual_rigging", "ramair_suspension_layout", "ramair_cad_diagnostics",
+))
 REQUIRED_GENERATED = (
     "CATIA_inputs/ramair_global_inputs.csv",
     "CATIA_inputs/Canopy/ramair_profile_points_for_CATIA.csv",
@@ -178,6 +181,7 @@ def prepare_stage(source_root: Path, stage_root: Path, regenerate: bool) -> dict
                 "preprocess_ramair_main.py",
                 "--config",
                 "configs/default_case_config.json",
+                "--cad-only",
             ],
             cwd=stage_root,
             text=True,

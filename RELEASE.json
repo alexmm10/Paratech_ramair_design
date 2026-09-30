@@ -1,0 +1,10 @@
+{
+  "product": "RamAir Studio",
+  "version": "2026.09.30",
+  "tag": "studio-delivery-20260930",
+  "backend_api": 28,
+  "suspension_schema": 2,
+  "openfoam": "Foundation 14",
+  "platform": "Windows + Ubuntu 22.04 WSL2; native Linux remote execution",
+  "acceptance": "Software verification and diagnostic CFD; scientific acceptance is per case"
+}

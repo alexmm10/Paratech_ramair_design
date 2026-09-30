@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 MAX_BYTES = 10 * 1024 * 1024
 DENIED_PARTS = {
-    "Results", "Previous Versions", "meshes", "openfoam_cases",
+    "Results", "Data Archive", "Previous Versions", "Workspaces", "meshes", "openfoam_cases",
     "validation_studies", "app_state", "postProcessing", "processor0",
 }
 

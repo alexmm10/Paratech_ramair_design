@@ -170,7 +170,6 @@ def run_checks() -> list[Check]:
         module_check("pandas"),
         module_check("matplotlib"),
         module_check("Pillow", "PIL"),
-        module_check("pytest"),
         module_check("gmsh_api", "gmsh"),
         module_check("streamlit"),
         pyarrow_runtime_check(),

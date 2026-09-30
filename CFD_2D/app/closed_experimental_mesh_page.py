@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 import streamlit as st
+from mesh_workspace_controls import general_controls, exact_quality, quality_atlas, front_controls, reset_mesh_editor_state
+from ramair_workspace import bind_mesh_config
 
 from experimental_mesh_comparison import render_mesh_quality_comparator
 
@@ -68,11 +70,12 @@ def render_closed_experimental_mesh(
     root: Path,
     start_job: StartJob,
     open_mesh: Callable[[Path, Path, str], int],
+    workspace_geometry: Path | None = None,
 ) -> None:
-    experiment = root / "CFD_2D/experimental_meshes" / EXPERIMENT_ID
-    revisions_root = experiment / "revisions"
+    experiment = workspace_geometry / "Meshes" if workspace_geometry else root / "CFD_2D/experimental_meshes" / EXPERIMENT_ID
+    revisions_root = experiment if workspace_geometry else experiment / "revisions"
     revisions = sorted(
-        [path for path in revisions_root.glob("*") if path.is_dir()],
+        [path for path in revisions_root.glob("*") if path.is_dir() and (path / "mesh_config.json").is_file()],
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )
@@ -91,6 +94,9 @@ def render_closed_experimental_mesh(
     )
     if selected is not None:
         report = _read(selected / "mesh_report.json", {}) or {}
+        with st.expander("checkMesh · métricas y recomendaciones"):
+            exact_quality(selected)
+        quality_atlas(root, selected, start_job)
         cols = st.columns(5)
         cols[0].metric("Estado", str(report.get("status") or "-"))
         cols[1].metric("checkMesh", str(report.get("checkMesh_status") or "-"))
@@ -102,6 +108,7 @@ def render_closed_experimental_mesh(
             open_mesh(root, selected / "mesh_final.msh", "windows_python")
         if actions[1].button("Cargar ajustes", key=f"closed-exp-load-{selected.name}"):
             _write(draft, _read(selected / "mesh_config.json", {}) or default_closed_config())
+            reset_mesh_editor_state("closed")
             st.rerun()
         if actions[2].button(
             "Aprobar", disabled=str(report.get("checkMesh_status")) != "OK",
@@ -169,11 +176,13 @@ def render_closed_experimental_mesh(
             st.json(report)
 
     config = _read(draft, {}) or default_closed_config()
+    if workspace_geometry:
+        config = bind_mesh_config(config, workspace_geometry)
     boundary = dict(config.get("boundary_layer") or {})
     external = dict(config.get("external_volume") or {})
     geometry = dict(config.get("geometry") or {})
-    with st.expander("Generar o modificar la malla cerrada", expanded=selected is None):
-        closed_variants = _closed_geometry_variants(root)
+    with st.expander("Generar o modificar la malla cerrada", expanded=selected is None or st.session_state.get("closed-show-loaded-editor", False)):
+        closed_variants = ["profile"] if workspace_geometry else _closed_geometry_variants(root)
         current_variant = str(
             geometry.get("closed_variant", "reference_uncut_validation_1m")
         )
@@ -186,7 +195,49 @@ def render_closed_experimental_mesh(
             help="Debe contener UPPER/LOWER y compartir la cuerda declarada en el caso CFD.",
             key="closed-exp-geometry-variant",
         )
-        bl_tab, ext_tab = st.tabs(["Capa límite", "Volumen externo"])
+        general_tab, bl_tab, ext_tab = st.tabs(["General", "Capa límite", "Volumen externo"])
+        with general_tab:
+            general_controls(config, "closed-general-")
+            geometry.update(config["geometry"])
+            execution = config.setdefault("execution", {})
+            numeric_cols = st.columns(2)
+            external["mesh_algorithm"] = numeric_cols[0].selectbox(
+                "Algoritmo 2D", [6, 5],
+                index=0 if int(external.get("mesh_algorithm", 6)) == 6 else 1,
+                format_func=lambda value: "Frontal-Delaunay (6)" if value == 6 else "Delaunay (5)",
+                key="closed-exp-algorithm",
+            )
+            execution["mesh_smoothing"] = numeric_cols[1].number_input(
+                "Mesh.Smoothing", 0, 10, int(execution.get("mesh_smoothing", 1)),
+                key="closed-exp-smoothing",
+            )
+            execution["post_generation_optimization"] = st.selectbox(
+                "Optimización 2D posterior",
+                ["off", "laplace2d", "relocate2d", "laplace2d_then_relocate2d"],
+                index=["off", "laplace2d", "relocate2d", "laplace2d_then_relocate2d"].index(
+                    execution.get("post_generation_optimization", "off")
+                    if execution.get("post_generation_optimization", "off") in {"off", "laplace2d", "relocate2d", "laplace2d_then_relocate2d"}
+                    else "off"
+                ),
+                format_func=lambda value: {
+                    "off": "Desactivada", "laplace2d": "Laplace2D", "relocate2d": "Relocate2D",
+                    "laplace2d_then_relocate2d": "Laplace2D → Relocate2D",
+                }[value],
+                help=(
+                    "Se ejecuta antes de exportar y checkMesh. Permanece desactivada por defecto; "
+                    "puede mover nodos triangulares y debe compararse como una revisión nueva."
+                ),
+                key="closed-exp-post-optimization",
+            )
+            if execution["post_generation_optimization"] != "off":
+                execution["post_generation_optimization_iterations"] = st.number_input(
+                    "Iteraciones Laplace2D", 1, 50,
+                    int(execution.get("post_generation_optimization_iterations", 5)),
+                    key="closed-exp-post-optimization-iterations",
+                )
+                if selected is not None:
+                    execution["optimization_base_revision"] = selected.name
+            config["execution"] = execution
         with bl_tab:
             cols = st.columns(3)
             boundary["distribution_mode"] = cols[0].selectbox(
@@ -549,6 +600,7 @@ def render_closed_experimental_mesh(
                 else:
                     st.caption("Se mantienen los límites GR/hmax como comprobación, sin recomendaciones automáticas.")
         with ext_tab:
+            front_controls(external, "closed-front-", choose_mode=True)
             external["automatic_extend_enabled"] = st.toggle(
                 "Control automático exterior Gmsh Extend",
                 value=bool(external.get("automatic_extend_enabled", False)),
@@ -615,44 +667,7 @@ def render_closed_experimental_mesh(
                         format="%.4f", key="closed-exp-extend-guard-distance",
                     )
             execution = dict(config.get("execution") or {})
-            numeric_cols = st.columns(2)
-            external["mesh_algorithm"] = numeric_cols[0].selectbox(
-                "Algoritmo 2D", [6, 5],
-                index=0 if int(external.get("mesh_algorithm", 6)) == 6 else 1,
-                format_func=lambda value: "Frontal-Delaunay (6)" if value == 6 else "Delaunay (5)",
-                key="closed-exp-algorithm",
-            )
-            execution["mesh_smoothing"] = numeric_cols[1].number_input(
-                "Mesh.Smoothing", 0, 10, int(execution.get("mesh_smoothing", 1)),
-                key="closed-exp-smoothing",
-            )
-            execution["post_generation_optimization"] = st.selectbox(
-                "Optimización 2D posterior (experimental)",
-                ["off", "laplace2d", "relocate2d", "laplace2d_then_relocate2d"],
-                index=["off", "laplace2d", "relocate2d", "laplace2d_then_relocate2d"].index(
-                    execution.get("post_generation_optimization", "off")
-                    if execution.get("post_generation_optimization", "off") in {"off", "laplace2d", "relocate2d", "laplace2d_then_relocate2d"}
-                    else "off"
-                ),
-                format_func=lambda value: {
-                    "off": "Desactivada", "laplace2d": "Laplace2D", "relocate2d": "Relocate2D",
-                    "laplace2d_then_relocate2d": "Laplace2D → Relocate2D",
-                }[value],
-                help=(
-                    "Se ejecuta antes de exportar y checkMesh. Permanece desactivada por defecto; "
-                    "puede mover nodos triangulares y debe compararse como una revisión nueva."
-                ),
-                key="closed-exp-post-optimization",
-            )
-            if execution["post_generation_optimization"] != "off":
-                execution["post_generation_optimization_iterations"] = st.number_input(
-                    "Iteraciones Laplace2D", 1, 50,
-                    int(execution.get("post_generation_optimization_iterations", 5)),
-                    key="closed-exp-post-optimization-iterations",
-                )
-                if selected is not None:
-                    execution["optimization_base_revision"] = selected.name
-            config["execution"] = execution
+
         name = st.text_input(
             "Nombre de revisión",
             value=str(config.get("name") or "closed_validation_beta75_experimental_v1"),
@@ -677,5 +692,5 @@ def render_closed_experimental_mesh(
 
     with st.expander("Comparar calidad de revisiones", expanded=False):
         render_mesh_quality_comparator(
-            experiment, topology="closed", key_prefix="closed-experimental-quality-compare",
+            experiment, direct_revisions=bool(workspace_geometry), topology="closed", key_prefix="closed-experimental-quality-compare",
         )

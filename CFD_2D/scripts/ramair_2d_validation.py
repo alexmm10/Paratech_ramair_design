@@ -172,14 +172,19 @@ def collect_ramair_points(
     return accepted_df, ignored_df
 
 
-def _style_reference(ax: plt.Axes, data: pd.DataFrame, x: str, y: str) -> None:
+def _series_style(series: str) -> dict:
     styles = {
         "Experimental": dict(color="black", marker="o", linestyle="none", markersize=4.0),
-        "CFD Cobalt": dict(color="#d62728", marker="s", linestyle="-", linewidth=1.2, markersize=3.5),
-        "CFD Kestrel": dict(color="#2455d6", marker="s", linestyle="-", linewidth=1.2, markersize=3.5),
+        "CFD Cobalt": dict(color="#d62728", linestyle="-", linewidth=1.2),
+        "CFD Kestrel": dict(color="#2455d6", linestyle="-", linewidth=1.2),
     }
+    return styles.get(series, {})
+
+
+def _style_reference(ax: plt.Axes, data: pd.DataFrame, x: str, y: str) -> None:
     for series, group in data.groupby("series", sort=False):
-        ax.plot(group[x], group[y], label=series, **styles.get(series, {}))
+        group = group.sort_values(x)
+        ax.plot(group[x], group[y], label=series, **_series_style(series))
 
 
 def validation_percentage_errors(
@@ -233,6 +238,8 @@ def validation_percentage_errors(
         cd_sim = float(point["Cd"])
         cl_exp = interpolate_inside(alpha, lift_alpha, lift_cl)
         cd_exp = interpolate_inside(cl_exp, drag_cl, drag_cd) if math.isfinite(cl_exp) else float("nan")
+        if not -10 <= alpha <= 16:
+            cd_exp = float("nan")
         ld_sim = cl_sim / cd_sim if abs(cd_sim) > 1.0e-12 else float("nan")
         ld_exp = cl_exp / cd_exp if math.isfinite(cd_exp) and abs(cd_exp) > 1.0e-12 else float("nan")
         rows.append({
@@ -359,6 +366,8 @@ def polar_reference_error_statistics(
                 interpolate_inside(reference_cl, drag_cl, drag_cd)
                 if math.isfinite(reference_cl) else float("nan")
             )
+            if not -10 <= alpha <= 16:
+                reference_cd = float("nan")
             reference_ld = (
                 reference_cl / reference_cd
                 if math.isfinite(reference_cd) and abs(reference_cd) > 1.0e-15
@@ -464,8 +473,9 @@ def write_polar_reference_error_products(
             ax.text(0.5, 0.5, "No accepted comparable points", ha="center", va="center")
         else:
             for reference_name, group in selected.groupby("reference", sort=False):
+                group = group.sort_values("alpha_deg")
                 ax.plot(
-                    group["alpha_deg"], group["signed_difference"], marker="o", linewidth=1.25,
+                    group["alpha_deg"], group["signed_difference"], marker=_series_style(reference_name).get("marker", "o"), linewidth=1.25,
                     color=reference_colors.get(reference_name), label=reference_name,
                 )
             ax.axhline(0.0, color="#777777", linewidth=0.8, linestyle="--")
@@ -486,9 +496,10 @@ def write_polar_reference_error_products(
             ax.text(0.5, 0.5, "No defined relative comparisons", ha="center", va="center")
         else:
             for reference_name, group in relative.groupby("reference", sort=False):
+                group = group.sort_values("alpha_deg")
                 ax.plot(
                     group["alpha_deg"], group["relative_difference_percent"],
-                    marker="o", linewidth=1.25,
+                    marker=_series_style(reference_name).get("marker", "o"), linewidth=1.25,
                     color=reference_colors.get(reference_name), label=reference_name,
                 )
             ax.axhline(0.0, color="#777777", linewidth=0.8, linestyle="--")
@@ -548,6 +559,22 @@ def write_polar_reference_error_products(
         peaks, "err2_percent", "Signed maximum error, err2 [%]",
         "Error of the maximum published value", "validation_err2_peak_summary.png",
     )
+    experimental = norms[norms.reference == "Experimental"].merge(
+        peaks[peaks.reference == "Experimental"], on=["reference", "variable", "sample_count"], how="inner")
+    fig, axes = plt.subplots(1, 2, figsize=(9.2, 4.1), constrained_layout=True)
+    if experimental.empty:
+        for ax in axes: ax.text(.5, .5, "No accepted comparable points", ha="center", va="center")
+    else:
+        axes[0].bar(experimental["variable"], experimental["err_percent"], color="#247ba0")
+        axes[1].bar(experimental["variable"], experimental["err2_percent"], color="#e07a2d")
+    axes[0].set(title="Full-polar err", ylabel="Normalized RMS error [%]")
+    axes[1].set(title="Maximum-value err2", ylabel="Signed peak error [%]")
+    for ax in axes: ax.grid(True, axis="y", alpha=.25)
+    fig.suptitle("OpenFOAM versus experiment")
+    save_scientific_figure(fig, output/"validation_experimental_err_err2.png", data=experimental, metadata={
+        "err":"100*RMS(OpenFOAM-experiment)/range(experiment)",
+        "err2":"100*(max(OpenFOAM)-max(experiment))/max(experiment)",
+        "scope":"Accepted matching angles; interpolation only inside published ranges; undefined zero denominators omitted"})
     return points, norms, peaks
 
 
@@ -560,11 +587,10 @@ def generate_validation_report(
     ignored_points: pd.DataFrame | None = None,
 ) -> Path:
     root = project_root(case_root)
-    reference = root / "CFD_2D" / "reference_data" / "LS1_0417_Ghoreyshi_2016"
     output = output_dir or (root / "CFD_2D" / "results" / "validation" / "LS1_0417_M0p15_Re1p9e6")
     output.mkdir(parents=True, exist_ok=True)
-    cl_alpha = pd.read_csv(reference / "cl_alpha_digitized.csv")
-    cd_cl = pd.read_csv(reference / "cd_cl_digitized.csv")
+    from ramair_validation_reference import load_validation_reference
+    cl_alpha, cd_cl, reference_manifest = load_validation_reference(root)
     if ramair_points is None:
         ramair, ignored = collect_ramair_points(root, reynolds_tolerance_fraction, mach_tolerance)
     else:
@@ -587,6 +613,8 @@ def generate_validation_report(
     else:
         ax.text(0.02, 0.04, "No matching RamAir results yet", transform=ax.transAxes, fontsize=9, color="#555555")
     ax.set(xlabel=r"Angle of attack, $\alpha$ [deg]", ylabel=r"Lift coefficient, $C_L$ [-]", title="LS(1)-0417 validation: lift curve")
+    ax.set_xlim(-10, 20)
+    ax.set_xticks(np.arange(-10, 21, 2))
     ax.grid(True, alpha=0.28)
     ax.legend(loc="best", fontsize=8)
     lift_plot_data = pd.concat([
@@ -597,7 +625,7 @@ def generate_validation_report(
         fig,
         output / "LS1_0417_CL_alpha_validation.png",
         data=lift_plot_data,
-        metadata={"source": "Ghoreyshi et al. digitized reference and explicitly published RamAir points", "grouping": "dataset"},
+        metadata={"source": reference_manifest.get("source", "LS reference dataset"), "grouping": "dataset"},
     )
 
     fig, ax = plt.subplots(figsize=(7.2, 4.6), constrained_layout=True)
@@ -610,6 +638,8 @@ def generate_validation_report(
         alpha_values_reference: list[float] = []
         efficiencies: list[float] = []
         for _, row in lift.iterrows():
+            if not -10 <= float(row["alpha_deg"]) <= 16:
+                continue
             cl_value = float(row["Cl"])
             if cl_value < float(drag_cl[0]) or cl_value > float(drag_cl[-1]):
                 continue
@@ -626,8 +656,8 @@ def generate_validation_report(
             })
         style = {
             "Experimental": {"color": "black", "marker": "o"},
-            "CFD Cobalt": {"color": "#d62728", "marker": "s"},
-            "CFD Kestrel": {"color": "#2455d6", "marker": "s"},
+            "CFD Cobalt": {"color": "#d62728", "marker": None},
+            "CFD Kestrel": {"color": "#2455d6", "marker": None},
         }.get(series, {})
         ax.plot(
             alpha_values_reference, efficiencies,
@@ -635,7 +665,7 @@ def generate_validation_report(
             linewidth=1.2, markersize=4,
         )
     if not ramair.empty:
-        valid_ramair = ramair[np.abs(pd.to_numeric(ramair["Cd"], errors="coerce")) > 1.0e-15].copy()
+        valid_ramair = ramair[(np.abs(pd.to_numeric(ramair["Cd"], errors="coerce")) > 1.0e-15) & ramair.alpha_deg.between(-10, 12)].copy()
         valid_ramair["Cl_over_Cd"] = valid_ramair["Cl"] / valid_ramair["Cd"]
         ax.plot(
             valid_ramair["alpha_deg"], valid_ramair["Cl_over_Cd"],
@@ -650,6 +680,8 @@ def generate_validation_report(
         ylabel=r"Aerodynamic efficiency, $C_L/C_D$ [-]",
         title="LS(1)-0417 validation: aerodynamic efficiency",
     )
+    ax.set_xlim(-10, 16)
+    ax.set_xticks(np.arange(-10, 17, 2))
     ax.grid(True, alpha=0.28)
     ax.legend(loc="best", fontsize=8)
     save_scientific_figure(
@@ -657,7 +689,7 @@ def generate_validation_report(
         output / "LS1_0417_CL_over_CD_alpha_validation.png",
         data=pd.DataFrame(efficiency_rows),
         metadata={
-            "source": "Ghoreyshi et al. digitized reference and explicitly published RamAir points",
+            "source": reference_manifest.get("source", "LS reference dataset"),
             "transformation": "Cd(Cl) interpolated inside each reference series; Cl/Cd then evaluated versus alpha",
         },
     )
@@ -665,7 +697,8 @@ def generate_validation_report(
     fig, ax = plt.subplots(figsize=(7.2, 4.6), constrained_layout=True)
     _style_reference(ax, cd_cl, "Cl", "Cd")
     if not ramair.empty:
-        ax.plot(ramair["Cl"], ramair["Cd"], color="#008b5a", marker="D", linewidth=1.4, label="RamAir OpenFOAM")
+        drag_ramair = ramair[ramair.alpha_deg.between(-10, 12)]
+        ax.plot(drag_ramair["Cl"], drag_ramair["Cd"], color="#008b5a", marker="D", linewidth=1.4, label="RamAir OpenFOAM")
     else:
         ax.text(0.02, 0.04, "No matching RamAir results yet", transform=ax.transAxes, fontsize=9, color="#555555")
     ax.set(xlabel=r"Lift coefficient, $C_L$ [-]", ylabel=r"Drag coefficient, $C_D$ [-]", title="LS(1)-0417 validation: drag polar")
@@ -673,13 +706,13 @@ def generate_validation_report(
     ax.legend(loc="best", fontsize=8)
     drag_plot_data = pd.concat([
         cd_cl.assign(dataset="reference"),
-        ramair.assign(dataset="RamAir"),
+        ramair[ramair.alpha_deg.between(-10, 12)].assign(dataset="RamAir"),
     ], ignore_index=True, sort=False)
     save_scientific_figure(
         fig,
         output / "LS1_0417_CD_CL_validation.png",
         data=drag_plot_data,
-        metadata={"source": "Ghoreyshi et al. digitized reference and explicitly published RamAir points", "grouping": "dataset"},
+        metadata={"source": reference_manifest.get("source", "LS reference dataset"), "grouping": "dataset"},
     )
     percentage_errors, maximum_errors = write_validation_error_products(
         output,
@@ -698,7 +731,7 @@ def generate_validation_report(
         output / "rans_urans",
     )
 
-    manifest = read_json(reference / "reference_manifest.json", {}) or {}
+    manifest = reference_manifest
     report = {
         "status": "RAMAir_POINTS_AVAILABLE" if not ramair.empty else "REFERENCE_ONLY",
         "reference_dataset": manifest,

@@ -16,6 +16,10 @@ TARGET_DIR="${HOME}/.local/bin"
 TARGET="$TARGET_DIR/xfoil"
 
 if [ ! -f "$SOURCE" ]; then
+  if command -v xfoil >/dev/null 2>&1; then
+    echo "OK: using XFOIL already installed at $(command -v xfoil)"
+    exit 0
+  fi
   echo "MISSING bundled XFOIL runtime: $SOURCE" >&2
   echo "Install with: sudo apt update && sudo apt install -y xfoil" >&2
   echo "Alternatively set RAMAIR_XFOIL_EXECUTABLE to a working executable." >&2

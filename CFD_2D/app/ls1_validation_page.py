@@ -645,6 +645,7 @@ def render_ls1_validation(root: Path, start_job: StartJob) -> None:
             (validation_root / "LS1_0417_CL_over_CD_alpha_validation.png", "Eficiencia CL/CD frente a ángulo"),
             (validation_root / "validation_err_norm_summary.png", "Norma err de la polar publicada"),
             (validation_root / "validation_err2_peak_summary.png", "Error err2 de los máximos publicados"),
+            (validation_root / "validation_experimental_err_err2.png", "Normas err y err2: OpenFOAM frente a experimento"),
             (validation_root / "validation_differences_Cl.png", "Diferencias de CL por ángulo"),
             (validation_root / "validation_differences_Cd.png", "Diferencias de CD por ángulo"),
             (validation_root / "validation_differences_Cl_over_Cd.png", "Diferencias de CL/CD por ángulo"),
@@ -1050,15 +1051,8 @@ def render_ls1_validation(root: Path, start_job: StartJob) -> None:
             ),
             key="ls1-validation-parallel-mode",
         )
-        renumber_before_decompose = parallel_cols[1].toggle(
-            "Renumber en caso nuevo",
-            value=True,
-            help=(
-                "Reordena y vuelve a comprobar una malla solo antes de descomponer un caso limpio. "
-                "Nunca se aplica silenciosamente al reanudar checkpoints."
-            ),
-            key="ls1-validation-renumber-new-case",
-        )
+        renumber_before_decompose = False
+        parallel_cols[1].caption("Se conserva el orden de celdas de la malla y los campos guardados.")
         automatic_core_selection = parallel_mode == "Auto"
         st.warning(
             "Una ejecución nueva siempre realiza RANS antes de A-B-C-D-E. Activa continuar solo "
@@ -1142,7 +1136,7 @@ def render_ls1_validation(root: Path, start_job: StartJob) -> None:
                     steady_force_fluctuation_tolerance_percent=float(rans_fluct_tol),
                     continue_transient_after_steady_timeout=True,
                     resume_existing=queue_policy == "resume_or_start", resume_additional_time_star=None,
-                    continue_after_timeout=True, stop_when_force_stable=True,
+                    continue_after_timeout=False, stop_when_force_stable=True,
                     convergence_minimum_time_star=20.0,
                     convergence_window_time_star=10.0,
                     convergence_mean_tolerance=0.02,
@@ -1150,7 +1144,7 @@ def render_ls1_validation(root: Path, start_job: StartJob) -> None:
                     stop_if_checkmesh_fails=True, pyfoam_live_monitor=False,
                     steady_pyfoam_live_monitor=False,
                     cleanup_processor_directories=True,
-                    postprocess_after_each=True, continue_after_error=True,
+                    postprocess_after_each=True, continue_after_error=False,
                     average_from_fraction=float(phase.get("average_from_fraction", 14.0 / 64.0)),
                     transient_phase_plan=phase_path,
                     restart_existing=queue_policy == "delete_and_restart",

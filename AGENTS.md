@@ -9,11 +9,10 @@ Read these files before changing the project:
 3. `README_PROJECT_STRUCTURE.md`
 4. The README and technical/manual documents relevant to the requested stage.
 
-Canonical editable source:
-`C:\Users\alejm\Desktop\PRACTICAS_INVICSA\3D design\DESIGN APP`
+Canonical editable source: the Windows Git checkout containing this file.
 
 Canonical WSL runtime:
-`/home/alejm/ramair_cfd/DESIGN_APP`
+`~/ramair_cfd/DESIGN_APP` by default; configurable with the official launcher.
 
 Do not develop in the old OneDrive `INPUT FILES` tree. Synchronize with
 `run_ramair_cfd2d_app.py` or the official Windows launcher.
@@ -36,11 +35,11 @@ Do not develop in the old OneDrive `INPUT FILES` tree. Synchronize with
 - Keep the Streamlit app as an orchestrator. CAE logic belongs in stage scripts.
 - Keep the case builder, mesh builder, quality controller, case writer, runner
   and postprocessor responsibilities separate.
-- Keep CATIA inputs limited to `CATIA/Inputs`.
+- Keep named CAD model inputs inside `Workspaces/<name>/CATIA/<model>/Inputs`.
 - Keep profiles under `Airfoil Profiles`.
-- Keep active generated data under `CFD_2D` and reusable snapshots under
-  `Results`.
-- Keep automatic backups under `Previous Versions`.
+- Keep new active data under `Workspaces/<name>/CFD_2D/<case>/Geometries/<geometry>/Meshes/<mesh>/OpenFOAM/<setup>/Angles/<alpha>`.
+- Preserve the independent Validation Lab under `CFD_2D` and historical snapshots in `Results`.
+- Keep automatic backups under `Data Archive`; never resume development in that archive.
 - Maintain UI/backend API compatibility and increment both API constants for a
   breaking backend change.
 

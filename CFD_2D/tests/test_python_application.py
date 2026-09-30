@@ -169,16 +169,11 @@ def test_inlet_designer_configuration_and_pure_geometry_contract() -> None:
 
 
 def test_inlet_designer_ui_registers_generated_profile() -> None:
-    app_text = (APP_DIR / "ramair_cfd2d_app.py").read_text(encoding="utf-8")
-    assert "Diseno 2D del corte ram-air" in app_text
-    assert "Usar como main_profile" in app_text
-    assert "optimized_cl_window" in app_text
-    assert "Abrir fallos en ParaView" in app_text
-    assert "open_checkmesh_problem_viewer" in app_text
-    assert (ROOT / "Application Support/Tools/xfoil/linux/xfoil").is_file()
-    assert (ROOT / "Application Support/Tools/xfoil/source/Xfoil699src.zip").is_file()
-    assert (ROOT / "Application Support/Tools/xfoil/source/xfoil699-gfortran-eof.patch").is_file()
-    assert (ROOT / "Documents and Manuals/Application/build_xfoil_699_wsl.sh").is_file()
+    source = (APP_DIR / "workspace_app.py").read_text(encoding="utf-8")
+    assert "standard_full_polar" in source and "optimized_cl_window" in source
+    jobs = (ROOT / "CFD_2D/scripts/ramair_workspace_jobs.py").read_text(encoding="utf-8")
+    assert 'Airfoil Profiles/Designs' in jobs
+    assert 'repanelled_profile.dat' in jobs and 'process_profile' in jobs
 
 
 def test_mesh_command_exposes_python_api_and_fresh_output_policy() -> None:
@@ -289,11 +284,11 @@ def test_pinned_application_dependencies_and_manual_exist() -> None:
     assert "pyarrow==18.1.0" in requirements
     assert "gmsh==4.15.2" in requirements
     assert "PyFoam==2026.6" in requirements
-    manual = ROOT / "Documents and Manuals" / "Application" / "README_CFD2D_PYTHON_APP.md"
+    manual = ROOT / "Documents and Manuals" / "Current" / "10_INSTALL_MAINTENANCE.md"
     assert manual.is_file()
     text = manual.read_text(encoding="utf-8")
-    assert "Windows/WSL" in text
-    assert "PyFoam.Execution.BasicRunner" in text
+    assert "requirements-cfd2d-app.txt" in text
+    assert "PyFoam" in text
     bootstrap = (ROOT / "Documents and Manuals/Application/bootstrap_cfd2d_app_wsl.sh").read_text(encoding="utf-8")
     assert "--system-site-packages" not in bootstrap
     assert "from mpl_toolkits.mplot3d import Axes3D" in bootstrap
@@ -308,43 +303,30 @@ def test_pinned_application_dependencies_and_manual_exist() -> None:
 
 
 def test_streamlit_ui_avoids_arrow_tables_and_eager_top_level_tabs() -> None:
-    app_text = (APP_DIR / "ramair_cfd2d_app.py").read_text(encoding="utf-8")
-    assert "st.dataframe" not in app_text
-    assert "render_records_table" in app_text
-    assert 'key="active-workflow-page"' in app_text
-    assert "active_page ==" in app_text
-    assert 'st.title("RamAir: Design and CFD")' in app_text
-    assert 'if active_page in {"Caso OpenFOAM", "Ejecucion", "Postproceso"}' in app_text
-    assert '"Perfil CFD del caso"' in app_text
-    assert '"Contexto activo"' in app_text
+    source = (APP_DIR / "workspace_app.py").read_text(encoding="utf-8")
+    shell = (APP_DIR / "ramair_cfd2d_app.py").read_text(encoding="utf-8")
+    assert 'st.sidebar.radio("Sección", PAGES' in source
+    assert 'elif page == "Mallado"' in source
+    assert "render_application(ROOT, MANAGER" in shell
+    assert len(shell.splitlines()) < 250
 
 
 def test_optional_catia_launcher_is_explicit_and_non_required() -> None:
-    launcher = ROOT / "Application Support/Tools/launch_catia_macro.py"
-    text = launcher.read_text(encoding="utf-8")
-    app_text = (APP_DIR / "ramair_cfd2d_app.py").read_text(encoding="utf-8")
-    assert "RAMAIR_CATIA_CNEXT" in text
-    assert "RAMAIR_CATIA_INPUTS" in text
-    assert "Start-Process" in text
-    assert "action.add_argument(\"--run\"" in text
-    assert "disabled=not (catia_available and catia_inputs_ready and catia_macro_ready)" in app_text
-    assert "CATIA V5 no se ha detectado" in app_text
-    assert '"y1 calculado [m]"' in app_text
-    assert '"Espesor / cuerda"' in app_text
-    assert "apply_pending_configuration_reload" in app_text
-    assert "_config_ui_revision" in app_text
-    assert "completion_action" in app_text
-    assert ".ramair-table td {background: #111827; color: #f9fafb" in app_text
-    assert "results_library_locations" in app_text
-    assert "open_results_library" in app_text
+    launcher = (ROOT / "Application Support/Tools/launch_catia_macro.py").read_text(encoding="utf-8")
+    source = (APP_DIR / "workspace_app.py").read_text(encoding="utf-8")
+    assert "RAMAIR_CATIA_CNEXT" in launcher and "RAMAIR_CATIA_INPUTS" in launcher
+    assert 'command(root, "catia", model)' in source
+    assert "no inicia CATIA" in source
+    assert "catia_macro_command(" not in source
 
 
 def test_display_labels_do_not_disable_selectbox_choices() -> None:
-    app_text = (APP_DIR / "ramair_cfd2d_app.py").read_text(encoding="utf-8")
-
-    assert 'field_name = label.split(".")[-1]' in app_text
-    assert "options = CHOICES.get(field_name)" in app_text
-    assert "labels = CHOICE_LABELS.get(field_name, {})" in app_text
+    source = (APP_DIR / "workspace_app.py").read_text(encoding="utf-8")
+    assert 'format_func=lambda' in source
+    assert '"closed", "open"' in source
+    controls = (APP_DIR / "parameter_controls.py").read_text(encoding="utf-8")
+    assert 'options.append(value)' in controls
+    assert 'index=options.index(value)' in controls
 
 
 def test_environment_checker_reports_pyarrow_runtime_compatibility() -> None:
@@ -384,7 +366,7 @@ def test_mesh_config_declares_backend_without_losing_existing_sections() -> None
     assert effective["closed_farfield_transition_dist_chord"] > effective["closed_nearfield_dist_max_chord"]
     assert effective["open_farfield_transition_dist_chord"] > effective["open_nearfield_dist_max_chord"]
     app_text = (APP_DIR / "ramair_cfd2d_app.py").read_text(encoding="utf-8")
-    assert 'mesh_level_values("fine")' in app_text
+    assert "render_application" in app_text
     # The runtime JSON is user-owned and can retain legacy or advanced keys
     # that are rendered through the reference-driven editor instead of string
     # literals in the Streamlit shell. Core editable controls are asserted
@@ -404,25 +386,13 @@ def test_mesh_config_declares_backend_without_losing_existing_sections() -> None
 
 
 def test_geometry_ui_exposes_grouped_catia_configuration() -> None:
-    app_text = (APP_DIR / "ramair_cfd2d_app.py").read_text(encoding="utf-8")
-    project = json.loads((ROOT / "Application Support/Configurations/default_case_config.json").read_text(encoding="utf-8"))
-    system = json.loads((ROOT / "Application Support/Configurations/ramair_catia_system_config.json").read_text(encoding="utf-8"))
-    assert "TAB_INTROS" in app_text
-    for tab in ["Estado", "Geometria", "Caso CFD", "Malla", "Caso OpenFOAM", "Ejecucion", "Postproceso", "Archivos y logs"]:
-        assert f'"{tab}"' in app_text
-    assert "PROJECT_TAB_LAYOUT" in app_text
-    assert "SYSTEM_TAB_LAYOUT" in app_text
-    assert "catia_system_config_editor" in app_text
-    assert "Plataforma" in app_text
-    assert "Preprocesado del perfil" in app_text
-    assert "Cierre y redondeado del trailing edge" in app_text
-    assert "ENABLE SUSPENSION SYSTEM" in app_text
-    assert "Opciones avanzadas CATIA: modificar solo ante fallos" in app_text
-    assert "Ejemplo completo" not in app_text or "custom_specs" in app_text
-    for section in project:
-        assert f'"{section}"' in app_text, f"Project UI does not expose {section}"
-    for section in system:
-        assert f'"{section}"' in app_text, f"CATIA system UI does not expose {section}"
+    source = (APP_DIR / "workspace_app.py").read_text(encoding="utf-8")
+    for section in ("canopy_geometry", "rib_and_cell_geometry", "crossports", "stabilizers", "suspension", "catia_exports"):
+        assert '"'+section+'"' in source
+    assert 'cfg.pop("fabric_and_lines", None)' in source
+    controls = (APP_DIR / "cad_design_controls.py").read_text(encoding="utf-8")
+    assert "line_diameter_mm" in controls and "Cd0_line" in controls
+    assert "make_crossport_table" in source
 
 
 def test_catscript_exports_canopy_before_optional_assembly() -> None:
@@ -761,14 +731,6 @@ def test_pyfoam_worker_records_real_log_and_process_return_code() -> None:
     assert 'getattr(runner.run, "getReturnCode", None)' in text
 
 
-def test_execution_page_resolves_its_case_directory() -> None:
-    app = (APP_DIR / "ramair_cfd2d_app.py").read_text(encoding="utf-8")
-    execution_page = app.split(
-        'if active_page == "Ejecucion" and workflow_case_ready:', 1
-    )[1].split('if active_page == "Postproceso" and workflow_case_ready:', 1)[0]
-
-    assignment = "cdir = case_directory(ROOT, variant, alpha)"
-    assert assignment in execution_page
-    assert execution_page.index(assignment) < execution_page.index(
-        'cdir / "parallel_execution_plan.json"'
-    )
+def test_execution_page_uses_workspace_queue() -> None:
+    source = (APP_DIR / "workspace_app.py").read_text(encoding="utf-8")
+    assert "queue_manifest(root, setup, angles, cores, concurrent, real_run," in source

@@ -1,7 +1,8 @@
 {
   "suspension": {
     "enabled": true,
-    "derive_anhedral_from_R_over_b": true
+    "derive_anhedral_from_R_over_b": true,
+    "positioning_mode": "automatic"
   },
   "canopy_reference": {
     "p_ref_x_c": 0.25,
@@ -147,7 +148,7 @@
     "line_visualization_mode": "curve",
     "cad_strategy": "curve_with_properties",
     "Cd0_line": 1.2,
-    "segmented_drag_active": true,
+    "segmented_drag_active": false,
     "velocity_reference": "alpha_op",
     "incident_velocity_angle_deg": null,
     "include_lower_straps_in_drag": true,
@@ -218,7 +219,9 @@
     "brake_deflection_mm": 0.0,
     "brake_line_shortening_mm": 0.0,
     "trailing_edge_displacement_mm": 0.0,
-    "description": "Brake lines are independent from A/B/C/D. By default they terminate at AGU_CONTROL when the AGU is active, otherwise at the slider brake actuator."
+    "description": "Brake lines are independent from A/B/C/D. By default they terminate at AGU_CONTROL when the AGU is active, otherwise at the slider brake actuator.",
+    "single_trunk_per_side": true,
+    "trunk_fraction_to_target": 0.75
   },
   "stabilizers": {
     "active": false,
@@ -233,7 +236,7 @@
     "surface_reference": "lower",
     "triangular_anchor_edge_mode": "lower_perimeter_by_x",
     "attach_to_loaded_ribs": true,
-    "attach_tip_lines_to_stabilizer": false,
+    "attach_tip_lines_to_stabilizer": true,
     "description": "Independent side panel on the two external ribs. For line anchors, this is the single main switch: set this true to move external structural tip anchors to the stabilizer edge. Default triangular panel uses UP_LE and UP_TE on the external rib plus an apex controlled by apex_x_c and height_mm. Lines are distributed along UP_LE-apex-UP_TE according to bank x/c, not collapsed at the apex. height_direction: rib_down, global_down, span_outward."
   },
   "tip_side_bulge": {
@@ -270,5 +273,24 @@
     "catia_create_tubes": false,
     "export_subfolder": "..\\Exports",
     "labels": false
+  },
+  "manual_network": {
+    "nodes": [],
+    "segments": []
+  },
+  "suspension_schema_version": 2,
+  "brake_selection": {
+    "mode": "outer_fraction",
+    "symmetric": true,
+    "fraction_L": 0.33,
+    "fraction_R": 0.33,
+    "cells_L": [],
+    "cells_R": []
+  },
+  "cascade_layout": {
+    "template": "chordwise",
+    "fraction": 0.45,
+    "span_group_size": 2,
+    "span_fraction": 0.7
   }
 }

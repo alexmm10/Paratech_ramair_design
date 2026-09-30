@@ -243,6 +243,8 @@ Sub CATMain()
     If gDefaultSuspensionLineDiameterMm <= 0.0 Then gDefaultSuspensionLineDiameterMm = 1.2
 
     exportStep = ParamBool(params, "export_full_assembly_step", False)
+    Dim exportCanopyStep
+    exportCanopyStep = ParamBool(params, "export_canopy_step", False)
 
     forceExportToBase = ParamBool(params, "force_export_to_base_folder", True)
     Dim exportFolder, defaultCanopyIgsName, defaultIgsName, defaultStepName
@@ -567,6 +569,17 @@ Sub CATMain()
         partDoc.ExportData exportCanopyIgsPath, "igs"
         If Err.Number <> 0 Then
             AppendWarning "Canopy surfaces were created, but canopy-only IGES export failed. Target path used: " & exportCanopyIgsPath & ". CATIA error: " & Err.Description & "."
+            Err.Clear
+        End If
+        On Error GoTo 0
+    End If
+
+    If exportCanopyStep Then
+        On Error Resume Next
+        Err.Clear
+        partDoc.ExportData exportFolder & "\ramair_canopy_geometry.stp", "stp"
+        If Err.Number <> 0 Then
+            AppendWarning "Canopy-only STEP export failed: " & Err.Description
             Err.Clear
         End If
         On Error GoTo 0

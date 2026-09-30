@@ -35,7 +35,7 @@ def accepted_rows(rows: Iterable[dict[str, Any]], topology: str) -> list[dict[st
     ]
 
 
-def _comparison_rows(rows: list[dict[str, Any]], axis: str) -> list[dict[str, Any]]:
+def _comparison_rows(rows: list[dict[str, Any]], axis: str, *, equal_duration: bool = True) -> list[dict[str, Any]]:
     if axis == "temporal":
         key = "dt_s"
         group_names = ("mesh_id", "sampling_duration_s")
@@ -44,6 +44,9 @@ def _comparison_rows(rows: list[dict[str, Any]], axis: str) -> list[dict[str, An
         group_names = ("dt_s", "sampling_duration_s")
     else:
         raise ValueError("axis must be temporal or spatial")
+    if not equal_duration:
+        group_names = tuple(name for name in group_names if name != "sampling_duration_s")
+    group_names += ("alpha_deg", "operating_condition_key")
     output: list[dict[str, Any]] = []
     group_values = {
         tuple(row.get(name) for name in group_names)
@@ -89,15 +92,17 @@ def _comparison_rows(rows: list[dict[str, Any]], axis: str) -> list[dict[str, An
 def _spatial_gci(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     reports: list[dict[str, Any]] = []
     groups = {
-        (row.get("dt_s"), row.get("sampling_duration_s"))
+        (row.get("dt_s"), row.get("sampling_duration_s"), row.get("alpha_deg"), row.get("operating_condition_key"))
         for row in rows
     }
-    for dt_s, duration_s in sorted(groups, key=str):
+    for dt_s, duration_s, alpha, physics in sorted(groups, key=str):
         subset = [
             row
             for row in rows
             if row.get("dt_s") == dt_s
             and row.get("sampling_duration_s") == duration_s
+            and row.get("alpha_deg") == alpha
+            and row.get("operating_condition_key") == physics
         ]
         subset.sort(key=lambda row: int(row["cell_count"]))
         if len(subset) < 3:
@@ -192,7 +197,7 @@ def build_space_time_report(
     return report
 
 
-def collect_accepted_run_rows(project_root: Path) -> list[dict[str, Any]]:
+def collect_accepted_run_rows(project_root: Path, *, include_partial: bool = False) -> list[dict[str, Any]]:
     active = active_workspace_root(Path(project_root).resolve())
     rows: list[dict[str, Any]] = []
     for metadata_path in sorted(
@@ -201,14 +206,17 @@ def collect_accepted_run_rows(project_root: Path) -> list[dict[str, Any]]:
         run_root = metadata_path.parent
         metadata = read_json(metadata_path, {}) or {}
         review = read_json(run_root / "review.json", {}) or {}
-        if str(review.get("status")) not in ACCEPTED_URANS_STATES:
+        permitted = ACCEPTED_URANS_STATES | ({"URANS_PARTIAL_REVIEWED"} if include_partial else set())
+        if str(review.get("status")) not in permitted:
             continue
         summary = (
             read_json(run_root / "postprocess/case_summary.json", {}) or {}
         )
         if not summary:
             summary = read_json(run_root / "case_summary.json", {}) or {}
-        means = summary.get("mean") or {}
+        # Only the reviewed window may supply statistics; a general postprocess
+        # summary may include startup or a different averaging interval.
+        means = {}
         signals = review.get("signals") or {}
         sampling_window = review.get("sampling_window") or {}
         sampling_duration = None
@@ -223,7 +231,9 @@ def collect_accepted_run_rows(project_root: Path) -> list[dict[str, Any]]:
         row = {
             "run_id": metadata.get("run_id") or run_root.name,
             "topology": metadata.get("topology"),
-            "mesh_id": metadata.get("mesh_id"),
+            "mesh_id": metadata.get("mesh_id") or metadata.get("mesh_hash") or metadata.get("mesh_package"),
+            "alpha_deg": metadata.get("alpha_deg"),
+            "operating_condition_key": str(tuple((name, metadata.get("operating_condition", {}).get(name)) for name in ("reynolds", "mach", "chord_m", "velocity_m_s", "rho_kg_m3", "mu_pa_s"))),
             "mesh_level": metadata.get("mesh_level"),
             "cell_count": metadata.get("cell_count"),
             "dt_s": metadata.get("dt_s"),
@@ -237,7 +247,7 @@ def collect_accepted_run_rows(project_root: Path) -> list[dict[str, Any]]:
             or (signals.get("Cm") or {}).get("summary", {}).get("mean"),
             "rms_Cl": (signals.get("Cl") or {})
             .get("summary", {})
-            .get("rms"),
+            .get("std"),
             "dominant_frequency_hz": (signals.get("Cl") or {})
             .get("spectrum", {})
             .get("dominant_frequency_hz"),
@@ -261,6 +271,7 @@ def build_workspace_reports(project_root: Path) -> dict[str, Any]:
             ),
         )
     frequency = build_frequency_reports(project_root)
+    exploratory = build_exploratory_report(project_root)
     return {
         "status": (
             "AVAILABLE"
@@ -272,7 +283,43 @@ def build_workspace_reports(project_root: Path) -> dict[str, Any]:
         ),
         "reports": reports,
         "frequency": frequency,
+        "exploratory": exploratory,
     }
+
+
+def build_exploratory_report(project_root: Path) -> dict[str, Any]:
+    """Explicitly reviewed partial production; never enters accepted GCI."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from ramair_scientific_plot_style import apply_scientific_style
+    apply_scientific_style()
+    active = active_workspace_root(Path(project_root).resolve())
+    rows = collect_accepted_run_rows(project_root, include_partial=True)
+    products = []
+    for topology in ("closed", "open"):
+        selected = [row for row in rows if row["topology"] == topology]
+        output = active / "convergence/space_time" / topology / "exploratory"
+        output.mkdir(parents=True, exist_ok=True)
+        comparison = _comparison_rows(selected, "temporal", equal_duration=False)
+        pd.DataFrame(selected).to_csv(output / "reviewed_runs.csv", index=False)
+        pd.DataFrame(comparison).to_csv(output / "temporal_comparison.csv", index=False)
+        for metric in ("mean_Cl", "mean_Cd", "mean_Cm", "rms_Cl", "dominant_frequency_hz"):
+            fig, ax = plt.subplots(figsize=(7, 4))
+            groups = sorted({(r["mesh_id"], r["alpha_deg"], r["operating_condition_key"]) for r in selected}, key=str)
+            for mesh, alpha, physics in groups:
+                points = sorted([r for r in selected if r["mesh_id"] == mesh and r["alpha_deg"] == alpha and r["operating_condition_key"] == physics and r.get(metric) is not None], key=lambda r: r["dt_s"])
+                if points:
+                    ax.plot([r["dt_s"] for r in points], [r[metric] for r in points], "o-", label=f"{points[0]['mesh_level']} | {alpha:g}°")
+            if ax.lines:
+                ax.set(xlabel="dt [s]", ylabel=metric, xscale="log", title="Partial production comparison — unequal durations; no convergence claim")
+                ax.grid(alpha=.25); ax.legend(); fig.tight_layout()
+                target = output / f"{metric}_vs_dt.png"
+                fig.savefig(target, dpi=180); products.append(str(target))
+            plt.close(fig)
+        write_json_atomic(output / "report.json", {"status": "EXPLORATORY_ONLY", "rows": selected,
+            "comparisons": comparison, "limitations": ["Unequal reviewed durations", "Frequency peaks may represent unresolved drift", "No spatial independence or GCI from these points"]})
+    return {"run_count": len(rows), "products": products}
 
 
 def _frequency_rows(project_root: Path) -> list[dict[str, Any]]:
@@ -283,6 +330,8 @@ def _frequency_rows(project_root: Path) -> list[dict[str, Any]]:
         metadata = read_json(metadata_path, {}) or {}
         review = read_json(run_root / "review.json", {}) or {}
         signal = (review.get("signals") or {}).get("Cl") or {}
+        if (review.get("sampling_window") or {}).get("stage") != "E":
+            continue
         spectrum = signal.get("spectrum") or {}
         if not spectrum.get("frequency_hz") or not spectrum.get("psd"):
             continue
@@ -310,6 +359,8 @@ def build_frequency_reports(project_root: Path) -> dict[str, Any]:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from ramair_scientific_plot_style import apply_scientific_style
+    apply_scientific_style()
 
     active = active_workspace_root(Path(project_root).resolve())
     root = active / "postprocess/frequency"
@@ -333,6 +384,8 @@ def build_frequency_reports(project_root: Path) -> dict[str, Any]:
                 for row in selected:
                     x = np.asarray(row.get(key) or [], dtype=float)
                     y = np.asarray(row.get("psd") or [], dtype=float)
+                    if x.shape != y.shape or not x.size:
+                        continue  # Older reviews may not contain St or 1/St.
                     mask = np.isfinite(x) & np.isfinite(y) & (x > 0.0)
                     if not np.any(mask):
                         continue
@@ -428,11 +481,13 @@ def build_frequency_reports(project_root: Path) -> dict[str, Any]:
             fig.savefig(target, dpi=180)
             products.append(str(target))
         plt.close(fig)
+    from ramair_frequency_analysis import comparison_figures
+    products.extend(comparison_figures(active))
     report = {
         "status": "AVAILABLE" if products else "INSUFFICIENT_FREQUENCY_RESULTS",
         "run_count": len(rows),
         "products": products,
-        "method": "Cummings-style lift-force Welch PSD and dominant St/1-St trend versus fixed dt",
+        "method": "Lift-force Welch PSD and St/1-St trend versus fixed dt; partial reviews are exploratory and not a demonstrated Cummings convergence path",
         "generated_at": utc_stamp(),
     }
     write_json_atomic(root / "frequency_convergence_report.json", report)

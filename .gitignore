@@ -16,6 +16,13 @@ Application Support/Reports/
 Application Support/Packages/
 Application Support/Temp/
 Previous Versions/
+Data Archive/
+Workspaces/
+CATIA/Models/
+Airfoil Profiles/Designs/
+Airfoil Profiles/.settings/
+Airfoil Profiles/Imported/
+**/.history/
 Results/
 CFD_2D/app_state/
 CFD_2D/logs/

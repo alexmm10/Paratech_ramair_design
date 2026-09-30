@@ -185,9 +185,10 @@ def render_mesh_quality_comparator(
     *,
     topology: str,
     key_prefix: str,
+    direct_revisions: bool = False,
 ) -> None:
     revisions = sorted(
-        [path for path in (experiment / "revisions").glob("*") if path.is_dir()],
+        [path for path in (experiment if direct_revisions else experiment / "revisions").glob("*") if path.is_dir()],
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )

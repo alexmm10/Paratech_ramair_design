@@ -53,7 +53,7 @@ def _iterations_from_log(path: Path) -> list[int]:
         return []
     values: list[int] = []
     patterns = (
-        re.compile(r"(?m)^\s*Time\s*=\s*(\d+)\s*$"),
+        re.compile(r"(?m)^\s*Time\s*=\s*(\d+)\s*s?\s*$"),
         re.compile(r"(?m)^\s*Iteration\s*[=:]\s*(\d+)\s*$"),
     )
     try:
@@ -119,7 +119,7 @@ def target_for_iteration(
     maximum: int = 20000,
 ) -> int:
     if iteration < initial:
-        return initial
+        return min(initial, maximum)
     target = initial
     while target <= iteration and target < maximum:
         target = min(maximum, target + extension)
