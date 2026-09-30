@@ -183,13 +183,13 @@ def test_boundary_layer_estimates_use_geometric_stack_and_flat_plate_delta99() -
     assert manual["y1_over_chord"] == pytest.approx(5.0e-5)
 
 
-def test_validation_geometry_scaling_rebuilds_dimensional_coordinates(tmp_path: Path) -> None:
+def test_validation_geometry_scaling_rebuilds_dimensional_coordinates(tmp_path: Path, reference_geometry_project: Path) -> None:
     (tmp_path / "preprocess_ramair_main.py").write_text("# project marker\n", encoding="utf-8")
     for relative in (
         "CFD_2D/CFD_2D_inputs/geometry/reference_uncut",
         "CFD_2D/CFD_2D_inputs/case_package/reference_uncut",
     ):
-        shutil.copytree(ROOT / relative, tmp_path / relative)
+        shutil.copytree(reference_geometry_project / relative, tmp_path / relative)
     report = build_scaled_variant(tmp_path)
     assert report["target_chord_m"] == 1.0
     points = pd.read_csv(
@@ -206,8 +206,8 @@ def test_validation_geometry_scaling_rebuilds_dimensional_coordinates(tmp_path: 
     assert manifest["geometry_scaling"]["source_chord_m"] == pytest.approx(3.016)
 
 
-def test_physical_case_uses_selected_validation_variant_chord() -> None:
-    assert chord_m_for_variant_request(ROOT, "reference_uncut_validation_1m") == pytest.approx(1.0)
+def test_physical_case_uses_selected_validation_variant_chord(reference_geometry_project: Path) -> None:
+    assert chord_m_for_variant_request(reference_geometry_project, "reference_uncut_validation_1m") == pytest.approx(1.0)
 
 
 def test_solver_performance_projection_uses_convective_time_and_adaptive_dt(tmp_path: Path) -> None:

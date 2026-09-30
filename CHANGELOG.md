@@ -14,6 +14,7 @@ Sin cambios pendientes de publicación en esta entrega. Registrar aquí el desar
 - Monitor de checkpoints sin falsos estados activos; cierre de logs coordinado con el gestor; espectros constantes identificados sin escalas logarítmicas inválidas; referencias de perfiles y presets portables.
 - Rendimiento desde documentación Current y hardware actual, ausencia de Courant/dt diferenciada de cero; intención de parada persistida antes de interrumpir el proceso.
 - Limpieza de herramientas e informes puntuales a archivo externo inventariado; documentación vigente unificada, instaladores, manifiestos completos, pruebas de otra ubicación y automatización GitHub.
+- Pruebas de geometría autónomas: crean sus propios exports desde perfiles distribuidos, sin requerir casos históricos ni carpetas vacías del equipo de desarrollo.
 - Pruebas reales: dos mallas × dos ángulos, pausa y continuación; ida/vuelta remota en WSL separado. Preparación Python y macro CATIA sin ejecutar CATIA. Resultados breves sin aceptación científica.
 
 La historia de desarrollo previa permanece en el historial Git y el archivo local externo; no forma parte de la documentación de uso de la versión entregada.

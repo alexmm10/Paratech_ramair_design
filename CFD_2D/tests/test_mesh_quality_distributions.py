@@ -80,8 +80,8 @@ def test_canonical_inlet_preserves_the_exact_base_segment() -> None:
     assert np.allclose(inlet[-1], wall[-1])
 
 
-def test_closed_experimental_wall_is_one_connected_loop() -> None:
-    root = Path(__file__).resolve().parents[2]
+def test_closed_experimental_wall_is_one_connected_loop(reference_geometry_project: Path) -> None:
+    root = reference_geometry_project
     geometry = load_closed_geometry(root, default_closed_config())
     segments = [
         geometry["upper_body"], geometry["leading_edge"],

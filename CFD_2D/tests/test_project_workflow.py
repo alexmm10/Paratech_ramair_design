@@ -450,7 +450,9 @@ def test_root_entrypoints_and_archives_exist() -> None:
     assert PREPROCESSOR_MAIN.exists()
     assert CATIA_SCRIPT_MAIN.exists()
     assert TECH_SPEC.exists()
-    assert (PROJECT_ROOT / "Data Archive").exists()
+    from project_layout import LAYOUT
+    # Empty runtime directories are created on demand and are not Git artifacts.
+    assert LAYOUT["previous_versions"] == Path("Data Archive")
 
 
 def test_preprocessor_generates_new_layout(generated_project: Path) -> None:
@@ -1004,10 +1006,11 @@ def test_open_diagnostic_mesh_is_not_pass(generated_project: Path) -> None:
 
 def test_open_zero_thickness_uses_uncut_base_curve_and_no_inlet_patch(
     generated_project: Path,
+    reference_geometry_project: Path,
 ) -> None:
     test_case_builder_finds_cfd_inputs_and_forbids_physical_ram_air_inlet(generated_project)
     shutil.copytree(
-        PROJECT_ROOT / "CFD_2D/CFD_2D_inputs/case_package/reference_uncut",
+        reference_geometry_project / "CFD_2D/CFD_2D_inputs/case_package/reference_uncut",
         generated_project / "CFD_2D/CFD_2D_inputs/case_package/reference_uncut",
         dirs_exist_ok=True,
     )
