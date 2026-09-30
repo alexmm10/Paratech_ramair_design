@@ -23,7 +23,7 @@
 | CFD_2D/app/validation_convergence_page.py | 3690 | 27 | Streamlit page for the isolated Validation & Convergence Lab. |
 | CFD_2D/app/validation_plotting.py | 245 | 5 | Static, compact plots for the Validation & Convergence Lab monitors. |
 | CFD_2D/app/windows_gmsh_viewer.py | 52 | 3 | Open a Linux/WSL mesh with the Windows Gmsh Python API GUI. |
-| CFD_2D/app/workflow_backend.py | 3435 | 105 | Backend shared by the Streamlit UI and command-line launchers. |
+| CFD_2D/app/workflow_backend.py | 3439 | 105 | Backend shared by the Streamlit UI and command-line launchers. |
 | CFD_2D/app/workspace_app.py | 828 | 19 | Modular desktop workflow. Profiles, CAD and CFD have independent ownership. |
 | CFD_2D/app/workspace_execution_controls.py | 162 | 4 | Resource planning and live RANS/URANS monitors for independent solver setups. |
 | CFD_2D/app/workspace_postprocess_controls.py | 46 | 1 | One visible source for analysis, sampling and visualization options. |
@@ -146,7 +146,7 @@
 | CFD_2D/scripts/ramair_scientific_plot_style.py | 131 | 4 | Shared, deterministic scientific plotting and provenance helpers. |
 | CFD_2D/scripts/ramair_simulation_inventory.py | 47 | 3 | Read-only phase-aware progress; completion of a process is not convergence. |
 | CFD_2D/scripts/ramair_suspension_layout.py | 174 | 6 | Versioned suspension selection and automatic networks (millimetres). |
-| CFD_2D/scripts/ramair_validation_gallery.py | 27 | 1 | Permanent selected figures, independent from deletable laboratory runs. |
+| CFD_2D/scripts/ramair_validation_gallery.py | 26 | 1 | Permanent selected figures, independent from deletable laboratory runs. |
 | CFD_2D/scripts/ramair_validation_reference.py | 28 | 1 | User-curated LS reference curves, preserving original digitized coordinates. |
 | CFD_2D/scripts/ramair_wall_topology.py | 70 | 2 | Separate coincident baffle faces using oriented polygons and real connectivity. |
 | CFD_2D/scripts/ramair_workcase_schema.py | 600 | 23 | Versioned identities, revisions and dependencies for RamAir work cases. |
@@ -163,7 +163,7 @@
 | Application Support/Tools/package_ramair_project.py | 202 | 5 | Create a portable RamAir source package without heavy generated outputs. |
 | Application Support/Tools/package_ramair_remote_execution.py | 227 | 6 | Create a checked, restartable OpenFOAM execution package for a Linux/WSL server. |
 | Application Support/Tools/project_git.py | 163 | 10 | Conservative Git maintenance commands used by the application UI. |
-| Application Support/Tools/release_identity.py | 23 | 1 | Shared source identity for application, workspace and remote packages. |
+| Application Support/Tools/release_identity.py | 25 | 1 | Shared source identity for application, workspace and remote packages. |
 | Application Support/Tools/transfer_studio_workspace.py | 92 | 5 | Export/import named Studio workspaces with verified files and relocatable metadata. |
 | Application Support/Tools/verify_company_delivery.py | 112 | 1 | Repeatable, bounded company-delivery acceptance on native Linux/WSL. |
 | Application Support/Tools/verify_studio_package.py | 46 | 1 | Extract a portable application and verify every file and Python source. |

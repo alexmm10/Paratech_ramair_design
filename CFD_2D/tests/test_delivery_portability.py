@@ -71,3 +71,19 @@ def test_monitor_does_not_label_finished_rans_as_running(tmp_path):
     assert build_monitor_snapshot(tmp_path,**args)['status']=='COMPLETED'
     write_json(tmp_path/'steadyInitialization/pending_stage.json',{'latest_iteration':10})
     assert build_monitor_snapshot(tmp_path,**args)['status']=='PAUSED_RECOVERABLE'
+
+
+def test_clean_performance_panel_does_not_invent_zero_courant(tmp_path):
+    from streamlit.testing.v1 import AppTest
+    root=Path(__file__).resolve().parents[2]
+    app=tmp_path/'performance_acceptance.py'
+    app.write_text('from pathlib import Path\nimport sys\n'
+        f'sys.path[:0]=[{str(root/"CFD_2D/scripts")!r},{str(root/"CFD_2D/app")!r}]\n'
+        'from performance_report_page import render_performance_report\n'
+        f'render_performance_report(Path({str(tmp_path)!r}))\n',encoding='utf-8')
+    result=AppTest.from_file(str(app)).run(timeout=60)
+    assert not result.exception
+    values={m.label:m.value for m in result.metric}
+    assert values['Co local']=='-'
+    assert values['dt adaptativo']=='-'
+    assert values['dt estimado para Co=5']=='-'

@@ -400,7 +400,6 @@ try:
         "run_ramair_cfd2d_app.py", "README.md", "RELEASE.json", "README_PROJECT_STRUCTURE.md",
         "PROJECT_CONTEXT_FOR_CODEX.md", "CHANGELOG.md", "AGENTS.md",
         "CFD_2D/README_CFD_2D.md",
-        "CFD_2D/reports/OPENFOAM_PERFORMANCE_AUDIT_20260907.md",
         "START_RAMAIR_CFD2D_APP.bat", "INSTALL_AND_START_RAMAIR_CFD2D_APP.bat",
         "preprocess_ramair_main.py", "Generate_RamAir_Canopy_MAIN.CATScript",
         "SETUP_CATIA_PREPROCESSOR_WINDOWS.bat", "RUN_CATIA_PREPROCESSOR_WINDOWS.bat",

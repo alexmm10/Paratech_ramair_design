@@ -1,7 +1,7 @@
 {
   "status": "PASS",
   "automated_tests": {
-    "passed": 427,
+    "passed": 428,
     "skipped": [
       {
         "name": "test_crashed_controller_drains_independent_child_and_preserves_write",
@@ -119,5 +119,6 @@
     "narrow": 390,
     "broken_images": 0,
     "document_overflow": false
-  }
+  },
+  "performance_panel": "Missing Courant/time data displayed as absent, no invented zeros"
 }

@@ -446,7 +446,9 @@ def test_open_closed_campaign_has_independent_full_validation_controls() -> None
 
 def test_curated_performance_report_is_deployed_without_replacing_runtime_reports() -> None:
     launcher = (ROOT / "run_ramair_cfd2d_app.py").read_text(encoding="utf-8")
-    assert 'CFD_2D/reports/OPENFOAM_PERFORMANCE_AUDIT_20260907.md' in launcher
+    assert 'source / "Documents and Manuals/Current"' in launcher
+    assert (ROOT / 'Documents and Manuals/Current/PERFORMANCE_CURRENT.md').is_file()
+    assert 'CFD_2D/reports/OPENFOAM_PERFORMANCE_AUDIT_20260907.md' not in launcher
     assert '"CFD_2D/reports"' in launcher
 
 
@@ -512,7 +514,7 @@ def test_job_manager_manual_stop_remains_visible_and_restartable(tmp_path: Path)
     assert job.status == "RUNNING"
     assert job.stop_requested_at
     job = manager.stop(job)
-    assert job.status == "RUNNING"
+    assert job.status in {"RUNNING", "PAUSED_RECOVERABLE"}
     assert job.stop_stage == "orchestrator_sigint"
     deadline = time.time() + 10
     while time.time() < deadline:
@@ -522,6 +524,14 @@ def test_job_manager_manual_stop_remains_visible_and_restartable(tmp_path: Path)
         time.sleep(0.05)
     assert job.status == "PAUSED_RECOVERABLE"
     assert manager.active_jobs() == []
+    restarted = manager.start("unit_after_stop", [sys.executable, "-c", "print('restarted')"])
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        restarted = manager.poll(restarted)
+        if restarted.status != "RUNNING":
+            break
+        time.sleep(.05)
+    assert restarted.status == "COMPLETED"
 
 
 def test_remote_execution_packager_contains_restart_stop_and_checksums(tmp_path: Path) -> None:

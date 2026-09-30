@@ -65,8 +65,7 @@ def render_performance_report(root: Path) -> None:
     hardware[4].metric("Espacio libre", f"{host['disk_free_gib']:.1f} GiB", help=host["storage"]+" · "+host["root"])
     st.caption(f"Dispositivo actual: {host['cpu_model']} · CPU en uso {host['cpu_percent']:.0f}% · {host['platform']}")
     current_report = root/"Documents and Manuals/Current/PERFORMANCE_CURRENT.md"
-    if current_report.exists(): st.markdown(current_report.read_text(encoding="utf-8"))
-    report_path = root / "CFD_2D/reports/OPENFOAM_PERFORMANCE_AUDIT_20260907.md"
+    report_path = current_report
     stability_report_path = (
         root
         / "Documents and Manuals/Current/OPEN_URANS_STABILITY.md"
@@ -94,7 +93,7 @@ def render_performance_report(root: Path) -> None:
             "simultáneos posteriores mantienen Serie como recomendación de campaña."
         )
     else:
-        st.warning("El resumen machine-readable del benchmark no está disponible en este runtime.")
+        st.info("No hay benchmarks locales registrados. Es normal en una instalación nueva; mide este equipo antes de seleccionar un perfil empírico.")
 
     st.markdown("### Coste observado en ejecuciones reales")
     measured = _measured_runs(root)
@@ -172,15 +171,16 @@ def render_performance_report(root: Path) -> None:
     measured = stability_data.get("measured_final") or {}
     stability_metrics = st.columns(4)
     stability_metrics[0].metric("Celda limitante", maximum_cell.get("cell_id") or "-")
-    stability_metrics[1].metric("Co local", f"{float(maximum_cell.get('maximum_Co') or 0):.3g}")
-    stability_metrics[2].metric("dt adaptativo", f"{float(measured.get('deltaT_s') or 0):.3g} s")
+    stability_metrics[1].metric("Co local", f"{float(maximum_cell['maximum_Co']):.3g}" if maximum_cell.get('maximum_Co') is not None else "-")
+    stability_metrics[2].metric("dt adaptativo", f"{float(measured['deltaT_s']):.3g} s" if measured.get('deltaT_s') is not None else "-")
     stability_metrics[3].metric(
         "dt estimado para Co=5",
-        f"{float(measured.get('estimated_deltaT_for_Co_5_s') or 0):.3g} s",
+        f"{float(measured['estimated_deltaT_for_Co_5_s']):.3g} s" if measured.get('estimated_deltaT_for_Co_5_s') is not None else "-",
     )
-    st.caption(
-        "La limitación está localizada en la transición exterior del labio superior, no en el dominio completo."
-    )
+    if stability_data:
+        st.caption("El diagnóstico histórico localiza su celda limitante en la transición exterior del labio superior; revise la evidencia propia de cada nueva ejecución.")
+    else:
+        st.caption("No hay diagnóstico de Courant local para este caso. Los indicadores ausentes no se interpretan como cero.")
     with st.expander("Informe de estabilidad URANS abierta", expanded=False):
         if stability_report_path.is_file():
             st.markdown(stability_report_path.read_text(encoding="utf-8"))

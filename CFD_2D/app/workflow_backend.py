@@ -2432,20 +2432,24 @@ class JobManager:
         return job
 
     def stop(self, job: Job) -> Job:
+        job = self.poll(job)
         if job.status != "RUNNING" or not job.pid:
             return job
+        # Record intent before signalling: a quick exit can otherwise let the
+        # completion thread publish FAILED before it sees the stop request.
+        job.stop_requested_at = job.stop_requested_at or time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        job.stop_stage = "orchestrator_sigint"
+        self._write(job)
         try:
             if os.name != "nt":
                 os.killpg(int(job.process_group_id or job.pid), signal.SIGINT)
             else:
                 os.kill(job.pid, signal.SIGTERM)
-            job.stop_requested_at = job.stop_requested_at or time.strftime("%Y-%m-%dT%H:%M:%S%z")
-            job.stop_stage = "orchestrator_sigint"
-            self._write(job)
         except ProcessLookupError:
-            job.status = "PAUSED_RECOVERABLE" if job.stop_requested_at else "FAILED"
-            self._write(job)
-        return job
+            if job.job_id not in self._processes:
+                job.status = "PAUSED_RECOVERABLE"
+                self._write(job)
+        return self.poll(job)
 
     def force_stop(self, job: Job) -> Job:
         """Escalate a requested stop to the recorded solver, then orchestrator."""

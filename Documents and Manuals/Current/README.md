@@ -18,3 +18,5 @@ API 28. [Informe de entrega](DELIVERY_REPORT.md).
 - [Entrega a la empresa e instalación](14_DELIVERY.md)
 
 [Inventario de módulos](CODE_INVENTORY.md) · [Inventario de funciones](FUNCTION_INVENTORY.csv). La evidencia de entrega está en Evidence/delivery_20260930.
+
+[Rendimiento y recursos](PERFORMANCE_CURRENT.md) · [Diagnóstico de estabilidad URANS abierto](OPEN_URANS_STABILITY.md).

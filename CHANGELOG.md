@@ -12,6 +12,7 @@ Sin cambios pendientes de publicación en esta entrega. Registrar aquí el desar
 - Escritura final asegurada en ejecuciones RANS breves; retención de campos de iteración para continuar RANS-only, orden de celdas preservado, separación del origen temporal URANS.
 - Paquetes remotos: continuación explícita de ejecuciones terminadas, rutas reubicables, dependencias fijadas, devolución/importación de postproceso, clasificación diagnóstica y rechazo de importación sobre solver activo.
 - Monitor de checkpoints sin falsos estados activos; cierre de logs coordinado con el gestor; espectros constantes identificados sin escalas logarítmicas inválidas; referencias de perfiles y presets portables.
+- Rendimiento desde documentación Current y hardware actual, ausencia de Courant/dt diferenciada de cero; intención de parada persistida antes de interrumpir el proceso.
 - Limpieza de herramientas e informes puntuales a archivo externo inventariado; documentación vigente unificada, instaladores, manifiestos completos, pruebas de otra ubicación y automatización GitHub.
 - Pruebas reales: dos mallas × dos ángulos, pausa y continuación; ida/vuelta remota en WSL separado. Preparación Python y macro CATIA sin ejecutar CATIA. Resultados breves sin aceptación científica.
 
