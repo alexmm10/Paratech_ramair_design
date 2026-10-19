@@ -144,7 +144,7 @@ def wsl_path_exists(distro: str, root: str, relative: str = "") -> bool:
 
 def windows_to_wsl(path: Path, distro: str) -> str:
     completed = subprocess.run(
-        ["wsl.exe", "-d", distro, "--", "wslpath", "-a", str(path.resolve())],
+        ["wsl.exe", "-d", distro, "--exec", "wslpath", "-a", str(path.resolve())],
         check=True,
         text=True,
         encoding="utf-8",

@@ -119,3 +119,16 @@ def test_object_deduplication_does_not_share_final_case_files(tmp_path):
     result=import_workspace(tmp_path/'Receiver',archive,'Imported')
     target=Path(result['workspace']);(target/'first.txt').write_text('changed independently')
     assert (target/'second.txt').read_text()=='same bytes'
+
+
+def test_windows_path_bridge_avoids_shell_backslash_interpretation(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    spec=importlib.util.spec_from_file_location('delivery_launcher_test',ROOT/'run_ramair_cfd2d_app.py')
+    launcher=importlib.util.module_from_spec(spec);spec.loader.exec_module(launcher)
+    calls=[]
+    def capture(command,**kwargs):
+        calls.append(command)
+        return SimpleNamespace(stdout='/mnt/c/FolderWithoutSpaces\n')
+    monkeypatch.setattr(launcher.subprocess,'run',capture)
+    assert launcher.windows_to_wsl(tmp_path/'FolderWithoutSpaces','Ubuntu-22.04')=='/mnt/c/FolderWithoutSpaces'
+    assert calls[0][:6]==['wsl.exe','-d','Ubuntu-22.04','--exec','wslpath','-a']

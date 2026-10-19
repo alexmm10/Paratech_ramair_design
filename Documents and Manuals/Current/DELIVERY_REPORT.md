@@ -49,6 +49,8 @@ INSTALAR_Y_ABRIR verifica contenido, prepara el entorno con el lanzador oficial,
 
 La recepción del instalador también contempla una carpeta parcialmente preparada que ya tenga entorno Python: la sincronización repone configuraciones básicas y archivos raíz de biblioteca que falten sin reemplazar los existentes. Esto evita que una instalación interrumpida quede inutilizable por la sola presencia de su entorno.
 
+La traducción de rutas Windows utiliza wslpath con ejecución directa, sin pasar las barras de una ruta sin espacios por el shell Linux. Se comprobó esa situación durante la recepción del paquete, además de las rutas con espacios del proyecto de desarrollo.
+
 La importación verifica cada objeto único y deduplica únicamente el área temporal. Los archivos finales de los distintos casos siguen siendo copias independientes. Esta mejora evita duplicar innecesariamente varios gigabytes durante la recepción y no introduce enlaces compartidos entre casos que puedan alterar sus mallas al editar otro.
 
 La instalación se probó con un entorno Python nuevo en otra ruta WSL del mismo dispositivo. Se importó el ejemplo, se repitió checkMesh y su aprobación, se comprobaron los 26 campos iniciales, los nueve puntos retenidos y un plan RANS-only de dos ángulos sin ejecutar solver. La prueba no equivale a haber utilizado un segundo dispositivo físico.
@@ -63,7 +65,7 @@ La revisión visual nativa actual de escritorio y pantalla estrecha no pudo comp
 
 ## Pruebas de software y auditoría
 
-La suite final termina con **438 pruebas aprobadas y una omitida**. Las pruebas específicas de entrega/workspaces y contratos de aplicación completaron 29 y 33 pruebas respectivamente. Se comprueban integridad, rutas, conservación de casos, importación idempotente, colisiones, aislamiento de archivos finales, perfiles reubicables, snapshots sin campos, coeficientes tras traslado y recuperación de opciones de postproceso, incluido inicio RANS en cero.
+La suite completa Windows terminó con **438 pruebas aprobadas y una omitida**. Después se añadió una prueba del puente de rutas Windows/WSL y las comprobaciones específicas finales de entrega/contratos completaron **44 pruebas**. El recibo de CI de la revisión publicada identifica el recuento de esa revisión. Se comprueban integridad, rutas, conservación de casos, importación idempotente, colisiones, aislamiento de archivos finales, perfiles reubicables, snapshots sin campos, coeficientes tras traslado y recuperación de opciones de postproceso, incluido inicio RANS en cero.
 
 Los auditores de contexto y artefactos están aprobados. Los enlaces locales de los manuales se revisaron sin referencias rotas. El verificador de la entrega comprueba todos los archivos y objetos del ejemplo, compila Python y contrasta commit y manifiestos. El recibo final y SHA-256 del ZIP se generan junto al paquete para identificar la distribución concreta.
 

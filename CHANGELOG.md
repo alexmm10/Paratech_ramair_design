@@ -13,6 +13,7 @@ Sin cambios pendientes de publicación en esta entrega. Registrar aquí el desar
 - Galería de polares/comparaciones/validación con procedencia, manual operativo por sección y referencia completa de parámetros. Recuperación de opciones de postproceso guardadas, incluido inicio de promedio RANS en iteración cero.
 - Sincronización de presets de estudio, aplicación explícita de RANS-only y selección inicial del perfil optimizado. Los historiales de presets ya no cuentan como presets activos.
 - Recuperación de instalaciones parciales: la sincronización repone configuraciones base y archivos de biblioteca ausentes sin sustituir los existentes, aunque el entorno Python ya esté instalado.
+- Conversión Windows→WSL mediante ejecución directa de wslpath: conserva las barras de rutas sin espacios y evita que el shell las interprete.
 
 ## [2026-09-30]
 
