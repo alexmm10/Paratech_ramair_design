@@ -432,6 +432,9 @@ try:
             retired.unlink()
 
     reference_configs = [
+        "Application Support/Configurations/default_case_config.json",
+        "Application Support/Configurations/ramair_catia_system_config.json",
+        "Application Support/Configurations/last_preprocessor_run_config.json",
         "Application Support/Configurations/studio_defaults.json",
         "CFD_2D/CFD_2D_inputs/config/cfd2d_mesh_config_reference.json",
         "CFD_2D/CFD_2D_inputs/config/cfd2d_inlet_design_config.json",
@@ -442,6 +445,14 @@ try:
         if src.is_file() and ("reference" in dst.name or dst.name == "studio_defaults.json" or not dst.exists()):
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
+
+    # A previous environment may exist even when first-run file copying was
+    # interrupted. Repair missing library seed files without replacing user edits.
+    for item in (source / "Airfoil Profiles").glob("*"):
+        destination = target / "Airfoil Profiles" / item.name
+        if item.is_file() and item.suffix.lower() in (".dat", ".csv", ".json", ".md", ".txt") and not destination.exists():
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(item, destination)
 
     # Migrate application-owned configuration schemas once, while preserving
     # later edits made by the user inside the WSL application.

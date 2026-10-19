@@ -1,0 +1,59 @@
+Runtime UI/backend API 28 synchronized atomically.
+RamAir CFD 2D application environment
+Project: /home/alejm/ramair_cfd/Delivery_Review_20261019/FinalReceiver/App
+Python environment: /home/alejm/ramair_cfd/Delivery_Review_20261019/FinalReceiver/App/.venv-cfd2d-ui
+project_root: /home/alejm/ramair_cfd/Delivery_Review_20261019/FinalReceiver/App
+status: OK
+OK      streamlit    1.58.0
+OK      pyarrow      18.1.0
+OK      gmsh         4.15.2
+OK      PyFoam       2026.6
+OK      numpy        1.26.4
+OK      scipy        1.13.1
+OK      pandas       2.2.3
+OK      matplotlib   3.8.4
+OK      Pillow       12.3.0
+OK      Axes3D      isolated Matplotlib toolkit
+OK      app/backend API 28
+OK      WSL          Ubuntu-22.04
+OK      xfoil        /home/alejm/.local/bin/xfoil
+
+Complete CAD/CFD dependency report:
+OK       python           /home/alejm/ramair_cfd/Delivery_Review_20261019/FinalReceiver/App/.venv-cfd2d-ui/bin/python
+OK       python_version   3.10.12 (main, Jun 22 2026, 18:55:27) [GCC 11.4.0]
+OK       platform         Linux-6.18.33.1-microsoft-standard-WSL2-x86_64-with-glibc2.35
+OK       wsl              Ubuntu-22.04
+OK       venv             /home/alejm/ramair_cfd/Delivery_Review_20261019/FinalReceiver/App/.venv-cfd2d-ui
+OK       numpy            Python package 'numpy' found; version 1.26.4
+OK       scipy            Python package 'scipy' found; version 1.13.1
+OK       pandas           Python package 'pandas' found; version 2.2.3
+OK       matplotlib       Python package 'matplotlib' found; version 3.8.4
+OK       Pillow           Python package 'PIL' found; version 12.3.0
+OK       gmsh_api         Python package 'gmsh' found; version 4.15.2
+OK       streamlit        Python package 'streamlit' found; version 1.58.0
+OK       pyarrow_runtime  PyArrow 18.1.0
+OK       PyFoam           Python package 'PyFoam' found; version 2026.6
+OK       PyFoam_runtime   PyFoam 2026.6; BasicRunner=PyFoam.Execution.BasicRunner.BasicRunner
+OK       gmsh             /home/alejm/.local/opt/gmsh-4.15.2/bin/gmsh; version 4.15.2
+OK       XFOIL            /home/alejm/.local/bin/xfoil; XFOIL command interface responded
+OK       OpenFOAM_environment sourced /home/alejm/.local/opt/openfoam14/etc/bashrc; WM_PROJECT_DIR=/home/alejm/.local/opt/openfoam14
+OK       gmshToFoam       /home/alejm/.local/opt/openfoam14/platforms/linux64GccDPInt32Opt/bin/gmshToFoam
+OK       checkMesh        /home/alejm/.local/opt/openfoam14/platforms/linux64GccDPInt32Opt/bin/checkMesh
+OK       foamRun          /home/alejm/.local/opt/openfoam14/platforms/linux64GccDPInt32Opt/bin/foamRun
+OK       pimpleFoam       /home/alejm/.local/opt/openfoam14/bin/pimpleFoam
+OK       potentialFoam    /home/alejm/.local/opt/openfoam14/platforms/linux64GccDPInt32Opt/bin/potentialFoam
+OK       decomposePar     /home/alejm/.local/opt/openfoam14/platforms/linux64GccDPInt32Opt/bin/decomposePar
+OK       reconstructPar   /home/alejm/.local/opt/openfoam14/platforms/linux64GccDPInt32Opt/bin/reconstructPar
+OK       foamPostProcess  /home/alejm/.local/opt/openfoam14/platforms/linux64GccDPInt32Opt/bin/foamPostProcess
+OK       postProcess      /home/alejm/.local/opt/openfoam14/bin/postProcess
+OK       foamToVTK        /home/alejm/.local/opt/openfoam14/platforms/linux64GccDPInt32Opt/bin/foamToVTK
+OK       mpirun           /usr/bin/mpirun
+OK       paraFoam         /home/alejm/.local/opt/openfoam14/bin/paraFoam
+OK       paraview         /usr/bin/paraview
+OK       pvbatch          /usr/bin/pvbatch
+OK       gnuplot          /usr/bin/gnuplot
+OK       pyFoamPlotWatcher.py /home/alejm/ramair_cfd/Delivery_Review_20261019/FinalReceiver/App/.venv-cfd2d-ui/bin/pyFoamPlotWatcher.py
+
+Report written: CFD_2D/reports/environment_report.json
+Environment check completed.
+WSL project: /home/alejm/ramair_cfd/Delivery_Review_20261019/FinalReceiver/App

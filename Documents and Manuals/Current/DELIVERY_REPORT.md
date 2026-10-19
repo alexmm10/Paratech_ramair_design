@@ -47,6 +47,8 @@ Al trasladar los JSON cambian las rutas y sus hashes. El instalador solo adapta 
 
 INSTALAR_Y_ABRIR verifica contenido, prepara el entorno con el lanzador oficial, incorpora el ejemplo y repite checkMesh si OpenFOAM está disponible. Si una dependencia o comprobación falta, informa y mantiene pendiente la aprobación. ABRIR_RAMAIR recuerda la ubicación elegida. Reinstalar el mismo ejemplo conserva las modificaciones; una colisión de nombre crea otro workspace.
 
+La recepción del instalador también contempla una carpeta parcialmente preparada que ya tenga entorno Python: la sincronización repone configuraciones básicas y archivos raíz de biblioteca que falten sin reemplazar los existentes. Esto evita que una instalación interrumpida quede inutilizable por la sola presencia de su entorno.
+
 La importación verifica cada objeto único y deduplica únicamente el área temporal. Los archivos finales de los distintos casos siguen siendo copias independientes. Esta mejora evita duplicar innecesariamente varios gigabytes durante la recepción y no introduce enlaces compartidos entre casos que puedan alterar sus mallas al editar otro.
 
 La instalación se probó con un entorno Python nuevo en otra ruta WSL del mismo dispositivo. Se importó el ejemplo, se repitió checkMesh y su aprobación, se comprobaron los 26 campos iniciales, los nueve puntos retenidos y un plan RANS-only de dos ángulos sin ejecutar solver. La prueba no equivale a haber utilizado un segundo dispositivo físico.

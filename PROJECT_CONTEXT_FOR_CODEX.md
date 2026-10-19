@@ -7,6 +7,7 @@ Release: 2026.10.19 · studio-delivery-20261019
 ## Propiedad y despliegue
 
 El checkout que contiene este documento es la fuente editable. En Windows el lanzador sincroniza código de forma atómica a `~/ramair_cfd/DESIGN_APP` en Ubuntu-22.04; puede cambiarse con `--wsl-project-root` o `RAMAIR_WSL_PROJECT_ROOT`. No desarrollar en antiguos árboles INPUT FILES ni editar a la vez la copia WSL.
+La sincronización repone configuraciones base y perfiles raíz ausentes en una instalación parcial; conserva los archivos editables existentes y actualiza los presets de estudio propiedad de la aplicación.
 Los campos y operaciones de mallado viven en disco Linux nativo. Workspaces puede estar en otro destino registrado; `runtime.location.json` y los servicios de almacenamiento describen su ubicación. No mover datos por cambiar la estructura de código.
 
 ## Entradas y responsabilidades
