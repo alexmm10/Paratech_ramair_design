@@ -1,0 +1,161 @@
+{
+  "config_schema_version": 16,
+  "preset_id": "LS1_0417_validation_RANS_ABCDE_URANS_v1",
+  "solver": "foamRun",
+  "solver_module": "incompressibleFluid",
+  "velocity_source": "mach",
+  "transient": true,
+  "time_step_mode": "adaptive_physics_limited",
+  "ddt_scheme": "backward",
+  "n_outer_correctors": 5,
+  "n_correctors": 2,
+  "transient_velocity_divergence_scheme": "Gauss linearUpwind limited",
+  "transient_turbulence_divergence_scheme": "Gauss linearUpwind limited",
+  "deltaT_star": 0.0025,
+  "maxDeltaT_star": 0.0025,
+  "maxCo": 50.0,
+  "outer_corrector_residual_control": {
+    "enabled": true,
+    "fields": {
+      "p": {
+        "tolerance": 0.0001,
+        "relTol": 0.0
+      },
+      "U": {
+        "tolerance": 0.0001,
+        "relTol": 0.0
+      },
+      "nuTilda": {
+        "tolerance": 0.0001,
+        "relTol": 0.0
+      }
+    }
+  },
+  "transport_correction_final": false,
+  "endTime_star": 64.0,
+  "field_write_interval_star": 0.1,
+  "field_write_control": "adjustableRunTime",
+  "average_from_fraction": 0.21875,
+  "temporal_accuracy": {
+    "profile_id": "closed_external_frequency_budget_v1",
+    "target_min_strouhal": 0.05,
+    "target_max_strouhal": 20.0,
+    "target_samples_per_cycle": 20,
+    "minimum_cycles_for_statistics": 10,
+    "smoke_end_time_star": 20.0,
+    "reference_deltaT_star": 0.01276096076,
+    "reference_end_time_star": 319.0240189,
+    "reference_average_time_star": 127.60960756,
+    "time_step_study_values_star": [
+      0.01276096076,
+      0.00638048038,
+      0.00319024019,
+      0.001595120095,
+      0.0007975600475,
+      0.00039878002375
+    ],
+    "strouhal_scope": "Conservative screening envelope for coherent wake, separated-flow and shear-layer content. St_max=20 comes from the Cummings et al. high-frequency shear-layer example and must be replaced by measured spectra when available.",
+    "scope_note": "The 20-samples-per-cycle ceiling is a project engineering target, not a quoted universal rule. The Ghoreyshi validation deltaT is retained as a reproduction reference and must be followed by sequential halving."
+  },
+  "purgeWrite": 24,
+  "farfield_boundary_condition": "freestream",
+  "steady_initialization_enabled": true,
+  "steady_max_iterations": 15000,
+  "steady_write_interval_iterations": 1000,
+  "steady_residual_control": {
+    "p": 1e-06,
+    "U": 1e-06,
+    "nuTilda": 1e-06
+  },
+  "steady_numerics": {
+    "p_relaxation": 0.3,
+    "U_relaxation": 0.7,
+    "nuTilda_relaxation": 0.7,
+    "velocity_divergence_scheme": "bounded Gauss linearUpwind limited",
+    "turbulence_divergence_scheme": "bounded Gauss upwind"
+  },
+  "velocity_profile_stations_xc": [
+    0.1,
+    0.3,
+    0.6,
+    0.9
+  ],
+  "velocity_profile_sample_points": 40,
+  "turbulence_model": "SpalartAllmaras",
+  "optional_secondary_model": "kOmegaSST",
+  "validation_study": {
+    "enabled": false,
+    "study_id": "",
+    "alpha_deg": 8.0,
+    "time_policy": "fixed_staged",
+    "startup_scheme": "Euler",
+    "production_scheme": "backward",
+    "sensitivity_scheme": "CrankNicolson",
+    "crank_nicolson_psi": 0.9,
+    "dt_target_s": null,
+    "startup_factors": [
+      0.25,
+      0.5,
+      1.0
+    ],
+    "startup_duration_tc": [
+      1.0,
+      1.0,
+      2.0
+    ],
+    "settling_tc": null,
+    "sampling_tc": null,
+    "nOuterCorrectors": 3,
+    "nCorrectors": 2,
+    "nNonOrthogonalCorrectors": 0,
+    "courant_controls_dt": false,
+    "field_write_interval_tc": 1.0,
+    "retained_snapshots": 24,
+    "mpi_ranks": 8,
+    "timeout_hours": 24.0,
+    "steady_checkpoint_timeout_min": 120.0
+  },
+  "screening_note": "Topology-aware laptop preset. SIMPLE uses nNonOrthogonalCorrectors=0 for both checked meshes, matching the OpenFOAM 14 steady-state recommendation. Closed external airfoils use one PIMPLE outer loop, maxCo=1 and second-order backward/limited spatial transport. Open cavities use two outer loops, maxCo=0.7, a smaller adaptive deltaT ceiling and more bounded transport. Both allow up to 10000 SIMPLE iterations but can transition earlier on residual and force-history criteria.",
+  "single_solver_contract": true,
+  "steady_native_residual_control_enabled": false,
+  "transient_relaxation": {
+    "p": 0.3,
+    "U": 0.9,
+    "nuTilda": 0.7
+  },
+  "validation_rans_convergence": {
+    "window_samples": 1000,
+    "minimum_samples": 500,
+    "residual_tolerance": 1e-06,
+    "mean_change_tolerance_percent": 0.5,
+    "fluctuation_tolerance_percent": 1.0,
+    "required_consecutive_windows": 3
+  },
+  "validation_write_strategy": {
+    "rans_full_field_interval_iterations": 1000,
+    "urans_control": "adjustableRunTime",
+    "urans_interval_time_star": 0.1,
+    "purge_write": 24,
+    "authoritative": true
+  },
+  "mesh_quality_numerics_mode": "automatic",
+  "validation_phase_d_steady_equivalence": {
+    "enabled": false,
+    "window_time_star": 2.5,
+    "minimum_samples": 200,
+    "mean_difference_tolerance_percent": 0.3,
+    "fluctuation_tolerance_percent": 0.5,
+    "coefficient_floors": {
+      "Cl": 0.05,
+      "Cd": 0.005,
+      "Cm": 0.005,
+      "Cl_over_Cd": 1.0
+    },
+    "policy": "skip_E_and_use_final_D_window_only_when_all_coefficients_pass"
+  },
+  "workspace_solver_contract": true,
+  "execution_controls": {
+    "phase_action": "rans_only",
+    "renumber_before_decompose": false
+  }
+}

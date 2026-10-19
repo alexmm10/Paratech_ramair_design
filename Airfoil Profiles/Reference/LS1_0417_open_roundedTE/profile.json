@@ -6,7 +6,7 @@
   "created_at": "2026-09-09T05:37:25",
   "topology": "open",
   "chord_m": 1.0,
-  "source": "CFD_2D/CFD_2D_inputs/geometry/open_ramair_validation_1m/profile_points.csv",
+  "source": "\\\\wsl.localhost\\Ubuntu-22.04\\home\\alejm\\ramair_cfd\\DESIGN_APP\\CFD_2D\\CFD_2D_inputs\\geometry\\open_ramair_validation_1m\\profile_points.csv",
   "source_sha256": "03f4d51c51d3a5ed7de0f4cb9158f11c26459ec2ebbcf7cbab1ff6509e236ff9",
   "te": {
     "mode": "rounded",
@@ -29,6 +29,5 @@
   },
   "base_profile": "Airfoil Profiles/Reference/LS1_0417_closed_roundedTE",
   "coordinates": "upper_TE_to_LE__lower_LE_to_TE__cap_lower_to_upper",
-  "revision": "f8a7ecac7c3183bf3cbf1b7ba3dab08f41cfb5f0b5582930ddbd2d57ca90c9c7",
-  "source_role": "historical_provenance; coordinates are bundled beside profile.json"
+  "revision": "f8a7ecac7c3183bf3cbf1b7ba3dab08f41cfb5f0b5582930ddbd2d57ca90c9c7"
 }

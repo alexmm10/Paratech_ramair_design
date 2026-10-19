@@ -1,0 +1,110 @@
+{
+  "name": "20261019 LS1 optimized RANS polar",
+  "scope": "Figuras del estudio conservadas sin campos volum\u00e9tricos. Comparaciones RANS y verificaci\u00f3n de origen; consultar hip\u00f3tesis y estado antes de reutilizar datos cient\u00edficos.",
+  "figures": [
+    {
+      "file": "Cm_alpha_4635c742fc.png",
+      "title": "Cm alpha",
+      "source": "Workspaces/Workflow_Validation_20260909/CFD_2D/SL_Re1900000_M015/Geometries/LS1_optimized/Meshes/Polar_RANS_medium_20260913/OpenFOAM/RANS_polar_20260913/Polar/Cm_alpha.png",
+      "sha256": "4635c742fc31e24d361ed487eedf2e755774f044127d63270964bdea998706bf",
+      "source_status": "RETAINED_STUDY_FIGURE",
+      "scope": "Original source status retained; no new convergence or scientific acceptance claimed."
+    },
+    {
+      "file": "Cd_alpha_8a7bad981e.png",
+      "title": "Cd alpha",
+      "source": "Workspaces/Workflow_Validation_20260909/CFD_2D/SL_Re1900000_M015/Geometries/LS1_optimized/Meshes/Polar_RANS_medium_20260913/OpenFOAM/RANS_polar_20260913/Polar/Cd_alpha.png",
+      "sha256": "8a7bad981e5b30049bea853b8060eeaadfa18f412b413b41d8bf5258318f37d7",
+      "source_status": "RETAINED_STUDY_FIGURE",
+      "scope": "Original source status retained; no new convergence or scientific acceptance claimed."
+    },
+    {
+      "file": "Cl_alpha_82ba3bc05a.png",
+      "title": "Cl alpha",
+      "source": "Workspaces/Workflow_Validation_20260909/CFD_2D/SL_Re1900000_M015/Geometries/LS1_optimized/Meshes/Polar_RANS_medium_20260913/OpenFOAM/RANS_polar_20260913/Polar/Cl_alpha.png",
+      "sha256": "82ba3bc05a85095a5080b588b19285b9e9c2ba22de18831faced4249396c9b73",
+      "source_status": "RETAINED_STUDY_FIGURE",
+      "scope": "Original source status retained; no new convergence or scientific acceptance claimed."
+    },
+    {
+      "file": "Cl_Cd_alpha_2b58e0a675.png",
+      "title": "Cl Cd alpha",
+      "source": "Workspaces/Workflow_Validation_20260909/CFD_2D/SL_Re1900000_M015/Geometries/LS1_optimized/Meshes/Polar_RANS_medium_20260913/OpenFOAM/RANS_polar_20260913/Polar/Cl_Cd_alpha.png",
+      "sha256": "2b58e0a67510de999ec6e10714a36accd24516777c42c5ae7f2c899a7b24c2e8",
+      "source_status": "RETAINED_STUDY_FIGURE",
+      "scope": "Original source status retained; no new convergence or scientific acceptance claimed."
+    },
+    {
+      "file": "Cm_alpha_a4957a403f.png",
+      "title": "Cm alpha",
+      "source": "Workspaces/Workflow_Validation_20260909/CFD_2D/SL_Re1900000_M015/Geometries/LS1_optimized/Meshes/Polar_RANS_medium_20260913/OpenFOAM/RANS_polar_20260913/Polar/Comparison/Cm_alpha.png",
+      "sha256": "a4957a403f64123f6776f360aead55ce5487914c3cbfde45383d9d960c97da9f",
+      "source_status": "RETAINED_STUDY_FIGURE",
+      "scope": "Original source status retained; no new convergence or scientific acceptance claimed."
+    },
+    {
+      "file": "Cd_alpha_aa14f612f1.png",
+      "title": "Cd alpha",
+      "source": "Workspaces/Workflow_Validation_20260909/CFD_2D/SL_Re1900000_M015/Geometries/LS1_optimized/Meshes/Polar_RANS_medium_20260913/OpenFOAM/RANS_polar_20260913/Polar/Comparison/Cd_alpha.png",
+      "sha256": "aa14f612f199b9359c2b236d7f456ba14c37437311c387dd8bb4c8a3bbbfcaa5",
+      "source_status": "RETAINED_STUDY_FIGURE",
+      "scope": "Original source status retained; no new convergence or scientific acceptance claimed."
+    },
+    {
+      "file": "Cl_alpha_11d4b0374c.png",
+      "title": "Cl alpha",
+      "source": "Workspaces/Workflow_Validation_20260909/CFD_2D/SL_Re1900000_M015/Geometries/LS1_optimized/Meshes/Polar_RANS_medium_20260913/OpenFOAM/RANS_polar_20260913/Polar/Comparison/Cl_alpha.png",
+      "sha256": "11d4b0374cd685fc54e1a9a44014caf937360c8f15a7a28ce7d095870ce28fbb",
+      "source_status": "RETAINED_STUDY_FIGURE",
+      "scope": "Original source status retained; no new convergence or scientific acceptance claimed."
+    },
+    {
+      "file": "Cl_Cd_c44bd51347.png",
+      "title": "Cl Cd",
+      "source": "Workspaces/Workflow_Validation_20260909/CFD_2D/SL_Re1900000_M015/Geometries/LS1_optimized/Meshes/Polar_RANS_medium_20260913/OpenFOAM/RANS_polar_20260913/Polar/Comparison/Cl_Cd.png",
+      "sha256": "c44bd51347002580554aa9a1164c0c1872799caf84d9f9de777dd6dfd4dc24a8",
+      "source_status": "RETAINED_STUDY_FIGURE",
+      "scope": "Original source status retained; no new convergence or scientific acceptance claimed."
+    },
+    {
+      "file": "Cp_wall_682ebf3392.png",
+      "title": "Cp wall",
+      "source": "Workspaces/Workflow_Validation_20260909/CFD_2D/SL_Re1900000_M015/Geometries/LS1_optimized/Meshes/Polar_RANS_medium_20260913/OpenFOAM/RANS_polar_20260913/Polar/Comparison/Cp_wall.png",
+      "sha256": "682ebf33927780c672a3436a6152a4afec0c47fc045f1619d2f2cb55f0558899",
+      "source_status": "RETAINED_STUDY_FIGURE",
+      "scope": "Original source status retained; no new convergence or scientific acceptance claimed."
+    },
+    {
+      "file": "differences_637014a2d7.png",
+      "title": "differences",
+      "source": "Workspaces/Workflow_Validation_20260909/CFD_2D/SL_Re1900000_M015/Geometries/LS1_optimized/Meshes/Polar_RANS_medium_20260913/OpenFOAM/RANS_polar_20260913/Polar/Comparison/differences.png",
+      "sha256": "637014a2d7309c9907141761350a3f5d5c66e3562d820911a7e3bdaf197a3c25",
+      "source_status": "RETAINED_STUDY_FIGURE",
+      "scope": "Original source status retained; no new convergence or scientific acceptance claimed."
+    },
+    {
+      "file": "Cf_wall_ef7fadbbdd.png",
+      "title": "Cf wall",
+      "source": "Workspaces/Workflow_Validation_20260909/CFD_2D/SL_Re1900000_M015/Geometries/LS1_optimized/Meshes/Polar_RANS_medium_20260913/OpenFOAM/RANS_polar_20260913/Polar/Comparison/Cf_wall.png",
+      "sha256": "ef7fadbbdded3c31e641f06c29a848ba9e57c3070241979fcd63e58258228168",
+      "source_status": "RETAINED_STUDY_FIGURE",
+      "scope": "Original source status retained; no new convergence or scientific acceptance claimed."
+    },
+    {
+      "file": "yplus_wall_aafca47ef2.png",
+      "title": "yplus wall",
+      "source": "Workspaces/Workflow_Validation_20260909/CFD_2D/SL_Re1900000_M015/Geometries/LS1_optimized/Meshes/Polar_RANS_medium_20260913/OpenFOAM/RANS_polar_20260913/Polar/Comparison/yplus_wall.png",
+      "sha256": "aafca47ef28c1386c7ac68984a7a4c4d43ab66624240b8dfd77c1bb964a198ad",
+      "source_status": "RETAINED_STUDY_FIGURE",
+      "scope": "Original source status retained; no new convergence or scientific acceptance claimed."
+    },
+    {
+      "file": "Cl_Cd_alpha_d647e3e8c4.png",
+      "title": "Cl Cd alpha",
+      "source": "Workspaces/Workflow_Validation_20260909/CFD_2D/SL_Re1900000_M015/Geometries/LS1_optimized/Meshes/Polar_RANS_medium_20260913/OpenFOAM/RANS_polar_20260913/Polar/Comparison/Cl_Cd_alpha.png",
+      "sha256": "d647e3e8c4c4bdd21f5cf9e056683741208b55f249d811e213573433135be837",
+      "source_status": "RETAINED_STUDY_FIGURE",
+      "scope": "Original source status retained; no new convergence or scientific acceptance claimed."
+    }
+  ]
+}

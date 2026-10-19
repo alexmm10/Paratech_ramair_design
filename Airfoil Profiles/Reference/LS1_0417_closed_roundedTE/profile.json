@@ -6,7 +6,7 @@
   "created_at": "2026-09-09T05:36:06",
   "topology": "closed",
   "chord_m": 1.0,
-  "source": "CFD_2D/CFD_2D_inputs/geometry/reference_uncut_validation_1m/profile_points.csv",
+  "source": "\\\\wsl.localhost\\Ubuntu-22.04\\home\\alejm\\ramair_cfd\\DESIGN_APP\\CFD_2D\\CFD_2D_inputs\\geometry\\reference_uncut_validation_1m\\profile_points.csv",
   "source_sha256": "f1bd0c26cc8c5c3b918c4ccad988543c57077933983628e064cac07f8a56dc76",
   "te": {
     "mode": "rounded",
@@ -18,6 +18,5 @@
   },
   "base_profile": null,
   "coordinates": "upper_TE_to_LE__lower_LE_to_TE__cap_lower_to_upper",
-  "revision": "82e944720e92334f0e506dfb989d99a47b371def766325d10978951036ae8948",
-  "source_role": "historical_provenance; coordinates are bundled beside profile.json"
+  "revision": "82e944720e92334f0e506dfb989d99a47b371def766325d10978951036ae8948"
 }

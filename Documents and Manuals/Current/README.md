@@ -1,4 +1,4 @@
-# Manuales vigentes · RamAir Studio 2026.09.30
+# Manuales vigentes · RamAir Studio 2026.10.19
 
 API 28. [Informe de entrega](DELIVERY_REPORT.md).
 
@@ -16,7 +16,10 @@ API 28. [Informe de entrega](DELIVERY_REPORT.md).
 - [Convergencia de malla RANS · Ejecución general](12_RANS_MESH_CONVERGENCE.md)
 - [Ejecución remota Linux / WSL y recuperación](13_REMOTE_EXECUTION.md)
 - [Entrega a la empresa e instalación](14_DELIVERY.md)
+- [Paquete único, instalación y recorrido del ejemplo](15_FIRST_RUN_AND_DEFAULTS.md)
+- [Manual operativo de todas las secciones](16_USER_OPERATIONS.md)
+- [Referencia de parámetros efectivos de estudio](17_STUDY_PARAMETER_REFERENCE.md)
 
-[Inventario de módulos](CODE_INVENTORY.md) · [Inventario de funciones](FUNCTION_INVENTORY.csv). La evidencia de entrega está en Evidence/delivery_20260930.
+[Inventario de módulos](CODE_INVENTORY.md) · [Inventario de funciones](FUNCTION_INVENTORY.csv). La evidencia actual está en Evidence/delivery_20261019; delivery_20260930 conserva las pruebas históricas de aquella entrega.
 
 [Rendimiento y recursos](PERFORMANCE_CURRENT.md) · [Diagnóstico de estabilidad URANS abierto](OPEN_URANS_STABILITY.md).

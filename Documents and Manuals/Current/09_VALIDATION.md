@@ -1,6 +1,6 @@
 # Laboratorio independiente y galería
 
-API 28 · Manual vigente · 2026-09-30.
+API 28 · Manual vigente · 2026-10-19.
 
 ## Independencia
 

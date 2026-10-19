@@ -1,6 +1,6 @@
 # Postproceso, resultados y comparación
 
-API 28 · Manual vigente · 2026-09-30.
+API 28 · Manual vigente · 2026-10-19.
 
 ## Menú
 
@@ -9,6 +9,10 @@ Tres pestañas: Postproceso y análisis; Polar y resultados; Comparación. La co
 ## Opciones
 
 Cp, Cf, y+, esfuerzos de pared, Q, vorticidad y Courant; perfiles de velocidad en estaciones configurables; imágenes finales ParaView; animaciones opcionales; exportación VTK opcional; escalas, intervalo temporal y muestras RANS. Imágenes rápidas y animaciones se solicitan por separado.
+
+Los menús recuperan las opciones guardadas del setup. Si no existen, utilizan Study Presets/postprocess.json. El valor cero de inicio de promedio RANS se conserva como cero.
+
+El ejemplo reducido conserva tablas/figuras y nueve puntos de origen. Tras la importación verificada, el instalador contrasta que los coeficientes no hayan cambiado y adapta sus referencias, sin otorgar una validación científica nueva. Si faltan campos volumétricos, RETAINED_RESULTS_ONLY evita reemplazar los productos por un cálculo desde campos iniciales. Una ejecución propia con nuevos campos guardados habilita el postproceso, incluidos campos comprimidos U.gz.
 
 ## Salidas
 

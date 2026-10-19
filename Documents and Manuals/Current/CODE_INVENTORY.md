@@ -1,9 +1,27 @@
-# Inventario de código · 2026.09.30
+# Inventario de código · 2026.10.19
 
-165 módulos. Inventario AST; no reemplaza tests ni identifica todos los procesos externos.
+173 módulos y 2429 símbolos. Análisis AST; no ejecuta código ni sustituye pruebas de software/CAE.
 
 | Archivo | Líneas | Símbolos | Responsabilidad |
 |---|---:|---:|---|
+| Application Support/Tools/check_project_context.py | 51 | 2 | Check that Codex context and release metadata match the application API. |
+| Application Support/Tools/check_repository_artifacts.py | 43 | 1 | Fail when Git would include generated or unexpectedly large artifacts. |
+| Application Support/Tools/generate_code_inventory.py | 30 | 2 | Rebuild the module and callable inventory without executing application code. |
+| Application Support/Tools/generate_study_reference.py | 44 | 3 | Regenerate the readable reference from the shipped effective configuration files. |
+| Application Support/Tools/import_ramair_remote_results.py | 203 | 7 | Validate and import a RamAir remote-return archive into its canonical cases. |
+| Application Support/Tools/install_studio_bundle.py | 163 | 6 | Install a verified single-file delivery and restore its lightweight example. |
+| Application Support/Tools/launch_catia_macro.py | 237 | 10 | Detect CATIA V5 on Windows and optionally launch the RamAir CATScript. |
+| Application Support/Tools/package_ramair_catia_windows.py | 280 | 8 | Build and verify a standalone Windows package for Python + CATIA V5. |
+| Application Support/Tools/package_ramair_project.py | 208 | 5 | Create a portable RamAir source package without heavy generated outputs. |
+| Application Support/Tools/package_ramair_remote_execution.py | 227 | 6 | Create a checked, restartable OpenFOAM execution package for a Linux/WSL server. |
+| Application Support/Tools/package_studio_delivery.py | 71 | 3 | Build one download: application, installer, user manuals and an importable example. |
+| Application Support/Tools/project_git.py | 163 | 10 | Conservative Git maintenance commands used by the application UI. |
+| Application Support/Tools/release_identity.py | 25 | 1 | Shared source identity for application, workspace and remote packages. |
+| Application Support/Tools/transfer_studio_workspace.py | 100 | 5 | Export/import named Studio workspaces with verified files and relocatable metadata. |
+| Application Support/Tools/verify_company_delivery.py | 112 | 1 | Repeatable, bounded company-delivery acceptance on native Linux/WSL. |
+| Application Support/Tools/verify_studio_delivery.py | 57 | 1 | Independently verify every file in the complete downloadable delivery. |
+| Application Support/Tools/verify_studio_package.py | 46 | 1 | Extract a portable application and verify every file and Python source. |
+| Application Support/Tools/verify_studio_ui.py | 39 | 1 | Exercise current pages without starting external CAD or solver processes. |
 | CFD_2D/app/__init__.py | 2 | 0 | Graphical orchestration package for the ram-air CFD 2D workflow. |
 | CFD_2D/app/cad_design_controls.py | 187 | 4 | Design-oriented CAD controls; backend geometry remains the source of previews. |
 | CFD_2D/app/cad_preview.py | 70 | 2 | Cached preview from the same isolated preprocessor used by named CAD models. |
@@ -24,9 +42,10 @@
 | CFD_2D/app/validation_plotting.py | 245 | 5 | Static, compact plots for the Validation & Convergence Lab monitors. |
 | CFD_2D/app/windows_gmsh_viewer.py | 52 | 3 | Open a Linux/WSL mesh with the Windows Gmsh Python API GUI. |
 | CFD_2D/app/workflow_backend.py | 3439 | 105 | Backend shared by the Streamlit UI and command-line launchers. |
-| CFD_2D/app/workspace_app.py | 828 | 19 | Modular desktop workflow. Profiles, CAD and CFD have independent ownership. |
+| CFD_2D/app/workspace_app.py | 844 | 19 | Modular desktop workflow. Profiles, CAD and CFD have independent ownership. |
+| CFD_2D/app/workspace_delivery_content.py | 38 | 2 | Read-only entry point for the defaults, manuals and preserved study figures. |
 | CFD_2D/app/workspace_execution_controls.py | 162 | 4 | Resource planning and live RANS/URANS monitors for independent solver setups. |
-| CFD_2D/app/workspace_postprocess_controls.py | 46 | 1 | One visible source for analysis, sampling and visualization options. |
+| CFD_2D/app/workspace_postprocess_controls.py | 48 | 1 | One visible source for analysis, sampling and visualization options. |
 | CFD_2D/app/workspace_rans_convergence.py | 98 | 1 | General execution mesh-convergence UI; studies do not mutate the laboratory. |
 | CFD_2D/scripts/boundary_layer_estimates.py | 225 | 8 | Lightweight boundary-layer estimates shared by the mesh UI and reports. |
 | CFD_2D/scripts/check_environment.py | 225 | 10 | Environment checker for the ram-air CAD/CFD workflow. |
@@ -145,27 +164,16 @@
 | CFD_2D/scripts/ramair_report_figures.py | 65 | 1 | Publication figures shared by the report export and the application. |
 | CFD_2D/scripts/ramair_scientific_plot_style.py | 131 | 4 | Shared, deterministic scientific plotting and provenance helpers. |
 | CFD_2D/scripts/ramair_simulation_inventory.py | 47 | 3 | Read-only phase-aware progress; completion of a process is not convergence. |
+| CFD_2D/scripts/ramair_studio_defaults.py | 31 | 3 | Portable study starting values. Never write to an existing user configuration. |
 | CFD_2D/scripts/ramair_suspension_layout.py | 174 | 6 | Versioned suspension selection and automatic networks (millimetres). |
 | CFD_2D/scripts/ramair_validation_gallery.py | 26 | 1 | Permanent selected figures, independent from deletable laboratory runs. |
 | CFD_2D/scripts/ramair_validation_reference.py | 28 | 1 | User-curated LS reference curves, preserving original digitized coordinates. |
 | CFD_2D/scripts/ramair_wall_topology.py | 70 | 2 | Separate coincident baffle faces using oriented polygons and real connectivity. |
 | CFD_2D/scripts/ramair_workcase_schema.py | 600 | 23 | Versioned identities, revisions and dependencies for RamAir work cases. |
-| CFD_2D/scripts/ramair_workspace.py | 335 | 28 | Persistent, independent CAD/CFD workspaces. No active-global input mutation. |
-| CFD_2D/scripts/ramair_workspace_jobs.py | 193 | 6 | Bounded stage commands for the workspace UI; solvers require --run. |
+| CFD_2D/scripts/ramair_workspace.py | 339 | 28 | Persistent, independent CAD/CFD workspaces. No active-global input mutation. |
+| CFD_2D/scripts/ramair_workspace_jobs.py | 210 | 7 | Bounded stage commands for the workspace UI; solvers require --run. |
 | CFD_2D/scripts/ramair_workspace_lifecycle.py | 171 | 6 | Explicit lifecycle operations and scientific review adapters for workspaces. |
 | CFD_2D/scripts/ramair_workspace_storage.py | 58 | 4 | Small Windows publications; OpenFOAM remains on the native Linux filesystem. |
 | CFD_2D/scripts/wall_separation_analysis.py | 624 | 13 | Connectivity-based wall-shear and boundary-layer separation analysis. |
-| Application Support/Tools/check_project_context.py | 51 | 2 | Check that Codex context and release metadata match the application API. |
-| Application Support/Tools/check_repository_artifacts.py | 43 | 1 | Fail when Git would include generated or unexpectedly large artifacts. |
-| Application Support/Tools/import_ramair_remote_results.py | 203 | 7 | Validate and import a RamAir remote-return archive into its canonical cases. |
-| Application Support/Tools/launch_catia_macro.py | 237 | 10 | Detect CATIA V5 on Windows and optionally launch the RamAir CATScript. |
-| Application Support/Tools/package_ramair_catia_windows.py | 280 | 8 | Build and verify a standalone Windows package for Python + CATIA V5. |
-| Application Support/Tools/package_ramair_project.py | 202 | 5 | Create a portable RamAir source package without heavy generated outputs. |
-| Application Support/Tools/package_ramair_remote_execution.py | 227 | 6 | Create a checked, restartable OpenFOAM execution package for a Linux/WSL server. |
-| Application Support/Tools/project_git.py | 163 | 10 | Conservative Git maintenance commands used by the application UI. |
-| Application Support/Tools/release_identity.py | 25 | 1 | Shared source identity for application, workspace and remote packages. |
-| Application Support/Tools/transfer_studio_workspace.py | 92 | 5 | Export/import named Studio workspaces with verified files and relocatable metadata. |
-| Application Support/Tools/verify_company_delivery.py | 112 | 1 | Repeatable, bounded company-delivery acceptance on native Linux/WSL. |
-| Application Support/Tools/verify_studio_package.py | 46 | 1 | Extract a portable application and verify every file and Python source. |
-| Application Support/Tools/verify_studio_ui.py | 39 | 1 | Exercise current pages without starting external CAD or solver processes. |
-| CATIA/Utilities/VERIFY_CATIA_PACKAGE.py | 133 | 4 | Static and data-level verification for the standalone CATIA package. |
+| preprocess_ramair_main.py | 5373 | 198 | preprocess_ramair_profile_parametric_v18_EXPORT_FIX_SAFE_SHARPTE.py |
+| run_ramair_cfd2d_app.py | 785 | 18 | Launch the RamAir DESIGN APP in Linux/WSL with an atomic code release. |

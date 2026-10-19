@@ -1,0 +1,105 @@
+{
+  "status": "PASS",
+  "installation": "Fresh Python environment in another WSL path on this same device",
+  "workspace": "/home/alejm/ramair_cfd/Delivery_Review_20261019/Receiver/App/Workspaces/Example_Open_Polar",
+  "meshes": [
+    {
+      "mesh": "Polar_RANS_medium_20260913",
+      "status": "APPROVED",
+      "checkMesh": "OK"
+    }
+  ],
+  "initial_angles": 26,
+  "retained_polar_points": 9,
+  "retained_postprocess_guard": "PASS",
+  "execution_plan": "Two angles, RANS-only, dry run; solver not executed",
+  "UI": {
+    "status": "PASS",
+    "pages": [
+      {
+        "page": "Inicio",
+        "exceptions": [],
+        "errors": [],
+        "warnings": [],
+        "duration_s": 0.148
+      },
+      {
+        "page": "Casos de trabajo",
+        "exceptions": [],
+        "errors": [],
+        "warnings": [],
+        "duration_s": 0.163
+      },
+      {
+        "page": "Perfiles 2D",
+        "exceptions": [],
+        "errors": [],
+        "warnings": [],
+        "duration_s": 0.408
+      },
+      {
+        "page": "Geometr\u00eda CATIA",
+        "exceptions": [],
+        "errors": [],
+        "warnings": [],
+        "duration_s": 6.438
+      },
+      {
+        "page": "Caso CFD",
+        "exceptions": [],
+        "errors": [],
+        "warnings": [],
+        "duration_s": 0.14
+      },
+      {
+        "page": "Mallado",
+        "exceptions": [],
+        "errors": [],
+        "warnings": [
+          "Predicted GR=1.1111 exceeds GRmax=1.1. Increase upper/lower divisions; for TE/LE-or-inlet, excessive divisions can require a stronger Bump."
+        ],
+        "duration_s": 2.276
+      },
+      {
+        "page": "Caso OpenFOAM",
+        "exceptions": [],
+        "errors": [],
+        "warnings": [],
+        "duration_s": 0.199
+      },
+      {
+        "page": "Ejecuci\u00f3n",
+        "exceptions": [],
+        "errors": [],
+        "warnings": [],
+        "duration_s": 1.385
+      },
+      {
+        "page": "Postproceso",
+        "exceptions": [],
+        "errors": [],
+        "warnings": [],
+        "duration_s": 5.416
+      },
+      {
+        "page": "Validation & Convergence Lab",
+        "exceptions": [],
+        "errors": [],
+        "warnings": [],
+        "duration_s": 0.116
+      },
+      {
+        "page": "Archivos y logs",
+        "exceptions": [],
+        "errors": [],
+        "warnings": [],
+        "duration_s": 0.124
+      }
+    ],
+    "solver_launched": false,
+    "CATIA_launched": false
+  },
+  "CATIA_executed": false,
+  "solver_executed": false,
+  "physical_second_device": false
+}

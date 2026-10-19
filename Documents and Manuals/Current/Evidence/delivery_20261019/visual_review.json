@@ -1,0 +1,1 @@
+{"status":"NOT_COMPLETED","scope":"Current native desktop and narrow browser visual review","reason":"Computer Use stopped because it could not determine the current browser URL confidently enough to enforce its policy.","automated_UI":"All 11 pages passed without exceptions or errors in a separately installed WSL environment.","no_browser_bypass_attempted":true}

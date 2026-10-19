@@ -386,6 +386,8 @@ try:
             target / "CFD_2D/validation_cases/LS1_0417_M0p15_Re1p9e6",
         ),
     ]
+    if (source / "Study Presets").is_dir():
+        replace_trees.append((source / "Study Presets", target / "Study Presets"))
     for src, dst in replace_trees:
         incoming = dst.with_name(dst.name + f".__incoming.{{token}}")
         previous = dst.with_name(dst.name + f".__previous.{{token}}")
@@ -430,13 +432,14 @@ try:
             retired.unlink()
 
     reference_configs = [
+        "Application Support/Configurations/studio_defaults.json",
         "CFD_2D/CFD_2D_inputs/config/cfd2d_mesh_config_reference.json",
         "CFD_2D/CFD_2D_inputs/config/cfd2d_inlet_design_config.json",
     ]
     for relative in reference_configs:
         src = source / relative
         dst = target / relative
-        if src.is_file() and ("reference" in dst.name or not dst.exists()):
+        if src.is_file() and ("reference" in dst.name or dst.name == "studio_defaults.json" or not dst.exists()):
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
 

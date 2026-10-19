@@ -6,7 +6,7 @@
   "created_at": "2026-09-09T10:33:17",
   "topology": "open",
   "chord_m": 1.0,
-  "source": "Airfoil Profiles/NASA_LS1_0417_Cut_Standard_Re1900000_M0p15_Gap7p7pct.csv",
+  "source": "/home/alejm/ramair_cfd/DESIGN_APP/Airfoil Profiles/NASA_LS1_0417_Cut_Standard_Re1900000_M0p15_Gap7p7pct.csv",
   "source_sha256": "224d585c4d59a44002d92682e799d695ed95760e7563756e13b648b6d47e6ebd",
   "te": {
     "mode": "rounded",
@@ -29,6 +29,5 @@
   },
   "base_profile": "Airfoil Profiles/Reference/Validation_LS1_Re1900000_M015_closed_roundedTE",
   "coordinates": "upper_TE_to_LE__lower_LE_to_TE__cap_lower_to_upper",
-  "revision": "06916d24c939f2574eb9cbd6911c7e2ebba84ddce419918eff6ba1de316d5c25",
-  "source_role": "historical_provenance; coordinates are bundled beside profile.json"
+  "revision": "06916d24c939f2574eb9cbd6911c7e2ebba84ddce419918eff6ba1de316d5c25"
 }

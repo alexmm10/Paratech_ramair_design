@@ -4,6 +4,15 @@
 
 Sin cambios pendientes de publicación en esta entrega. Registrar aquí el desarrollo posterior.
 
+## [2026-10-19]
+
+- Entrega completa en un único ZIP: código, instalador verificable Windows/WSL, manuales, bibliotecas y ejemplo importable. Instalación repetible que conserva los cambios del usuario y evita colisiones de nombres.
+- Catálogo de presets de estudio para CAD, condiciones físicas, tres mallas aprobadas, solver/fases y postproceso. Las configuraciones nuevas usan esos valores; las existentes conservan sus ajustes.
+- Ejemplo abierto optimizado con malla de 248180 celdas, 26 ángulos preparados desde campos iniciales y 9 puntos RANS retenidos. Las figuras y tablas se consultan sin distribuir checkpoints volumétricos.
+- Protección de snapshots reducidos: el postproceso identifica campos omitidos y no sustituye las figuras conservadas por resultados calculados desde campos iniciales.
+- Galería de polares/comparaciones/validación con procedencia, manual operativo por sección y referencia completa de parámetros. Recuperación de opciones de postproceso guardadas, incluido inicio de promedio RANS en iteración cero.
+- Sincronización de presets de estudio, aplicación explícita de RANS-only y selección inicial del perfil optimizado. Los historiales de presets ya no cuentan como presets activos.
+
 ## [2026-09-30]
 
 - Consolidación de RamAir Studio API 28: workspaces independientes, biblioteca de perfiles, controles modulares CAD/mesh/CFD, calidad local de malla, recuperación y postproceso RANS/URANS y comparación de polares.

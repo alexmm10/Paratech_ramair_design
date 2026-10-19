@@ -1,54 +1,82 @@
-# Informe de entrega · RamAir Studio 2026.09.30
+# Informe de entrega · RamAir Studio 2026.10.19
 
-## Resultado y alcance
+## Resultado
 
-La versión consolidada reúne diseño de perfiles, preparación CAD, Gmsh/OpenFOAM, ejecución RANS/URANS, postproceso y laboratorio. API 28 coordina la interfaz modular con sus servicios. Se incorpora la nueva suspensión y la convergencia RANS en ejecución general. La entrega separa aplicación, ejemplo y ejecución remota; los manifests fijan versión, commit y hashes.
-Los archivos de tareas previas se revisaron antes de incorporarlos. Se conserva el código de compatibilidad que aún usan el laboratorio y Results; las herramientas puntuales y documentación obsoleta salen del árbol activo.
+La entrega se reúne en un solo ZIP: instalación Windows/WSL, código, macro CATIA, perfiles existentes, presets efectivos de estudio, manuales por sección, galería de resultados y workspace abierto importable. No requiere recuperar el árbol de desarrollo ni copiar entornos instalados. El paquete, su manifiesto y el archivo SHA-256 fijan la versión y el commit exactos.
 
-## Suspensión CAD
+El código mantiene separados interfaz, servicios científicos, bibliotecas y workspaces. La aplicación sigue siendo API 28; los nuevos defaults y herramientas de entrega amplían el flujo sin cambiar el contrato existente. Las configuraciones del usuario no se reemplazan al cargar los defaults.
 
-Selección estructural y frenos independientes, porcentaje exterior editable o celdas, simetría/asimetría y cálculo por posiciones reales. Nuevos modelos parten de 33% exterior por semienvergadura; modelos anteriores preservan datos originales. Se reportan IDs, fijaciones y cobertura efectiva.
-Plantillas directas, transversales, A–B/C–D, combinadas y manuales. Una confluencia BRK por lado; destinos compatibles y continuaciones sin confluencias artificiales para elementos aislados. Validación de ciclo, duplicación, longitud nula y desconexión; informe JSON/CSV junto al modelo. R/b no se redefine por la cascada.
-Previsualización con planta, frontal, lateral y mapa de celdas frenadas; caché dependiente de fuentes y configuración. Preparación Python y macro verificadas sin ejecutar CATIA. La red no constituye una comprobación estructural o de equilibrio CFD–FSI.
+## Configuraciones de partida
 
-## Convergencia RANS y recuperación
+Application Support/Configurations/studio_defaults.json selecciona los archivos de Study Presets. La procedencia identifica la configuración efectiva utilizada, evitando acumular ajustes posteriores sobre un nombre de malla antiguo.
 
-Estudios persistentes por geometría con copias de ajustes efectivos, firma física/numérica, matriz de estados y fuente/hash de resultados. Selecciones de uno/múltiples ángulos, reutilización compatible y creación de casos faltantes. Usa el gestor de recursos y monitores con pausa/continuación; fuerza RANS-only también fuera del equipo principal.
-Doce figuras y CSV: polares y coeficientes frente a N, diferencias por ángulo, referencia fina editable. Puntos ausentes y porcentajes próximos a cero identificados; análisis obsoletos se recalculan. GCI 2D requiere tres mallas admisibles y convergencia iterativa/revisión; pruebas cortas bloqueadas para aceptación.
-Se corrigió el guardado final de RANS cuando su límite de iteraciones es menor que el intervalo de escritura. Las continuaciones conservan campos/numeración; no renumeran ni repiten potentialFoam. RANS-only no traslada prematuramente su contador de iteración a t=0 URANS. Reiniciar y continuar son acciones separadas, con archivo de resultados previos.
+- CAD: dimensiones, forma, suspensión, crossports y opciones del modelo preparado. Los perfiles siguen siendo seleccionables de forma independiente del diseño dimensional.
+- CFD: condición Re=1.9e6 y M=0.15, presión/temperatura de estudio y cuerda CFD 1 m, con propiedades derivadas recalculadas.
+- Malla cerrada general: configuración aprobada de 215058 celdas de origen.
+- Malla abierta optimizada: configuración aprobada de 248180 celdas; abierta estándar: 265520.
+- OpenFOAM: archivos efectivos de solver y fases de los estudios, con ejecución inicial RANS-only y sin renumeración. URANS se elige explícitamente. El arranque abierto nuevo muestra maxCo=1; el archivo de procedencia mantiene el valor histórico del estudio.
+- Postproceso: recuperación de ajustes guardados; en su ausencia, estaciones de pared, 80 muestras por normal, ventana final de 500 muestras RANS y opciones de visualización/exportación del estudio.
 
-## Pruebas reales y evidencia
+Se añaden seis referencias exactas coarse/medium/fine del laboratorio: cerrado 203691/333826/618382 y abierto 223080/302692/502474 celdas. Sus formatos pertenecen al motor legacy de validación y se conservan separados de los presets anidados del mallador general. No se crean mallas ni ejecuciones ficticias para aparentar la existencia de esa campaña en el equipo receptor.
 
-Desde un workspace nuevo se procesó LS1 con TE redondeado, se preparó CAD y se crearon condiciones Re=1.9e6, M=0.15, cuerda 1 m. Se generaron dos mallas reales aprobadas por checkMesh, con 108104 y 155824 celdas; se crearon casos de 0° y 8° y se ejecutaron cuatro RANS acotados.
-La malla coarse se pausó en iteración 22 y continuó hasta 42 para ambos ángulos; medium alcanzó 80. Los hashes de malla mantuvieron el orden de celdas. Los cuatro casos generan postproceso PROCESSED_PARTIAL y doce figuras comparativas. Cl/Cd/Cm siguen transitorios de convergencia; no deben usarse para rendimiento aerodinámico final.
-El recorrido remoto aislado continuó 42→62→82, pausó guardando campos, conservó malla, postprocesó, recogió y verificó el ZIP de retorno e importó en receptor separado. No inició URANS y preservó la clasificación parcial.
-La prueba de recuperación que Windows omite por requerir grupos de procesos Unix se ejecutó adicionalmente en WSL: los tres tests de esa sección aprobaron.
-Las pruebas completas en Windows finalizaron con 428 aprobadas y una omitida porque requiere grupos de procesos Unix, sin warnings. Las once secciones no generaron excepciones ni errores; el laboratorio informa por separado de y+ y del protocolo RANS/URANS. El recálculo de las doce gráficas se verificó desde el menú. La vista de 1366 px y la de 390 px no presentaron desbordamiento de documento ni imágenes rotas. La instalación en una ruta distinta creó un entorno Python nuevo, importó el ejemplo y repitió checkMesh y aprobación de ambas mallas. La evidencia y verificadores de paquete se registran en Evidence/delivery_20260930. La evidencia distingue software, pruebas CFD breves y validación científica; las tablas no declaran independencia con dos mallas.
+## Geometría y mallas comprobadas
 
-## Limpieza y estructura
+Se regeneraron realmente las mallas con los defaults cerrado y abierto optimizado, incluyendo Gmsh, conversión a OpenFOAM y checkMesh. Se reprodujeron 215058 y 248180 celdas, ambas con checkMesh OK.
 
-Se archivaron 501 archivos Windows y 186 WSL históricos/puntuales/bibliográficos y temporales fuera de la aplicación. Todos sus hashes se verificaron contra los inventarios. Estos guardan ruta, hash y razón. No se movieron Workspaces, Results, Data Archive, resultados o checkpoints del usuario. Los temporales y entornos regenerables quedan fuera de Git y paquetes. Current contiene manuales por sección, inventario de módulos/funciones, reglas de mantenimiento e informe vigente.
-Se eliminaron referencias de arranque a informes de septiembre anteriores y se actualizó el panel de informe en Inicio. Instaladores y rutas son configurables; la documentación de recepción no depende de un usuario de Windows concreto.
+| Métrica | Cerrada | Abierta optimizada |
+|---|---:|---:|
+| No ortogonalidad máxima [°] | 42.2286 | 51.8483 |
+| Skewness máxima | 0.651769 | 0.667073 |
+| Determinante mínimo | 0.00881479 | 0.01135534 |
+| Peso de interpolación mínimo | 0.121769 | 0.0857932 |
+| Ratio de volumen mínimo | 0.138652 | 0.0870889 |
 
-## Distribución y GitHub
+La evidencia completa conserva todos los indicadores y comandos. Las métricas describen esas geometrías; cargar un preset en otro perfil no hereda una aprobación. La interfaz mantiene una advertencia de crecimiento tangencial previsto 1.1111 frente a objetivo 1.1 en el ajuste abierto original. No se ocultó ni se modificó silenciosamente la configuración de estudio para eliminarla; la malla regenerada supera los controles geométricos reales. Cualquier refinamiento posterior exige revisar su nueva calidad.
 
-Código, macro, dependencias declaradas, presets, perfiles pequeños y pruebas pertenecen a Application. Example contiene solo la demostración acotada seleccionada. Remote conserva casos y herramientas de ejecución/retorno, sin entornos instalados. Los tres incluyen identidad de release y hash por archivo; SHA256SUMS verifica los archivos enviados.
-Se publica main sin reescribir historia, etiqueta studio-delivery-20260930 y paquetes. CI verifica Python, contratos, contexto, artefactos y manifiestos; las pruebas de WSL/OpenFOAM no se sustituyen por CI genérico.
+## Ejemplo que recibe el usuario
 
-## Límites de aceptación en la empresa
+Example_Open_Polar contiene geometría LS1 optimizada, base sin cortar, malla real de 248180 celdas, configuración RANS_polar_20260913, 26 ángulos preparados entre −5° y 20° y nueve puntos RANS revisados disponibles en el estudio de origen. Se conservan tablas, historias y figuras seleccionadas; no se rellenan ángulos ausentes ni se extrapola la polar.
 
-- CATIA V5: preprocesado y macro preparada; operaciones CATIA reales y licencia pendientes en instalación receptora.
-- Servidor real: procedimiento probado en WSL aislado; hardware, scheduler/políticas y almacenamiento del servidor empresarial pendientes de recepción.
-- CFD: smoke funcional con RANS, no campaña de independencia espacial/temporal ni polar científicamente convergida. La validación del laboratorio y sus datos propios permanecen independientes.
-- Inlets abiertos: un checkMesh correcto no garantiza estabilidad para todo dt ni Reynolds; controlar calidad local, Courant y suficiente producción estable antes de aceptar URANS/FFT/GCI.
-- Transporte: no se distribuyen licencias, programas externos instalados o PDFs sin autorización. El receptor debe instalar dependencias y revalidar las aprobaciones tras importar.
+Los checkpoints volumétricos se omiten. Algunos archivos 0 de origen contenían datos transferidos desde RANS: se archivaron fuera de la entrega y se reconstruyeron campos iniciales coherentes mediante el escritor oficial, con física, ángulo y condiciones de contorno correspondientes. Los casos originales del usuario permanecen intactos. El ejemplo inicia cálculos nuevos; no permite continuar el estado volumétrico de la campaña original.
 
-## Continuidad
+Cada snapshot conserva su etiqueta. RETAINED_RESULTS_ONLY impide recalcular campos desde la condición inicial y sustituir las figuras del estudio por resultados aparentes. Tras una ejecución propia con nuevos campos, el postproceso vuelve a estar disponible, incluidos campos comprimidos U.gz.
 
-Leer README, estructura, AGENTS, contexto y manual de la sección. Guardar la evidencia y el manifiesto del release. Respaldar workspaces aparte. Registrar cambios, repetir pruebas y publicar commits nuevos. Las referencias físicas principales se mantienen en CFD_2D_TECHNICAL_SPECIFICATIONS.txt; Current describe el comportamiento efectivo de la versión entregada.
+Al trasladar los JSON cambian las rutas y sus hashes. El instalador solo adapta las referencias de los puntos tras verificar el paquete y contrastar que Cl/Cd/Cm no hayan cambiado. Conserva el alcance científico original y no otorga una aceptación nueva.
 
-## Correcciones de cierre
+## Instalación y transferencia
 
-El monitor distingue una ejecución activa de un checkpoint recuperable y no deduce RUNNING solo por existir un log. Se eliminó una carrera entre la consulta de trabajos y el cierre de sus archivos de log. Los espectros de señales constantes muestran ausencia de energía positiva sin forzar escalas logarítmicas inválidas. Las referencias de perfiles y presets empaquetados usan rutas relativas; los registros de procedencia no son dependencias de ejecución. Los informes históricos adicionales y temporales se conservan en inventarios externos de limpieza; no forman parte de la distribución.
+INSTALAR_Y_ABRIR verifica contenido, prepara el entorno con el lanzador oficial, incorpora el ejemplo y repite checkMesh si OpenFOAM está disponible. Si una dependencia o comprobación falta, informa y mantiene pendiente la aprobación. ABRIR_RAMAIR recuerda la ubicación elegida. Reinstalar el mismo ejemplo conserva las modificaciones; una colisión de nombre crea otro workspace.
 
-El informe de rendimiento se distribuye desde Current y consulta hardware actual. Los benchmarks históricos son datos opcionales del usuario; su ausencia no es un fallo de instalación. Los indicadores de Courant/dt ausentes se muestran como ausentes. El gestor registra la intención de parada antes de interrumpir el proceso y permite iniciar un nuevo trabajo tras la parada.
+La importación verifica cada objeto único y deduplica únicamente el área temporal. Los archivos finales de los distintos casos siguen siendo copias independientes. Esta mejora evita duplicar innecesariamente varios gigabytes durante la recepción y no introduce enlaces compartidos entre casos que puedan alterar sus mallas al editar otro.
+
+La instalación se probó con un entorno Python nuevo en otra ruta WSL del mismo dispositivo. Se importó el ejemplo, se repitió checkMesh y su aprobación, se comprobaron los 26 campos iniciales, los nueve puntos retenidos y un plan RANS-only de dos ángulos sin ejecutar solver. La prueba no equivale a haber utilizado un segundo dispositivo físico.
+
+## Interfaz, manuales y figuras
+
+Las once secciones se ejercitaron mediante la interfaz automatizada de Streamlit sin excepciones ni errores: Inicio, Casos de trabajo, Perfiles 2D, Geometría CATIA, Caso CFD, Mallado, Caso OpenFOAM, Ejecución, Postproceso, laboratorio y Archivos/logs. La advertencia geométrica original se conserva separada de errores de funcionamiento.
+
+Se añaden 36 figuras de polares estándar/optimizada, comparación y validación, con procedencia y alcance. Inicio y el laboratorio permiten consultarlas sin disponer de las campañas volumétricas. Los manuales 01–14 describen secciones y mantenimiento; 15 explica instalación/primer uso, 16 las operaciones de cada sección y 17 los parámetros efectivos. Los inventarios AST y de funciones se han regenerado.
+
+La revisión visual nativa actual de escritorio y pantalla estrecha no pudo completarse: Computer Use se detuvo al no poder verificar la URL del navegador con suficiente seguridad. No se intentó eludir esa restricción. Las comprobaciones automatizadas de las once páginas sí están completadas; la evidencia visual de septiembre corresponde a aquella versión y no se presenta como verificación visual de estos cambios.
+
+## Pruebas de software y auditoría
+
+La suite final termina con **438 pruebas aprobadas y una omitida**. Las pruebas específicas de entrega/workspaces y contratos de aplicación completaron 29 y 33 pruebas respectivamente. Se comprueban integridad, rutas, conservación de casos, importación idempotente, colisiones, aislamiento de archivos finales, perfiles reubicables, snapshots sin campos, coeficientes tras traslado y recuperación de opciones de postproceso, incluido inicio RANS en cero.
+
+Los auditores de contexto y artefactos están aprobados. Los enlaces locales de los manuales se revisaron sin referencias rotas. El verificador de la entrega comprueba todos los archivos y objetos del ejemplo, compila Python y contrasta commit y manifiestos. El recibo final y SHA-256 del ZIP se generan junto al paquete para identificar la distribución concreta.
+
+La evidencia de código/mallas/instalación está en Evidence/delivery_20261019. Los recibos del ZIP final se adjuntan a la carpeta exterior de verificación, porque incluir su propio hash dentro del código produciría una referencia circular.
+
+## Estructura y continuidad
+
+Git contiene código, defaults, presets, referencias pequeñas, figuras y manuales; los objetos del ejemplo se adjuntan al ZIP descargable. Los workspaces, campos y archivos del usuario permanecen separados. Los informes antiguos sustituidos y las copias auxiliares de preparación se conservan fuera del árbol activo. No se eliminan checkpoints ni campañas existentes del usuario.
+
+Para continuar: leer README, AGENTS, contexto, estructura y manual correspondiente; instalar requirements-development; revisar los contratos afectados; ejecutar pruebas y auditorías; publicar un commit nuevo y reproducir el paquete con el workspace exportado de ese mismo commit. El generador de la entrega rechaza ejemplos de otro commit.
+
+## Límites de recepción
+
+- CATIA no se ejecutó: se preparan macro y datos compatibles. La empresa debe comprobarlos con su instalación y licencia.
+- El servidor empresarial requiere comprobación propia de OpenFOAM, MPI, recursos, almacenamiento y políticas.
+- No se ejecutó una nueva campaña RANS/URANS para empaquetar. Las pruebas reales de solver anteriores conservan su evidencia histórica; los datos retenidos mantienen la revisión original.
+- checkMesh y pruebas de software no acreditan independencia espacial/temporal ni validación aerodinámica universal. Estas se aceptan por caso con resultados suficientes y referencias comparables.
+- La revisión visual actual en navegador queda pendiente por la restricción de la herramienta indicada; no se declara completada.

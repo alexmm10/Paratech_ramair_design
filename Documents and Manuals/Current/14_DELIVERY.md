@@ -1,33 +1,31 @@
-# Entrega a la empresa e instalación
+# Entrega completa a la empresa · 2026.10.19
 
-## Qué enviar
+La entrega actual utiliza **un único ZIP**, RamAir_Studio_20261019_Completo.zip. Sustituye la distribución anterior de aplicación y ejemplo por separado. No se necesita el archivo de desarrollo para instalarla.
 
-Enviar la carpeta de entrega completa con:
+El ZIP contiene INSTALAR_Y_ABRIR y ABRIR_RAMAIR, código DESIGN APP, perfiles existentes, presets de CAD/CFD/mallado/solver/postproceso, manuales, galería y workspace abierto. La instalación incorpora el ejemplo y comprueba su malla cuando dispone de OpenFOAM. Conserva los workspaces previos.
 
-1. **RamAir_Studio_20260930_Application.zip**: código, macro, defaults, bibliotecas pequeñas, presets, pruebas, instaladores y manuales. Es el componente obligatorio.
-2. **RamAir_Studio_20260930_Example.zip**: workspace importable con CAD preparado, perfil cerrado, dos mallas y cuatro ejecuciones RANS breves con sus productos. Sirve para recepción; no aporta polares convergidas.
-3. **RamAir_Studio_20260930_Remote.zip**: casos demostrativos seleccionados para un Linux remoto y scripts de ejecución/pausa/continuación/retorno. Necesario solo para el procedimiento remoto.
-4. **LEEME_ENTREGA.md, DELIVERY_MANIFEST.json y SHA256SUMS.txt**: orden de instalación, versiones, commit y verificación de integridad de los tres paquetes.
+El ejemplo incluye LS1 optimizado, malla de 248180 celdas, configuración y 26 ángulos preparados. Conserva 9 puntos RANS de origen y productos seleccionados. Omite los campos volumétricos finales: permite consultar resultados e iniciar cálculos nuevos desde campos iniciales, pero no continuar la campaña original. Los snapshots se identifican expresamente.
 
-El repositorio y la etiqueta de entrega deben apuntar al commit indicado en el manifiesto. Conservar una copia del paquete publicado. No enviar el árbol completo de desarrollo ni .git, venvs, archivo histórico, PDFs de terceros o campañas del usuario por defecto.
-
-## Equipo receptor
-
-Windows con Python 3 y WSL2 Ubuntu 22.04. Usar carpeta Windows local, con permisos de escritura, y disco Linux para mallas/campos. CATIA V5 y su licencia son externos. OpenFOAM Foundation 14/MPI son necesarios para solver; ParaView para productos visuales; XFOIL para diseño de inlet. Gmsh 4.15.2 y Python se instalan con el bootstrap.
-
-Extraer Application y abrir INSTALL_AND_START_RAMAIR_CFD2D_APP.bat. Si falta WSL, seguir el mensaje e instalar/reiniciar Windows. El instalador puede pedir la contraseña Linux para paquetes del sistema. Debe configurarse el repositorio OpenFOAM oficial si aún no existe. Una instalación sin dependencias abre las funciones disponibles e informa cuáles faltan; no simula sin solver.
-Para elegir otra ruta Linux: `python run_ramair_cfd2d_app.py --install --wsl-project-root ~/ramair_empresa/DESIGN_APP`. Comprobar después con `--check-only` y abrir sin --install. Las dependencias no se copian desde el equipo de desarrollo.
+Los presets guardan parámetros originales y métricas de calidad; no heredan una aprobación para otro perfil. La galería añade 36 figuras de polares, comparación y validación sin duplicar campañas.
 
 ## Recepción
 
-Importar Example desde Casos de trabajo → Trasladar en un workspace nuevo. Repetir checkMesh y aprobar por contenido las mallas importadas antes de nuevas ejecuciones. Verificar vistas CAD, condiciones, malla, generación OpenFOAM, prueba RANS corta y productos. CATIA se ejecuta manualmente si el receptor desea aceptar la macro en su instalación.
-El paquete remoto se extrae aparte y se prueba con la guía 13. Requiere comprobar permisos, MPI, recursos, almacenamiento y políticas del servidor de la empresa. La prueba WSL aislada no sustituye esa recepción.
-El ejemplo de esta entrega usa el nombre `Company_Delivery_20260924`; manténgalo al importar si va a usar el paquete remoto ya preparado, para que su retorno encuentre las mismas configuraciones. Dicho paquete conserva checkpoints RANS: use `bash resume_remote.sh` para ampliarlos, luego `bash postprocess_remote.sh` y `bash collect_results.sh`. `run_remote.sh` omite correctamente las ejecuciones ya terminadas. Para otro workspace, genere un paquete remoto nuevo desde su propio estudio.
+1. Verificar SHA-256 y extraer completamente el ZIP.
+2. Disponer de Python Windows y WSL2 Ubuntu 22.04.
+3. Ejecutar INSTALAR_Y_ABRIR.bat y revisar el diagnóstico de dependencias.
+4. Seleccionar Example_Open_Polar; revisar perfil, CAD, malla, calidad y polar.
+5. Crear otro workspace o configuración para cálculos propios y mantener respaldos independientes.
 
-## Datos científicos propios
+Leer [primer uso](15_FIRST_RUN_AND_DEFAULTS.md), [operaciones por sección](16_USER_OPERATIONS.md) y [parámetros efectivos](17_STUDY_PARAMETER_REFERENCE.md). El informe distingue comprobaciones de software, malla y aceptación científica.
 
-Para enviar una campaña real, exportar su workspace aparte y activar inclusión de resultados si necesita continuar campos. Git guarda software, no esa campaña. Mantener biblioteca compartida y configuración exacta. Las aprobaciones se revisan tras traslado; no reemplazar los datos originales hasta verificar la copia.
+## Equipo receptor
 
-## Actualizar y desarrollar
+CATIA y su licencia son externos. OpenFOAM Foundation 14, MPI, XFOIL y ParaView se instalan para sus funciones específicas; no se distribuyen entornos instalados ni publicaciones de terceros. El bootstrap descarga las dependencias Python que falten.
 
-Conservar Workspaces/Results/Data Archive, instalar la nueva aplicación sobre código o en otra ruta y sincronizar con el lanzador oficial. No mezclar carpetas app/scripts de versiones distintas. Para desarrollo, clonar main, instalar requirements-development, leer AGENTS/contexto, cambiar módulos/contratos juntos y repetir tests/auditorías. Nunca force-push como procedimiento de actualización.
+Los paquetes Linux remotos se generan desde Ejecución para los casos seleccionados; no son una descarga obligatoria adicional. El servidor real requiere recepción independiente de recursos, permisos y políticas.
+
+## Código y mantenimiento
+
+Git contiene código, defaults, presets, perfiles pequeños, figuras y manuales. El ejemplo pesado se adjunta al ZIP descargable, no al árbol Git. Workspaces, Results y Data Archive propios quedan separados de las actualizaciones.
+
+Para reproducir la entrega, exportar un workspace con el mismo commit y ejecutar Application Support/Tools/package_studio_delivery.py. El builder rechaza un ejemplo de otro commit y genera manifiesto y hash. Verificar con verify_studio_delivery.py y repetir la instalación en una ruta limpia. CATIA no se ejecuta en las verificaciones automáticas; el empaquetado no convierte resultados insuficientes en aceptados.

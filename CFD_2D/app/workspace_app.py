@@ -16,6 +16,7 @@ from ramair_workspace import (initialize, workspaces, create_workspace, register
     comparable_setups, compatible_mesh, alpha_name, slug, export_products, new_manifest)
 from ramair_profile_library import catalogue, process_profile, import_geometry
 from ramair_workspace_jobs import queue_manifest
+from ramair_studio_defaults import catalog as defaults_catalog, stage_defaults, preferred_profile
 from ramair_polar_comparison import curate_points, load_polar, polar_metrics, compare_polars
 
 
@@ -248,6 +249,8 @@ def render_catia(root: Path, workspace: Path | None, start_job) -> None:
     parent = st.text_input("Guardar modelos en", str(workspace / "CATIA" if workspace else root / "CATIA/Models"))
     cfg = backend.load_config(root, "project")
     system = read_json(root / "Application Support/Configurations/ramair_catia_system_config.json")
+    cfg = stage_defaults(root, "cad", fallback=cfg)
+    system = stage_defaults(root, "cad_system", fallback=system)
     from ramair_suspension_layout import migrate
     system = migrate(system, new=True)
     from cad_design_controls import canopy_controls, crossport_controls, suspension_controls, stabilizer_controls
@@ -302,10 +305,12 @@ def render_cfd(workspace: Path) -> None:
     st.markdown("Define las condiciones antes de seleccionar la geometría. Todos los perfiles se simulan con cuerda de 1 m; la viscosidad se calcula para satisfacer simultáneamente Reynolds y Mach.")
     name = st.text_input("Nombre de las condiciones", "M015_Re1900000")
     cols = st.columns(4)
-    re = cols[0].number_input("Reynolds", 100., 1e10, 1.9e6, format="%.0f")
-    mach = cols[1].number_input("Mach", .0001, 5., .15, format="%.4f")
-    p = cols[2].number_input("Presión [Pa]", 1., 1e8, 101325.)
-    t = cols[3].number_input("Temperatura [K]", 1., 5000., 288.15)
+    root = Path(__file__).resolve().parents[2]
+    defaults = stage_defaults(root, "case", fallback={})
+    re = cols[0].number_input("Reynolds", 100., 1e10, float(defaults.get("reynolds", 1.9e6)), format="%.0f")
+    mach = cols[1].number_input("Mach", .0001, 5., float(defaults.get("mach", .15)), format="%.4f")
+    p = cols[2].number_input("Presión [Pa]", 1., 1e8, float(defaults.get("pressure_ref_pa", 101325.)))
+    t = cols[3].number_input("Temperatura [K]", 1., 5000., float(defaults.get("temperature_K", 288.15)))
     physical = physical_conditions(re, mach, p, t)
     cols = st.columns(4)
     for col, key, label in zip(cols, ("velocity_m_s", "rho", "mu", "nu"), ("U [m/s]", "ρ [kg/m³]", "μ [Pa·s]", "ν [m²/s]")):
@@ -328,7 +333,7 @@ def select_cfd_geometry(workspace: Path, root: Path, allow_import: bool) -> tupl
         with st.expander("Añadir geometría desde la biblioteca"):
             items = catalogue(root)
             if items:
-                profile = st.selectbox("Perfil 2D", items, format_func=lambda i: f"{i['name']} · {i['topology'].upper()}")
+                profile = st.selectbox("Perfil 2D", items, index=preferred_profile(items, root), format_func=lambda i: f"{i['name']} · {i['topology'].upper()}")
                 bases = [i for i in items if i["topology"] == "closed"]
                 base = st.selectbox("Base sin corte", bases, format_func=lambda i: i["name"]) if profile["topology"] == "open" and bases else None
                 name = st.text_input("Nombre en este caso", profile["name"])
@@ -361,7 +366,13 @@ def render_mesh(root: Path, workspace: Path, start_job) -> None:
     if mesh_rows:
         st.dataframe(mesh_rows, hide_index=True, width="stretch")
     draft = geometry / "Meshes/draft_config.json"
-    presets = [p for p in (root / "Mesh Presets").rglob("*.json") if read_json(p).get("topology", p.stem.split("_")[0]) == top]
+    if not draft.is_file():
+        shipped = stage_defaults(root, "mesh", top)
+        if shipped:
+            write_json(draft, bind_mesh_config(shipped, geometry))
+    presets = [p for p in (root / "Mesh Presets").glob("*.json") if read_json(p).get("topology", p.stem.split("_")[0]) == top]
+    if defaults_catalog(root):
+        st.caption("Borradores nuevos: preset de estudio incluido. Cambiar de preset no cambia una malla aprobada; genera una versión nueva y vuelve a comprobarla.")
     with st.expander("Presets compartidos y configuraciones de otros casos"):
         preset = st.selectbox("Preset compatible", [None, *presets], format_func=lambda p: "Defaults" if p is None else p.stem)
         if st.button("Cargar preset como borrador"):
@@ -422,12 +433,12 @@ def render_solver(root: Path, workspace: Path, start_job) -> None:
         st.info("Genera una malla, comprueba checkMesh y apruébala en Mallado.")
         return
     chosen = st.multiselect("Mallas aprobadas que recibirán esta configuración", meshes, default=meshes[:1], format_func=lambda p: p.name)
-    solver, plan = solver_defaults(root)
+    solver, plan = solver_defaults(root, geometry_context(geometry)["topology"])
     if geometry_context(geometry)["topology"] == "open":
         solver["maxCo"] = plan["maxCo"] = 1.0
         st.info("Arranque abierto: Courant máximo inicial 1. El valor 50 del ejemplo cerrado no es un ajuste general para los labios del corte. Puedes modificarlo tras comprobar estabilidad y resolución temporal.")
     existing = [p for mesh in meshes for p in list_entities(mesh / "OpenFOAM", "solver_setup.json")]
-    source = st.selectbox("Partir de configuración", [None, *existing], format_func=lambda p: "Defaults actuales de Validation" if p is None else f"{p.parent.parent.name}/{p.name}")
+    source = st.selectbox("Partir de configuración", [None, *existing], format_func=lambda p: "Preset de estudio incluido" if p is None else f"{p.parent.parent.name}/{p.name}")
     if source:
         solver, plan = read_json(source / "solver_config.json"), read_json(source / "phase_plan.json")
     revision = str(geometry)+"/"+str(source or "defaults")
@@ -590,6 +601,8 @@ def render_postprocess(root: Path, workspace: Path, start_job) -> None:
     if not setup:
         return
     manifest = read_json(setup / "solver_setup.json")
+    if (setup / "delivery_snapshot.json").is_file():
+        st.info("Ejemplo incluido: conserva la polar, tablas y figuras del estudio de origen. Los campos volumétricos se han omitido. Puede consultar los resultados; para recalcular contornos ejecute primero una simulación nueva desde los campos iniciales.")
     from ramair_simulation_inventory import simulation_inventory
     with st.expander("Simulaciones disponibles", expanded=True):
         available=simulation_inventory(setup)
@@ -598,7 +611,7 @@ def render_postprocess(root: Path, workspace: Path, start_job) -> None:
     with analysis:
         angles = st.multiselect("Ángulos a postprocesar", manifest["angles"], default=manifest["angles"][:1])
         from workspace_postprocess_controls import postprocess_controls
-        options = postprocess_controls()
+        options = postprocess_controls(read_json(setup / "postprocess_options.json") or stage_defaults(root, "postprocess", fallback={}))
         if st.button("Postprocesar selección", disabled=not angles or options is None, type="primary"):
             path = write_json(setup / "postprocess_options.json", options)
             start_job("postprocess", command(root, "postprocess", setup, "--config", path, "--angles", *angles))
@@ -628,7 +641,7 @@ def render_postprocess(root: Path, workspace: Path, start_job) -> None:
                 else:
                     st.caption("Primero copia y verifica los productos que deseas conservar.")
     with polar:
-        stage = st.radio("Resultados de", ["URANS", "RANS"], horizontal=True)
+        stage = st.radio("Resultados de", ["URANS", "RANS"], index=1 if read_json(setup / "solver_config.json").get("execution_controls", {}).get("phase_action") == "rans_only" else 0, horizontal=True)
         if stage == "RANS":
             st.caption("Puede añadir el promedio RANS aunque URANS no exista, sea breve o haya divergido. Revise la estabilidad del tramo RANS: el punto se etiqueta RANS y no acredita convergencia temporal URANS.")
         accepted = st.multiselect("Ángulos para la polar", manifest["angles"])
@@ -758,7 +771,9 @@ def render_application(root: Path, manager, start_job, validation_renderer) -> N
             cols = st.columns(3)
             cols[0].metric("Casos de trabajo", len(items))
             cols[1].metric("Perfiles preparados", len(catalogue(root)))
-            cols[2].metric("Presets de malla", len(list((root / "Mesh Presets").rglob("*.json"))))
+            cols[2].metric("Presets de malla", len(list((root / "Mesh Presets").glob("*.json"))))
+            from workspace_delivery_content import delivery_content
+            delivery_content(root)
             st.markdown("1. Prepara perfiles 2D y su borde de salida.\n2. Crea un caso de trabajo.\n3. Genera modelos CATIA o define condiciones CFD.\n4. Importa geometrías, genera y aprueba mallas.\n5. Prepara OpenFOAM, ejecuta ángulos y compara resultados.")
             if st.button("Verificar entorno e instalaciones"):
                 start_job("environment", backend.environment_command(root))
@@ -791,7 +806,8 @@ def render_application(root: Path, manager, start_job, validation_renderer) -> N
         elif page == "Validation & Convergence Lab":
             validation_renderer(root, start_job)
             with st.expander("Galería permanente de resultados finales"):
-                image_gallery(root / "Validation Gallery", "validation-gallery")
+                from workspace_delivery_content import retained_gallery
+                retained_gallery(root, "validation-gallery")
                 source_folder = st.text_input("Carpeta con figuras finales que quieres conservar", key="gallery-source")
                 if source_folder and Path(source_folder).is_dir():
                     available = sorted(Path(source_folder).glob("*.png"))

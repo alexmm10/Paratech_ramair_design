@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-19",
+  "name": "LS1 Re1.9e6 M0.15 · configuración de estudio",
+  "case": "Study Presets/case.json",
+  "cad": "Study Presets/cad.json",
+  "cad_system": "Study Presets/cad_system.json",
+  "postprocess": "Study Presets/postprocess.json",
+  "mesh": {
+    "closed": "Mesh Presets/closed_medium_R50c_closed_study_215058.json",
+    "open": "Mesh Presets/open_medium_R50c_open_optimized_248180.json"
+  },
+  "solver": {
+    "closed": "Study Presets/solver_closed.json",
+    "open": "Study Presets/solver_open.json"
+  },
+  "phase_plan": {
+    "closed": "Study Presets/phase_plan_closed.json",
+    "open": "Study Presets/phase_plan_open.json"
+  },
+  "preferred_profile_id": "e55d18051db140f0aec8d41b8d8bcb82",
+  "example_name": "Example_Open_Polar",
+  "quality_reference": "Study Presets/mesh_quality_reference.json",
+  "scope": "Editable starting values; existing workspaces/configurations are never overwritten.",
+  "explicit_adjustments": [
+    "Default execution uses rans_only and preserves cell order.",
+    "Open URANS starts with maxCo=1 in the UI; the original solver preset retains the historical study value for provenance."
+  ]
+}

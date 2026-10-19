@@ -1,0 +1,23 @@
+{
+  "run_openfoam_postprocess": true,
+  "automatic_paraview_products": true,
+  "include_rans_stage": true,
+  "wall_profile_analysis": true,
+  "velocity_profile_stations": [
+    0.05,
+    0.1,
+    0.3,
+    0.6,
+    0.9
+  ],
+  "velocity_profile_sample_points": 80,
+  "rans_average_tail_samples": 500,
+  "rans_average_start_iteration": null,
+  "include_paraview_animations": false,
+  "paraview_maximum_frames": 24,
+  "paraview_time_range_s": null,
+  "field_scale_mode": "exact",
+  "export_vtk": false,
+  "export_vtk_all_times": false,
+  "openfoam_postprocess_timeout_s": 600
+}

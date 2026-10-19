@@ -86,6 +86,12 @@ CRITICAL_SOURCE_MEMBERS = (
     "CFD_2D/scripts/ramair_suspension_layout.py",
     "CFD_2D/scripts/ramair_rans_mesh_study.py",
     "CFD_2D/app/workspace_rans_convergence.py",
+    "CFD_2D/scripts/ramair_studio_defaults.py",
+    "CFD_2D/app/workspace_delivery_content.py",
+    "Application Support/Tools/install_studio_bundle.py",
+    "Application Support/Tools/package_studio_delivery.py",
+    "Application Support/Tools/verify_studio_delivery.py",
+    "Application Support/Configurations/studio_defaults.json",
 )
 
 

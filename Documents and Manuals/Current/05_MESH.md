@@ -1,6 +1,6 @@
 # Mallado estándar, presets y aprobación
 
-API 28 · Manual vigente · 2026-09-30.
+API 28 · Manual vigente · 2026-10-19.
 
 ## Motor
 
@@ -29,3 +29,9 @@ Se muestran extremos reales: no ortogonalidad, skewness, determinante, peso de i
 ## Interpretación
 
 checkMesh OK confirma controles geométricos de esa malla. No demuestra independencia espacial ni exactitud aerodinámica. Las revisiones fallidas permanecen identificadas para diagnóstico y comparación.
+
+## Presets incluidos en 2026.10.19
+
+El borrador nuevo cerrado usa el preset de estudio de 215058 celdas de origen. El abierto parte del optimizado de 248180; el estándar de 265520 se selecciona como alternativa. Los tres conservan sus métricas, firma de la configuración de origen y procedencia en Study Presets. Las nuevas geometrías siempre se vuelven a generar y comprobar.
+
+Study Presets/Lab References conserva además las seis configuraciones exactas activas coarse/medium/fine del laboratorio: cerrado 203691/333826/618382 y abierto 223080/302692/502474 celdas. Su formato pertenece al motor de validación legacy; no se mezcla con los presets anidados del flujo general. Son registros de reproducibilidad, no mallas activadas ni ejecuciones ficticias en la nueva instalación.

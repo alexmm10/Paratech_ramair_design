@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "target_deltaT_star": 0.0025,
+  "adjust_time_step": true,
+  "maxCo": 50.0,
+  "max_outer_correctors": 5,
+  "outer_residual_control_enabled": true,
+  "stages": [
+    {
+      "stage": "A",
+      "scheme": "Euler",
+      "dt_factor": 0.25,
+      "duration_time_star": 1.0,
+      "sampling": false
+    },
+    {
+      "stage": "B",
+      "scheme": "Euler",
+      "dt_factor": 0.5,
+      "duration_time_star": 1.0,
+      "sampling": false
+    },
+    {
+      "stage": "C",
+      "scheme": "Euler",
+      "dt_factor": 1.0,
+      "duration_time_star": 2.0,
+      "sampling": false
+    },
+    {
+      "stage": "D",
+      "scheme": "backward",
+      "dt_factor": 1.0,
+      "duration_time_star": 10.0,
+      "sampling": false
+    },
+    {
+      "stage": "E",
+      "scheme": "backward",
+      "dt_factor": 1.0,
+      "duration_time_star": 50.0,
+      "sampling": true
+    }
+  ],
+  "production_stage": "E",
+  "production_start_time_star": 14.0,
+  "total_time_star": 64.0,
+  "average_from_fraction": 0.21875,
+  "phase_d_steady_equivalence": {
+    "enabled": false,
+    "window_time_star": 2.5,
+    "minimum_samples": 200,
+    "mean_difference_tolerance_percent": 0.3,
+    "fluctuation_tolerance_percent": 0.5
+  }
+}

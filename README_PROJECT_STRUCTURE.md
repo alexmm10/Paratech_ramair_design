@@ -1,4 +1,4 @@
-# Estructura vigente · RamAir Studio 2026.09.30
+# Estructura vigente · RamAir Studio 2026.10.19
 
 ```text
 DESIGN APP/
@@ -9,6 +9,7 @@ DESIGN APP/
   Generate_RamAir_Canopy_MAIN.CATScript Macro manual compatible
   Airfoil Profiles/                    Referencias y perfiles compartidos
   Mesh Presets/                        Configuraciones paramétricas reutilizables
+  Study Presets/                       Defaults efectivos y procedencia del estudio
   Validation Gallery/                  Figuras seleccionadas con procedencia
   CATIA/Utilities/                     Verificación y dependencias CAD
   CFD_2D/
@@ -47,3 +48,5 @@ Los archivos obsoletos retirados están fuera de esta estructura: archivo Window
 La fuente Windows puede instalarse en otra ruta; el lanzador elige runtime Linux con `--wsl-project-root`. Los paths de procedencia en evidencia son históricos, no rutas necesarias para instalar.
 
 [Instalación y entrega](Documents%20and%20Manuals/Current/14_DELIVERY.md) · [Manuales](Documents%20and%20Manuals/Current/README.md) · [Informe](Documents%20and%20Manuals/Current/DELIVERY_REPORT.md).
+
+La distribución completa añade una raíz exterior `RamAir_Studio_20261019/` con `INSTALAR_Y_ABRIR.bat`, `ABRIR_RAMAIR.bat`, `LEEME_PRIMERO.md`, `DELIVERY_MANIFEST.json`, el código en `DESIGN APP/` y el workspace exportado en `Content/Example_Open_Polar.zip`. Este contenido de ejemplo se adjunta al ZIP descargable y no al árbol Git.

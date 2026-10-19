@@ -1,4 +1,77 @@
 module,line,symbol,kind
+Application Support/Tools/check_project_context.py,16,require,FunctionDef
+Application Support/Tools/check_project_context.py,22,main,FunctionDef
+Application Support/Tools/check_repository_artifacts.py,17,main,FunctionDef
+Application Support/Tools/generate_code_inventory.py,5,main,FunctionDef
+Application Support/Tools/generate_code_inventory.py,12,main.visit,FunctionDef
+Application Support/Tools/generate_study_reference.py,10,main,FunctionDef
+Application Support/Tools/generate_study_reference.py,22,main.walk,FunctionDef
+Application Support/Tools/generate_study_reference.py,31,main.walk.esc,FunctionDef
+Application Support/Tools/import_ramair_remote_results.py,17,sha256,FunctionDef
+Application Support/Tools/import_ramair_remote_results.py,25,safe_extract,FunctionDef
+Application Support/Tools/import_ramair_remote_results.py,36,read_manifest,FunctionDef
+Application Support/Tools/import_ramair_remote_results.py,44,verify_files,FunctionDef
+Application Support/Tools/import_ramair_remote_results.py,58,monitor_recovery_evidence,FunctionDef
+Application Support/Tools/import_ramair_remote_results.py,100,main,FunctionDef
+Application Support/Tools/import_ramair_remote_results.py,153,main.rebase,FunctionDef
+Application Support/Tools/install_studio_bundle.py,17,sha256,FunctionDef
+Application Support/Tools/install_studio_bundle.py,24,verify_content,FunctionDef
+Application Support/Tools/install_studio_bundle.py,36,relocate_snapshot_points,FunctionDef
+Application Support/Tools/install_studio_bundle.py,61,restore_example,FunctionDef
+Application Support/Tools/install_studio_bundle.py,85,check_example_meshes,FunctionDef
+Application Support/Tools/install_studio_bundle.py,116,main,FunctionDef
+Application Support/Tools/launch_catia_macro.py,21,is_wsl,FunctionDef
+Application Support/Tools/launch_catia_macro.py,28,powershell_executable,FunctionDef
+Application Support/Tools/launch_catia_macro.py,32,decode_windows_stream,FunctionDef
+Application Support/Tools/launch_catia_macro.py,41,run_powershell,FunctionDef
+Application Support/Tools/launch_catia_macro.py,65,windows_path,FunctionDef
+Application Support/Tools/launch_catia_macro.py,82,windows_detection_script,FunctionDef
+Application Support/Tools/launch_catia_macro.py,120,detect_catia,FunctionDef
+Application Support/Tools/launch_catia_macro.py,151,launch_catia,FunctionDef
+Application Support/Tools/launch_catia_macro.py,219,parse_args,FunctionDef
+Application Support/Tools/launch_catia_macro.py,229,main,FunctionDef
+Application Support/Tools/package_ramair_catia_windows.py,53,copy_file,FunctionDef
+Application Support/Tools/package_ramair_catia_windows.py,62,sha256,FunctionDef
+Application Support/Tools/package_ramair_catia_windows.py,70,package_config_file,FunctionDef
+Application Support/Tools/package_ramair_catia_windows.py,91,package_configs,FunctionDef
+Application Support/Tools/package_ramair_catia_windows.py,97,copy_last_run_config,FunctionDef
+Application Support/Tools/package_ramair_catia_windows.py,113,verify_packaged_profile_references,FunctionDef
+Application Support/Tools/package_ramair_catia_windows.py,131,prepare_stage,FunctionDef
+Application Support/Tools/package_ramair_catia_windows.py,237,main,FunctionDef
+Application Support/Tools/package_ramair_project.py,98,console_safe,FunctionDef
+Application Support/Tools/package_ramair_project.py,104,excluded,FunctionDef
+Application Support/Tools/package_ramair_project.py,120,collect_files,FunctionDef
+Application Support/Tools/package_ramair_project.py,145,sha256,FunctionDef
+Application Support/Tools/package_ramair_project.py,153,main,FunctionDef
+Application Support/Tools/package_ramair_remote_execution.py,24,sha256,FunctionDef
+Application Support/Tools/package_ramair_remote_execution.py,32,read_json,FunctionDef
+Application Support/Tools/package_ramair_remote_execution.py,40,case_identity,FunctionDef
+Application Support/Tools/package_ramair_remote_execution.py,54,copy_case,FunctionDef
+Application Support/Tools/package_ramair_remote_execution.py,70,launcher_text,FunctionDef
+Application Support/Tools/package_ramair_remote_execution.py,97,main,FunctionDef
+Application Support/Tools/package_studio_delivery.py,18,checksum,FunctionDef
+Application Support/Tools/package_studio_delivery.py,25,build_bundle,FunctionDef
+Application Support/Tools/package_studio_delivery.py,62,main,FunctionDef
+Application Support/Tools/project_git.py,16,run,FunctionDef
+Application Support/Tools/project_git.py,27,clean,FunctionDef
+Application Support/Tools/project_git.py,31,configured_value,FunctionDef
+Application Support/Tools/project_git.py,35,require_identity,FunctionDef
+Application Support/Tools/project_git.py,47,require_remote,FunctionDef
+Application Support/Tools/project_git.py,55,repository_identity,FunctionDef
+Application Support/Tools/project_git.py,63,invalidate_push_preview,FunctionDef
+Application Support/Tools/project_git.py,67,preview_push,FunctionDef
+Application Support/Tools/project_git.py,84,require_current_push_preview,FunctionDef
+Application Support/Tools/project_git.py,98,main,FunctionDef
+Application Support/Tools/release_identity.py,8,release_identity,FunctionDef
+Application Support/Tools/transfer_studio_workspace.py,12,is_result,FunctionDef
+Application Support/Tools/transfer_studio_workspace.py,16,export_workspace,FunctionDef
+Application Support/Tools/transfer_studio_workspace.py,42,import_workspace,FunctionDef
+Application Support/Tools/transfer_studio_workspace.py,78,import_workspace.rebase,FunctionDef
+Application Support/Tools/transfer_studio_workspace.py,96,main,FunctionDef
+Application Support/Tools/verify_company_delivery.py,22,main,FunctionDef
+Application Support/Tools/verify_studio_delivery.py,13,verify,FunctionDef
+Application Support/Tools/verify_studio_package.py,11,main,FunctionDef
+Application Support/Tools/verify_studio_ui.py,9,main,FunctionDef
 CFD_2D/app/cad_design_controls.py,10,canopy_controls,FunctionDef
 CFD_2D/app/cad_design_controls.py,32,crossport_controls,FunctionDef
 CFD_2D/app/cad_design_controls.py,65,suspension_controls,FunctionDef
@@ -13,13 +86,13 @@ CFD_2D/app/closed_experimental_mesh_page.py,69,render_closed_experimental_mesh,F
 CFD_2D/app/experimental_mesh_comparison.py,13,_read,FunctionDef
 CFD_2D/app/experimental_mesh_comparison.py,21,_number,FunctionDef
 CFD_2D/app/experimental_mesh_comparison.py,31,_metric_payload,FunctionDef
+CFD_2D/app/experimental_mesh_comparison.py,44,_metric_payload.stat,FunctionDef
 CFD_2D/app/experimental_mesh_comparison.py,92,_validation_medium_payload,FunctionDef
 CFD_2D/app/experimental_mesh_comparison.py,145,_highlight_best,FunctionDef
 CFD_2D/app/experimental_mesh_comparison.py,164,_highlight_best_columns,FunctionDef
 CFD_2D/app/experimental_mesh_comparison.py,169,_metric_formatter,FunctionDef
 CFD_2D/app/experimental_mesh_comparison.py,183,render_mesh_quality_comparator,FunctionDef
-CFD_2D/app/experimental_mesh_comparison.py,44,stat,FunctionDef
-CFD_2D/app/experimental_mesh_comparison.py,245,render_table,FunctionDef
+CFD_2D/app/experimental_mesh_comparison.py,245,render_mesh_quality_comparator.render_table,FunctionDef
 CFD_2D/app/gmsh_python_runner.py,18,parse_args,FunctionDef
 CFD_2D/app/gmsh_python_runner.py,31,write_report,FunctionDef
 CFD_2D/app/gmsh_python_runner.py,38,main,FunctionDef
@@ -35,17 +108,17 @@ CFD_2D/app/ls1_validation_page.py,173,_selected_core_count,FunctionDef
 CFD_2D/app/ls1_validation_page.py,208,_write_json_atomic,FunctionDef
 CFD_2D/app/ls1_validation_page.py,222,_raise_json_type,FunctionDef
 CFD_2D/app/ls1_validation_page.py,226,_validation_execution_monitor,FunctionDef
+CFD_2D/app/ls1_validation_page.py,238,_validation_execution_monitor.render,FunctionDef
 CFD_2D/app/ls1_validation_page.py,446,_visible_validation_image,FunctionDef
 CFD_2D/app/ls1_validation_page.py,473,_render_validation_postprocess_results,FunctionDef
+CFD_2D/app/ls1_validation_page.py,491,_render_validation_postprocess_results.render,FunctionDef
 CFD_2D/app/ls1_validation_page.py,571,render_ls1_validation,FunctionDef
-CFD_2D/app/ls1_validation_page.py,238,render,FunctionDef
-CFD_2D/app/ls1_validation_page.py,491,render,FunctionDef
 CFD_2D/app/mesh_workspace_controls.py,10,reset_mesh_editor_state,FunctionDef
 CFD_2D/app/mesh_workspace_controls.py,19,quality_atlas,FunctionDef
 CFD_2D/app/mesh_workspace_controls.py,44,front_controls,FunctionDef
 CFD_2D/app/mesh_workspace_controls.py,57,general_controls,FunctionDef
 CFD_2D/app/mesh_workspace_controls.py,76,exact_quality,FunctionDef
-CFD_2D/app/mesh_workspace_controls.py,80,metric,FunctionDef
+CFD_2D/app/mesh_workspace_controls.py,80,exact_quality.metric,FunctionDef
 CFD_2D/app/open_closed_validation_page.py,43,_read_json,FunctionDef
 CFD_2D/app/open_closed_validation_page.py,51,_points,FunctionDef
 CFD_2D/app/open_closed_validation_page.py,58,_comparison_command,FunctionDef
@@ -64,18 +137,18 @@ CFD_2D/app/parallel_campaign_ui.py,15,_read,FunctionDef
 CFD_2D/app/parallel_campaign_ui.py,23,_write,FunctionDef
 CFD_2D/app/parallel_campaign_ui.py,30,campaign_manifest_path,FunctionDef
 CFD_2D/app/parallel_campaign_ui.py,34,render_parallel_campaign_monitor,FunctionDef
-CFD_2D/app/parallel_campaign_ui.py,56,monitor,FunctionDef
+CFD_2D/app/parallel_campaign_ui.py,56,render_parallel_campaign_monitor.monitor,FunctionDef
 CFD_2D/app/parameter_controls.py,101,info,FunctionDef
 CFD_2D/app/parameter_controls.py,112,reference,FunctionDef
+CFD_2D/app/parameter_controls.py,114,reference.walk,FunctionDef
 CFD_2D/app/parameter_controls.py,128,table,FunctionDef
 CFD_2D/app/parameter_controls.py,147,editor,FunctionDef
 CFD_2D/app/parameter_controls.py,181,group,FunctionDef
 CFD_2D/app/parameter_controls.py,187,optional,FunctionDef
-CFD_2D/app/parameter_controls.py,114,walk,FunctionDef
 CFD_2D/app/performance_report_page.py,19,_json,FunctionDef
 CFD_2D/app/performance_report_page.py,28,_measured_runs,FunctionDef
 CFD_2D/app/performance_report_page.py,55,render_performance_report,FunctionDef
-CFD_2D/app/performance_report_page.py,58,current_hardware,FunctionDef
+CFD_2D/app/performance_report_page.py,58,render_performance_report.current_hardware,FunctionDef
 CFD_2D/app/pyfoam_solver_runner.py,52,SolverDivergenceError,ClassDef
 CFD_2D/app/pyfoam_solver_runner.py,56,_finite_float,FunctionDef
 CFD_2D/app/pyfoam_solver_runner.py,64,divergence_reason_from_line,FunctionDef
@@ -90,19 +163,19 @@ CFD_2D/app/pyfoam_solver_runner.py,222,force_coefficient_divergence_reason,Funct
 CFD_2D/app/pyfoam_solver_runner.py,244,live_monitor_preflight,FunctionDef
 CFD_2D/app/pyfoam_solver_runner.py,266,_force_plot_rows,FunctionDef
 CFD_2D/app/pyfoam_solver_runner.py,279,write_force_monitor_log,FunctionDef
+CFD_2D/app/pyfoam_solver_runner.py,293,write_force_monitor_log.process,FunctionDef
+CFD_2D/app/pyfoam_solver_runner.py,315,write_force_monitor_log.append_rows,FunctionDef
 CFD_2D/app/pyfoam_solver_runner.py,346,write_force_monitor_snapshot,FunctionDef
 CFD_2D/app/pyfoam_solver_runner.py,369,selected_pyfoam_plot_files,FunctionDef
 CFD_2D/app/pyfoam_solver_runner.py,377,run_pyfoam_plot_replay,FunctionDef
 CFD_2D/app/pyfoam_solver_runner.py,411,run_basic,FunctionDef
+CFD_2D/app/pyfoam_solver_runner.py,425,run_basic.RamAirMonitoredRunner,ClassDef
+CFD_2D/app/pyfoam_solver_runner.py,426,run_basic.RamAirMonitoredRunner.lineHandle,FunctionDef
+CFD_2D/app/pyfoam_solver_runner.py,461,run_basic.request_divergence_stop,FunctionDef
+CFD_2D/app/pyfoam_solver_runner.py,489,run_basic.launch_watcher,FunctionDef
 CFD_2D/app/pyfoam_solver_runner.py,585,main,FunctionDef
-CFD_2D/app/pyfoam_solver_runner.py,293,process,FunctionDef
-CFD_2D/app/pyfoam_solver_runner.py,315,append_rows,FunctionDef
-CFD_2D/app/pyfoam_solver_runner.py,425,RamAirMonitoredRunner,ClassDef
-CFD_2D/app/pyfoam_solver_runner.py,461,request_divergence_stop,FunctionDef
-CFD_2D/app/pyfoam_solver_runner.py,628,interrupt_as_keyboard,FunctionDef
-CFD_2D/app/pyfoam_solver_runner.py,426,lineHandle,FunctionDef
-CFD_2D/app/pyfoam_solver_runner.py,639,run_stage,FunctionDef
-CFD_2D/app/pyfoam_solver_runner.py,489,launch_watcher,FunctionDef
+CFD_2D/app/pyfoam_solver_runner.py,628,main.interrupt_as_keyboard,FunctionDef
+CFD_2D/app/pyfoam_solver_runner.py,639,main.run_stage,FunctionDef
 CFD_2D/app/ramair_cfd2d_app.py,34,manager_for,FunctionDef
 CFD_2D/app/ramair_cfd2d_app.py,42,start_job,FunctionDef
 CFD_2D/app/ramair_cfd2d_app.py,61,selected_job,FunctionDef
@@ -114,25 +187,29 @@ CFD_2D/app/ramair_live_monitor.py,77,parent_is_alive,FunctionDef
 CFD_2D/app/ramair_live_monitor.py,89,read_log_tail,FunctionDef
 CFD_2D/app/ramair_live_monitor.py,100,parse_solver_monitor_data,FunctionDef
 CFD_2D/app/ramair_live_monitor.py,105,SolverLogAccumulator,ClassDef
+CFD_2D/app/ramair_live_monitor.py,108,SolverLogAccumulator.__init__,FunctionDef
+CFD_2D/app/ramair_live_monitor.py,116,SolverLogAccumulator.reset,FunctionDef
+CFD_2D/app/ramair_live_monitor.py,123,SolverLogAccumulator._append_line,FunctionDef
+CFD_2D/app/ramair_live_monitor.py,146,SolverLogAccumulator.update,FunctionDef
+CFD_2D/app/ramair_live_monitor.py,165,SolverLogAccumulator.snapshot,FunctionDef
 CFD_2D/app/ramair_live_monitor.py,181,draw_monitor_axes,FunctionDef
 CFD_2D/app/ramair_live_monitor.py,246,write_static_monitor_products,FunctionDef
 CFD_2D/app/ramair_live_monitor.py,360,detect_stage,FunctionDef
 CFD_2D/app/ramair_live_monitor.py,366,write_status,FunctionDef
 CFD_2D/app/ramair_live_monitor.py,373,run_monitor,FunctionDef
 CFD_2D/app/ramair_live_monitor.py,478,parse_args,FunctionDef
-CFD_2D/app/ramair_live_monitor.py,108,__init__,FunctionDef
-CFD_2D/app/ramair_live_monitor.py,116,reset,FunctionDef
-CFD_2D/app/ramair_live_monitor.py,123,_append_line,FunctionDef
-CFD_2D/app/ramair_live_monitor.py,146,update,FunctionDef
-CFD_2D/app/ramair_live_monitor.py,165,snapshot,FunctionDef
 CFD_2D/app/validation_convergence_page.py,51,_records,FunctionDef
 CFD_2D/app/validation_convergence_page.py,60,_read_json,FunctionDef
 CFD_2D/app/validation_convergence_page.py,70,_canonical_urans_rows,FunctionDef
 CFD_2D/app/validation_convergence_page.py,140,_status_badge,FunctionDef
 CFD_2D/app/validation_convergence_page.py,168,_cummings_dt_assignment,FunctionDef
 CFD_2D/app/validation_convergence_page.py,193,_json_panel,FunctionDef
+CFD_2D/app/validation_convergence_page.py,194,_json_panel.render,FunctionDef
 CFD_2D/app/validation_convergence_page.py,211,_plot_inventory,FunctionDef
 CFD_2D/app/validation_convergence_page.py,234,_postprocess_product_browser,FunctionDef
+CFD_2D/app/validation_convergence_page.py,258,_postprocess_product_browser.render_browser,FunctionDef
+CFD_2D/app/validation_convergence_page.py,291,_postprocess_product_browser.render_browser.product_path,FunctionDef
+CFD_2D/app/validation_convergence_page.py,331,_postprocess_product_browser.render_browser.is_paraview_product,FunctionDef
 CFD_2D/app/validation_convergence_page.py,397,_selected_checkpoint,FunctionDef
 CFD_2D/app/validation_convergence_page.py,407,_checkpoint_for_angle,FunctionDef
 CFD_2D/app/validation_convergence_page.py,427,_rans_execution_label,FunctionDef
@@ -142,16 +219,12 @@ CFD_2D/app/validation_convergence_page.py,473,_review_label,FunctionDef
 CFD_2D/app/validation_convergence_page.py,490,_mesh_content,FunctionDef
 CFD_2D/app/validation_convergence_page.py,509,_monitor_charts,FunctionDef
 CFD_2D/app/validation_convergence_page.py,708,_render_live_monitor,FunctionDef
+CFD_2D/app/validation_convergence_page.py,720,_render_live_monitor.monitor_fragment,FunctionDef
 CFD_2D/app/validation_convergence_page.py,778,_save_strategy,FunctionDef
 CFD_2D/app/validation_convergence_page.py,789,_render_rans_execution_menu,FunctionDef
 CFD_2D/app/validation_convergence_page.py,951,render_convergence_lab,FunctionDef
+CFD_2D/app/validation_convergence_page.py,1192,render_convergence_lab.request_pause,FunctionDef
 CFD_2D/app/validation_convergence_page.py,3604,render_validation_convergence_lab,FunctionDef
-CFD_2D/app/validation_convergence_page.py,194,render,FunctionDef
-CFD_2D/app/validation_convergence_page.py,258,render_browser,FunctionDef
-CFD_2D/app/validation_convergence_page.py,720,monitor_fragment,FunctionDef
-CFD_2D/app/validation_convergence_page.py,291,product_path,FunctionDef
-CFD_2D/app/validation_convergence_page.py,331,is_paraview_product,FunctionDef
-CFD_2D/app/validation_convergence_page.py,1192,request_pause,FunctionDef
 CFD_2D/app/validation_plotting.py,31,_downsample,FunctionDef
 CFD_2D/app/validation_plotting.py,38,_robust_limits,FunctionDef
 CFD_2D/app/validation_plotting.py,53,residual_figure,FunctionDef
@@ -168,6 +241,7 @@ CFD_2D/app/workflow_backend.py,194,config_path,FunctionDef
 CFD_2D/app/workflow_backend.py,200,_canonicalize_config_layout_paths,FunctionDef
 CFD_2D/app/workflow_backend.py,228,load_config,FunctionDef
 CFD_2D/app/workflow_backend.py,241,migrate_solver_config_schema,FunctionDef
+CFD_2D/app/workflow_backend.py,247,migrate_solver_config_schema.residual_control,FunctionDef
 CFD_2D/app/workflow_backend.py,327,_write_bytes_atomic,FunctionDef
 CFD_2D/app/workflow_backend.py,339,sync_active_workcase_config,FunctionDef
 CFD_2D/app/workflow_backend.py,439,set_workcase_selection,FunctionDef
@@ -225,9 +299,22 @@ CFD_2D/app/workflow_backend.py,2170,saved_mesh_catalog,FunctionDef
 CFD_2D/app/workflow_backend.py,2254,command_text,FunctionDef
 CFD_2D/app/workflow_backend.py,2259,Job,ClassDef
 CFD_2D/app/workflow_backend.py,2277,JobManager,ClassDef
+CFD_2D/app/workflow_backend.py,2280,JobManager.__init__,FunctionDef
+CFD_2D/app/workflow_backend.py,2286,JobManager._status_path,FunctionDef
+CFD_2D/app/workflow_backend.py,2289,JobManager._write,FunctionDef
+CFD_2D/app/workflow_backend.py,2292,JobManager.start,FunctionDef
+CFD_2D/app/workflow_backend.py,2348,JobManager._wait_and_finalize,FunctionDef
+CFD_2D/app/workflow_backend.py,2368,JobManager.load,FunctionDef
+CFD_2D/app/workflow_backend.py,2371,JobManager.list_jobs,FunctionDef
+CFD_2D/app/workflow_backend.py,2381,JobManager.poll,FunctionDef
+CFD_2D/app/workflow_backend.py,2427,JobManager.mark_stop_requested,FunctionDef
+CFD_2D/app/workflow_backend.py,2434,JobManager.stop,FunctionDef
+CFD_2D/app/workflow_backend.py,2454,JobManager.force_stop,FunctionDef
+CFD_2D/app/workflow_backend.py,2469,JobManager.active_jobs,FunctionDef
 CFD_2D/app/workflow_backend.py,2478,touch_application_heartbeat,FunctionDef
 CFD_2D/app/workflow_backend.py,2508,_write_shutdown_marker,FunctionDef
 CFD_2D/app/workflow_backend.py,2527,start_application_idle_watchdog,FunctionDef
+CFD_2D/app/workflow_backend.py,2550,start_application_idle_watchdog.monitor,FunctionDef
 CFD_2D/app/workflow_backend.py,2569,request_application_shutdown,FunctionDef
 CFD_2D/app/workflow_backend.py,2597,tail_file,FunctionDef
 CFD_2D/app/workflow_backend.py,2604,latest_files,FunctionDef
@@ -239,6 +326,7 @@ CFD_2D/app/workflow_backend.py,2654,_unregister_project_viewer,FunctionDef
 CFD_2D/app/workflow_backend.py,2661,_process_cmdline,FunctionDef
 CFD_2D/app/workflow_backend.py,2668,_process_cwd,FunctionDef
 CFD_2D/app/workflow_backend.py,2675,close_project_viewers,FunctionDef
+CFD_2D/app/workflow_backend.py,2685,close_project_viewers.belongs_to_project,FunctionDef
 CFD_2D/app/workflow_backend.py,2726,_write_checkmesh_paraview_script,FunctionDef
 CFD_2D/app/workflow_backend.py,2899,results_library_locations,FunctionDef
 CFD_2D/app/workflow_backend.py,2911,open_results_library,FunctionDef
@@ -246,58 +334,45 @@ CFD_2D/app/workflow_backend.py,2937,open_local_folder,FunctionDef
 CFD_2D/app/workflow_backend.py,2966,validation_paraview_readiness,FunctionDef
 CFD_2D/app/workflow_backend.py,3066,open_paraview_case,FunctionDef
 CFD_2D/app/workflow_backend.py,3103,open_mesh_viewer,FunctionDef
+CFD_2D/app/workflow_backend.py,3211,open_mesh_viewer.reap_viewer,FunctionDef
 CFD_2D/app/workflow_backend.py,3229,open_validation_mesh_viewer,FunctionDef
 CFD_2D/app/workflow_backend.py,3298,open_checkmesh_problem_viewer,FunctionDef
-CFD_2D/app/workflow_backend.py,247,residual_control,FunctionDef
-CFD_2D/app/workflow_backend.py,2280,__init__,FunctionDef
-CFD_2D/app/workflow_backend.py,2286,_status_path,FunctionDef
-CFD_2D/app/workflow_backend.py,2289,_write,FunctionDef
-CFD_2D/app/workflow_backend.py,2292,start,FunctionDef
-CFD_2D/app/workflow_backend.py,2348,_wait_and_finalize,FunctionDef
-CFD_2D/app/workflow_backend.py,2368,load,FunctionDef
-CFD_2D/app/workflow_backend.py,2371,list_jobs,FunctionDef
-CFD_2D/app/workflow_backend.py,2381,poll,FunctionDef
-CFD_2D/app/workflow_backend.py,2427,mark_stop_requested,FunctionDef
-CFD_2D/app/workflow_backend.py,2434,stop,FunctionDef
-CFD_2D/app/workflow_backend.py,2454,force_stop,FunctionDef
-CFD_2D/app/workflow_backend.py,2469,active_jobs,FunctionDef
-CFD_2D/app/workflow_backend.py,2550,monitor,FunctionDef
-CFD_2D/app/workflow_backend.py,2685,belongs_to_project,FunctionDef
-CFD_2D/app/workflow_backend.py,3211,reap_viewer,FunctionDef
-CFD_2D/app/workflow_backend.py,3421,reap_viewer,FunctionDef
-CFD_2D/app/workspace_app.py,35,image_gallery,FunctionDef
-CFD_2D/app/workspace_app.py,46,profile_preview,FunctionDef
-CFD_2D/app/workspace_app.py,95,command,FunctionDef
-CFD_2D/app/workspace_app.py,99,select_entity,FunctionDef
-CFD_2D/app/workspace_app.py,106,render_workspaces,FunctionDef
-CFD_2D/app/workspace_app.py,160,render_profiles,FunctionDef
-CFD_2D/app/workspace_app.py,240,render_catia,FunctionDef
-CFD_2D/app/workspace_app.py,301,render_cfd,FunctionDef
-CFD_2D/app/workspace_app.py,320,select_cfd_geometry,FunctionDef
-CFD_2D/app/workspace_app.py,342,render_mesh,FunctionDef
-CFD_2D/app/workspace_app.py,408,select_setup,FunctionDef
-CFD_2D/app/workspace_app.py,416,render_solver,FunctionDef
-CFD_2D/app/workspace_app.py,523,phase_result_gallery,FunctionDef
-CFD_2D/app/workspace_app.py,540,render_execution,FunctionDef
-CFD_2D/app/workspace_app.py,549,render_standard_execution,FunctionDef
-CFD_2D/app/workspace_app.py,588,render_postprocess,FunctionDef
-CFD_2D/app/workspace_app.py,724,render_application,FunctionDef
-CFD_2D/app/workspace_app.py,381,scoped_job,FunctionDef
-CFD_2D/app/workspace_app.py,490,apply_time_ceiling,FunctionDef
+CFD_2D/app/workflow_backend.py,3421,open_checkmesh_problem_viewer.reap_viewer,FunctionDef
+CFD_2D/app/workspace_app.py,36,image_gallery,FunctionDef
+CFD_2D/app/workspace_app.py,47,profile_preview,FunctionDef
+CFD_2D/app/workspace_app.py,96,command,FunctionDef
+CFD_2D/app/workspace_app.py,100,select_entity,FunctionDef
+CFD_2D/app/workspace_app.py,107,render_workspaces,FunctionDef
+CFD_2D/app/workspace_app.py,161,render_profiles,FunctionDef
+CFD_2D/app/workspace_app.py,241,render_catia,FunctionDef
+CFD_2D/app/workspace_app.py,304,render_cfd,FunctionDef
+CFD_2D/app/workspace_app.py,325,select_cfd_geometry,FunctionDef
+CFD_2D/app/workspace_app.py,347,render_mesh,FunctionDef
+CFD_2D/app/workspace_app.py,392,render_mesh.scoped_job,FunctionDef
+CFD_2D/app/workspace_app.py,419,select_setup,FunctionDef
+CFD_2D/app/workspace_app.py,427,render_solver,FunctionDef
+CFD_2D/app/workspace_app.py,501,render_solver.apply_time_ceiling,FunctionDef
+CFD_2D/app/workspace_app.py,534,phase_result_gallery,FunctionDef
+CFD_2D/app/workspace_app.py,551,render_execution,FunctionDef
+CFD_2D/app/workspace_app.py,560,render_standard_execution,FunctionDef
+CFD_2D/app/workspace_app.py,599,render_postprocess,FunctionDef
+CFD_2D/app/workspace_app.py,737,render_application,FunctionDef
+CFD_2D/app/workspace_delivery_content.py,8,retained_gallery,FunctionDef
+CFD_2D/app/workspace_delivery_content.py,25,delivery_content,FunctionDef
 CFD_2D/app/workspace_execution_controls.py,13,execution_options,FunctionDef
 CFD_2D/app/workspace_execution_controls.py,75,render_case_monitor,FunctionDef
 CFD_2D/app/workspace_execution_controls.py,111,monitors,FunctionDef
-CFD_2D/app/workspace_execution_controls.py,113,live,FunctionDef
+CFD_2D/app/workspace_execution_controls.py,113,monitors.live,FunctionDef
 CFD_2D/app/workspace_postprocess_controls.py,6,postprocess_controls,FunctionDef
 CFD_2D/app/workspace_rans_convergence.py,9,render,FunctionDef
 CFD_2D/scripts/boundary_layer_estimates.py,14,first_cell_height_from_yplus,FunctionDef
 CFD_2D/scripts/boundary_layer_estimates.py,54,beta_law_coefficient,FunctionDef
+CFD_2D/scripts/boundary_layer_estimates.py,80,beta_law_coefficient.residual,FunctionDef
 CFD_2D/scripts/boundary_layer_estimates.py,106,beta_law_cumulative_distances,FunctionDef
 CFD_2D/scripts/boundary_layer_estimates.py,124,geometric_layers_for_thickness,FunctionDef
 CFD_2D/scripts/boundary_layer_estimates.py,148,geometric_prism_stack_thickness,FunctionDef
 CFD_2D/scripts/boundary_layer_estimates.py,162,turbulent_flat_plate_delta99,FunctionDef
 CFD_2D/scripts/boundary_layer_estimates.py,171,boundary_layer_comparison,FunctionDef
-CFD_2D/scripts/boundary_layer_estimates.py,80,residual,FunctionDef
 CFD_2D/scripts/check_environment.py,26,Check,ClassDef
 CFD_2D/scripts/check_environment.py,47,remediation_for,FunctionDef
 CFD_2D/scripts/check_environment.py,63,module_check,FunctionDef
@@ -385,6 +460,7 @@ CFD_2D/scripts/preprocess_ramair.py,69,np_trapezoid_compat,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,77,_default_project_root,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,395,mm_path_text,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,401,Config,ClassDef
+CFD_2D/scripts/preprocess_ramair.py,494,Config.span_effective_mm,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,500,build_config_from_user_settings,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,603,clamp01,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,607,span_eta,FunctionDef
@@ -395,10 +471,17 @@ CFD_2D/scripts/preprocess_ramair.py,642,chord_anchor_fraction,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,657,planform_chordwise_offset_mm,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,670,make_cell_widths,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,685,write_dxf_r12,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,689,write_dxf_r12.header,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,692,write_dxf_r12.layer,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,695,write_dxf_r12.tables_end,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,698,write_dxf_r12.end,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,701,write_dxf_r12.polyline,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,722,split_profile,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,740,read_profile_branches_for_canopy,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,759,read_profile_branches_for_canopy.branch_to_legacy,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,774,to_catia_points,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,788,make_cell_and_rib_tables,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,836,make_cell_and_rib_tables.add_station,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,920,_interp_z_at_x,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,931,_crossport_x_positions,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,952,_base_crossport_specs,FunctionDef
@@ -415,6 +498,7 @@ CFD_2D/scripts/preprocess_ramair.py,1380,preprocess_profile,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,1440,parse_args,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,1499,_resolve_project_path,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,1504,_apply_default_case_config,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,1519,_apply_default_case_config.resolve_config_path,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,1583,config_with_cli_overrides,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,1717,default_system_config,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,1913,_load_system_json,FunctionDef
@@ -423,10 +507,48 @@ CFD_2D/scripts/preprocess_ramair.py,1927,_deep_get,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,1936,_as_vec,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,1942,maybe_apply_suspension_beta_to_canopy_cfg,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,1969,CanopyGeometry,ClassDef
+CFD_2D/scripts/preprocess_ramair.py,1971,CanopyGeometry.__init__,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,1991,CanopyGeometry._read_params,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2007,CanopyGeometry._section_interp_z,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2014,CanopyGeometry.lower_z_norm,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2017,CanopyGeometry.upper_z_norm,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2020,CanopyGeometry._te_center_norm,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2025,CanopyGeometry._estimate_planform_area_mm2,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2031,CanopyGeometry.central_rib_row,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2035,CanopyGeometry.central_reference_point,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2042,CanopyGeometry.boundary_rib_rows,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2045,CanopyGeometry._arc_radius,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2051,CanopyGeometry._arc_theta,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2056,CanopyGeometry._arc_pivot_z,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2063,CanopyGeometry.transform_local,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2083,CanopyGeometry.transform_profile_point,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2092,CanopyGeometry.lower_anchor_point,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,2096,Node,ClassDef
+CFD_2D/scripts/preprocess_ramair.py,2097,Node.__init__,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2106,Node.p,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2109,Node.to_dict,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,2113,Segment,ClassDef
+CFD_2D/scripts/preprocess_ramair.py,2114,Segment.__init__,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2137,Segment.to_dict,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,2152,StabilizerGeometry,ClassDef
+CFD_2D/scripts/preprocess_ramair.py,2165,StabilizerGeometry.__init__,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2172,StabilizerGeometry.active,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2176,StabilizerGeometry._unit,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2181,StabilizerGeometry.generate,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2192,StabilizerGeometry._surface_point,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2201,StabilizerGeometry._local_basis,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2223,StabilizerGeometry._make_side,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2263,StabilizerGeometry.interpolate_tip_anchor,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,2308,TipSideBulgeGeometry,ClassDef
+CFD_2D/scripts/preprocess_ramair.py,2323,TipSideBulgeGeometry.__init__,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2332,TipSideBulgeGeometry.active,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2336,TipSideBulgeGeometry._unit,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2341,TipSideBulgeGeometry._shape,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2359,TipSideBulgeGeometry._x_grid,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2376,TipSideBulgeGeometry._v_grid,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2382,TipSideBulgeGeometry._outward_dir,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2399,TipSideBulgeGeometry.generate,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2415,TipSideBulgeGeometry._make_side,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,2469,_nodes_to_df,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,2473,_segments_to_df,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,2477,_surfaces_to_df,FunctionDef
@@ -435,10 +557,52 @@ CFD_2D/scripts/preprocess_ramair.py,2489,append_global_params,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,2494,write_stabilizer_outputs,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,2508,write_tip_side_bulge_outputs,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,2525,AnchorGenerator,ClassDef
+CFD_2D/scripts/preprocess_ramair.py,2527,AnchorGenerator.__init__,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2531,AnchorGenerator._enabled_banks,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2542,AnchorGenerator.selected_ribs,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2572,AnchorGenerator._pair_index,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2577,AnchorGenerator.generate,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,2626,SliderPayloadSystem,ClassDef
+CFD_2D/scripts/preprocess_ramair.py,2637,SliderPayloadSystem.__init__,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2649,SliderPayloadSystem._unit,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2654,SliderPayloadSystem.local_vec,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2657,SliderPayloadSystem._theta,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2670,SliderPayloadSystem.slider_dimensions,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2688,SliderPayloadSystem._add_oriented_box,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2706,SliderPayloadSystem.create_for_slider_distance,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,2786,LineNetwork,ClassDef
+CFD_2D/scripts/preprocess_ramair.py,2788,LineNetwork.__init__,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2801,LineNetwork._line_props,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2804,LineNetwork._add_prebuilt_segment,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2809,LineNetwork.add_segment,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2829,LineNetwork._target_for,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2838,LineNetwork._cascade_levels_for_bank,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2849,LineNetwork.build_for_distance,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2912,LineNetwork._anchor_nodes_for_R,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2923,LineNetwork._mean_straight_R_to_confluence,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2930,LineNetwork._mean_path_length,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2949,LineNetwork.solve_geometry_for_R_and_angles,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2972,LineNetwork.solve_geometry_for_R_and_angles.mean_for,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,2996,LineNetwork.compute_unique_exposed_length,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,3012,LineNetwork.compute_sum_of_all_path_lengths,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,3015,LineNetwork._velocity_unit,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,3030,LineNetwork._compute_segment_drag,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,3077,LineNetwork.CD_lines_simple,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,3081,LineNetwork.CD_lines_segmented,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,3084,LineNetwork.max_bifurcation_angle_deg,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,3106,LineNetwork.check_left_right_symmetry,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,3131,LineNetwork._bank_xc,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,3137,LineNetwork._trace_final_target,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,3145,LineNetwork._line_diagnostic_nearest_xc,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,3177,LineNetwork._theta_measured_from_system,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,3214,LineNetwork.rigging_reference_line_metrics,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,3245,LineNetwork.rigging_mu_measured_deg,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,3249,ValidationReport,ClassDef
+CFD_2D/scripts/preprocess_ramair.py,3250,ValidationReport.__init__,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,3257,ValidationReport._checks,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,3279,ValidationReport.rows,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,3341,SuspensionVisualizer,ClassDef
+CFD_2D/scripts/preprocess_ramair.py,3343,SuspensionVisualizer.write_png,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,3392,write_suspension_outputs,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,3433,write_fabric_property_outputs,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,3475,write_suspension_disabled_params,FunctionDef
@@ -475,6 +639,8 @@ CFD_2D/scripts/preprocess_ramair.py,4181,_build_external_profile_variant,Functio
 CFD_2D/scripts/preprocess_ramair.py,4189,_write_dat_2d,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,4207,_write_dxf_2d_edges,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,4220,_segments_intersect_basic,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,4221,_segments_intersect_basic.orient,FunctionDef
+CFD_2D/scripts/preprocess_ramair.py,4223,_segments_intersect_basic.on_seg,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,4235,run_profile_quality_checks,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,4289,_plot_profile_2d,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,4313,_plot_2d_comparison,FunctionDef
@@ -485,97 +651,6 @@ CFD_2D/scripts/preprocess_ramair.py,4399,_write_ross_reference_placeholders,Func
 CFD_2D/scripts/preprocess_ramair.py,4423,write_2d_cae_exports,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,4709,_apply_2d_reference_cli_overrides,FunctionDef
 CFD_2D/scripts/preprocess_ramair.py,4728,main,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,494,span_effective_mm,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,689,header,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,692,layer,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,695,tables_end,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,698,end,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,701,polyline,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,759,branch_to_legacy,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,836,add_station,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,1519,resolve_config_path,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,1971,__init__,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,1991,_read_params,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2007,_section_interp_z,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2014,lower_z_norm,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2017,upper_z_norm,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2020,_te_center_norm,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2025,_estimate_planform_area_mm2,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2031,central_rib_row,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2035,central_reference_point,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2042,boundary_rib_rows,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2045,_arc_radius,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2051,_arc_theta,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2056,_arc_pivot_z,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2063,transform_local,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2083,transform_profile_point,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2092,lower_anchor_point,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2097,__init__,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2106,p,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2109,to_dict,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2114,__init__,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2137,to_dict,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2165,__init__,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2172,active,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2176,_unit,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2181,generate,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2192,_surface_point,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2201,_local_basis,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2223,_make_side,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2263,interpolate_tip_anchor,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2323,__init__,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2332,active,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2336,_unit,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2341,_shape,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2359,_x_grid,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2376,_v_grid,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2382,_outward_dir,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2399,generate,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2415,_make_side,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2527,__init__,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2531,_enabled_banks,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2542,selected_ribs,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2572,_pair_index,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2577,generate,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2637,__init__,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2649,_unit,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2654,local_vec,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2657,_theta,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2670,slider_dimensions,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2688,_add_oriented_box,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2706,create_for_slider_distance,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2788,__init__,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2801,_line_props,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2804,_add_prebuilt_segment,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2809,add_segment,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2829,_target_for,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2838,_cascade_levels_for_bank,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2849,build_for_distance,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2912,_anchor_nodes_for_R,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2923,_mean_straight_R_to_confluence,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2930,_mean_path_length,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2949,solve_geometry_for_R_and_angles,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2996,compute_unique_exposed_length,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,3012,compute_sum_of_all_path_lengths,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,3015,_velocity_unit,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,3030,_compute_segment_drag,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,3077,CD_lines_simple,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,3081,CD_lines_segmented,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,3084,max_bifurcation_angle_deg,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,3106,check_left_right_symmetry,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,3131,_bank_xc,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,3137,_trace_final_target,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,3145,_line_diagnostic_nearest_xc,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,3177,_theta_measured_from_system,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,3214,rigging_reference_line_metrics,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,3245,rigging_mu_measured_deg,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,3250,__init__,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,3257,_checks,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,3279,rows,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,3343,write_png,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,4221,orient,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,4223,on_seg,FunctionDef
-CFD_2D/scripts/preprocess_ramair.py,2972,mean_for,FunctionDef
 CFD_2D/scripts/project_layout.py,49,project_path,FunctionDef
 CFD_2D/scripts/project_layout.py,58,find_project_root,FunctionDef
 CFD_2D/scripts/project_layout.py,70,canonicalize_project_relative,FunctionDef
@@ -605,15 +680,15 @@ CFD_2D/scripts/ramair_2d_checkpoint_integrity.py,131,copied_checkpoint_matches,F
 CFD_2D/scripts/ramair_2d_closed_experimental_mesh.py,64,default_closed_config,FunctionDef
 CFD_2D/scripts/ramair_2d_closed_experimental_mesh.py,146,_merge_config,FunctionDef
 CFD_2D/scripts/ramair_2d_closed_experimental_mesh.py,161,load_closed_geometry,FunctionDef
+CFD_2D/scripts/ramair_2d_closed_experimental_mesh.py,173,load_closed_geometry.branch,FunctionDef
+CFD_2D/scripts/ramair_2d_closed_experimental_mesh.py,206,load_closed_geometry.find_limit,FunctionDef
 CFD_2D/scripts/ramair_2d_closed_experimental_mesh.py,323,build_2d_mesh,FunctionDef
+CFD_2D/scripts/ramair_2d_closed_experimental_mesh.py,357,build_2d_mesh.point_tag,FunctionDef
 CFD_2D/scripts/ramair_2d_closed_experimental_mesh.py,824,generate,FunctionDef
 CFD_2D/scripts/ramair_2d_closed_experimental_mesh.py,899,approve,FunctionDef
 CFD_2D/scripts/ramair_2d_closed_experimental_mesh.py,917,quality_study,FunctionDef
 CFD_2D/scripts/ramair_2d_closed_experimental_mesh.py,985,parse_args,FunctionDef
 CFD_2D/scripts/ramair_2d_closed_experimental_mesh.py,998,main,FunctionDef
-CFD_2D/scripts/ramair_2d_closed_experimental_mesh.py,173,branch,FunctionDef
-CFD_2D/scripts/ramair_2d_closed_experimental_mesh.py,206,find_limit,FunctionDef
-CFD_2D/scripts/ramair_2d_closed_experimental_mesh.py,357,point_tag,FunctionDef
 CFD_2D/scripts/ramair_2d_closed_medium_slowdown_audit.py,38,_iteration_records,FunctionDef
 CFD_2D/scripts/ramair_2d_closed_medium_slowdown_audit.py,80,_numeric_directories,FunctionDef
 CFD_2D/scripts/ramair_2d_closed_medium_slowdown_audit.py,92,audit_slowdown,FunctionDef
@@ -635,6 +710,7 @@ CFD_2D/scripts/ramair_2d_convergence_analysis.py,29,deterministic_run_id,Functio
 CFD_2D/scripts/ramair_2d_convergence_analysis.py,63,effective_h,FunctionDef
 CFD_2D/scripts/ramair_2d_convergence_analysis.py,69,refinement_ratio,FunctionDef
 CFD_2D/scripts/ramair_2d_convergence_analysis.py,75,_bisect_observed_order,FunctionDef
+CFD_2D/scripts/ramair_2d_convergence_analysis.py,89,_bisect_observed_order.residual,FunctionDef
 CFD_2D/scripts/ramair_2d_convergence_analysis.py,110,generalized_gci,FunctionDef
 CFD_2D/scripts/ramair_2d_convergence_analysis.py,167,signal_summary,FunctionDef
 CFD_2D/scripts/ramair_2d_convergence_analysis.py,206,stationarity_blocks,FunctionDef
@@ -643,9 +719,8 @@ CFD_2D/scripts/ramair_2d_convergence_analysis.py,328,relative_percent,FunctionDe
 CFD_2D/scripts/ramair_2d_convergence_analysis.py,332,compare_run_metrics,FunctionDef
 CFD_2D/scripts/ramair_2d_convergence_analysis.py,375,classify_courant,FunctionDef
 CFD_2D/scripts/ramair_2d_convergence_analysis.py,407,compare_pimple_outer_correctors,FunctionDef
-CFD_2D/scripts/ramair_2d_convergence_analysis.py,89,residual,FunctionDef
-CFD_2D/scripts/ramair_2d_convergence_analysis.py,415,optional_difference,FunctionDef
-CFD_2D/scripts/ramair_2d_convergence_analysis.py,425,optional_ratio,FunctionDef
+CFD_2D/scripts/ramair_2d_convergence_analysis.py,415,compare_pimple_outer_correctors.optional_difference,FunctionDef
+CFD_2D/scripts/ramair_2d_convergence_analysis.py,425,compare_pimple_outer_correctors.optional_ratio,FunctionDef
 CFD_2D/scripts/ramair_2d_convergence_decisions.py,22,_finite,FunctionDef
 CFD_2D/scripts/ramair_2d_convergence_decisions.py,30,evidence_eligibility,FunctionDef
 CFD_2D/scripts/ramair_2d_convergence_decisions.py,46,_percent_change,FunctionDef
@@ -764,11 +839,13 @@ CFD_2D/scripts/ramair_2d_mesh_builder.py,1196,ordered_curve_ids,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,1200,curve_ids_for_patch,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,1209,_ordered_closed_loop_point_ids,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,1246,_segments_intersect,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,1247,_segments_intersect.orient,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,1257,count_closed_polyline_self_intersections,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,1277,count_open_polyline_self_intersections,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,1291,count_polyline_cross_intersections,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,1302,_remove_near_duplicate_loop_points,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,1318,_catmull_rom_closed,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,1325,_catmull_rom_closed.tj,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,1349,_smooth_array,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,1356,_adaptive_resample_closed_curve,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,1434,_safe_unit_vector,FunctionDef
@@ -779,6 +856,7 @@ CFD_2D/scripts/ramair_2d_mesh_builder.py,1609,graded_inlet_transition_parameters
 CFD_2D/scripts/ramair_2d_mesh_builder.py,1669,boundary_layer_parameters,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,1732,_curve_point_length,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,1743,audit_curve_connectivity,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,1762,audit_curve_connectivity.coord,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,1864,_target_nodes_for_curve,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,1880,_uniform_closed_curve_node_counts,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,1928,_rotate_closed_ids_to_te,FunctionDef
@@ -788,14 +866,38 @@ CFD_2D/scripts/ramair_2d_mesh_builder.py,2012,_boundary_layer_outer_cell_height_
 CFD_2D/scripts/ramair_2d_mesh_builder.py,2037,_derive_surface_size_from_boundary_layer,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,2081,estimate_boundary_layer_from_yplus_inputs,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,2120,simplify_closed_loop_for_debug,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,2194,simplify_closed_loop_for_debug.nearest_side_index,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,2203,simplify_closed_loop_for_debug.forward_path,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,2264,simplify_closed_loop_for_debug.cyclic_path,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,2337,write_profile_audit,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,2375,write_profile_preprocessing_outputs,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,2389,write_profile_preprocessing_outputs.ordered_xy,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,2459,write_geo_closed,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,3065,_open_wall_coordinate_sections,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,3074,_open_wall_coordinate_sections.sequence,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,3105,_open_wall_coordinate_sections.xy,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,3131,build_base_profile_inlet_arc,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,3171,build_base_profile_inlet_arc.cyclic_path,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,3221,build_base_profile_inlet_arc.smoothstep,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,3252,build_base_profile_inlet_arc.tangent_mismatch_deg,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,3290,write_geo_open_zero_thickness_base_profile,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,4020,write_geo_open_thin_solid,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,4068,write_geo_open_thin_solid.edge_point_sequence,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,4076,write_geo_open_thin_solid.point_xy,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,4079,write_geo_open_thin_solid.orient_sequence,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,4211,write_geo_open_thin_solid.rounded_lip_cap,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,4255,write_geo_open_thin_solid.unit_direction,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,4261,write_geo_open_thin_solid.tangent_bridge_controls,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,4293,write_geo_open_thin_solid.lc_for_midpoint,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,4529,write_geo_open_thin_solid.synthetic_curve_length,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,5304,write_geo_open_diagnostic,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,5336,write_geo_open_diagnostic.point_lc_name,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,5351,write_geo_open_diagnostic.edge_point_sequence,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,5359,write_geo_open_diagnostic.point_xy,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,5365,write_geo_open_diagnostic.orient_sequence,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,5374,write_geo_open_diagnostic.generated_te_cap_sequence,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,5448,write_geo_open_diagnostic.split_open_wall_for_bl,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,5606,write_geo_open_diagnostic.append_internal_curve,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,5975,_stat_block,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,5994,_poly_area_2d,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,6003,_tri_area_3d,FunctionDef
@@ -804,7 +906,10 @@ CFD_2D/scripts/ramair_2d_mesh_builder.py,6017,_poly_angles_deg,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,6034,merge_coincident_msh2_nodes,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,6128,merge_named_msh2_interface_nodes,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,6272,extrude_msh2_surface_one_cell,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,6338,extrude_msh2_surface_one_cell.planar_area,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,6364,extrude_msh2_surface_one_cell.positive_conn,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,6441,parse_msh_v2,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,6491,parse_msh_v2.add_surface_edges,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,6576,_stop_process_group,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,6600,run_command,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,6632,configure_gmsh_api_threads,FunctionDef
@@ -825,7 +930,9 @@ CFD_2D/scripts/ramair_2d_mesh_builder.py,6813,strip_boundary_layer_block_from_ge
 CFD_2D/scripts/ramair_2d_mesh_builder.py,6842,_write_minimal_foam_case,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,6869,_desired_openfoam_boundary_type,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,6878,rewrite_openfoam_boundary_types,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,6883,rewrite_openfoam_boundary_types.repl,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,6903,parse_checkmesh_metrics,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,6907,parse_checkmesh_metrics.to_float,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,6987,update_mesh_counts_from_checkmesh,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,7002,update_boundary_layer_confirmation,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,7031,_read_legacy_vtk_problem_geometry,FunctionDef
@@ -834,6 +941,7 @@ CFD_2D/scripts/ramair_2d_mesh_builder.py,7078,_read_foam_label_set,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,7091,summarize_checkmesh_problem_locations,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,7241,write_checkmesh_problem_location_report,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,7288,run_openfoam_mesh_checks,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_builder.py,7304,run_openfoam_mesh_checks.mirror_converted_polymesh,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,7431,check_existing_openfoam_mesh,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,7498,plot_previews,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,7532,plot_msh_front_surface_preview,FunctionDef
@@ -841,39 +949,6 @@ CFD_2D/scripts/ramair_2d_mesh_builder.py,7626,basic_report,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,7980,build_mesh,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,8633,parse_args,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_builder.py,8692,main,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,1247,orient,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,1325,tj,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,1762,coord,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,2389,ordered_xy,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,3074,sequence,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,3105,xy,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,3171,cyclic_path,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,3252,tangent_mismatch_deg,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,4068,edge_point_sequence,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,4076,point_xy,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,4079,orient_sequence,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,4211,rounded_lip_cap,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,4255,unit_direction,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,4261,tangent_bridge_controls,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,4293,lc_for_midpoint,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,4529,synthetic_curve_length,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,5336,point_lc_name,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,5351,edge_point_sequence,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,5359,point_xy,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,5365,orient_sequence,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,5374,generated_te_cap_sequence,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,5448,split_open_wall_for_bl,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,6338,planar_area,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,6364,positive_conn,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,6491,add_surface_edges,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,6883,repl,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,6907,to_float,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,7304,mirror_converted_polymesh,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,2194,nearest_side_index,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,2203,forward_path,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,2264,cyclic_path,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,3221,smoothstep,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_builder.py,5606,append_internal_curve,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_numerics.py,11,automatic_non_orthogonal_controls,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_numerics.py,32,_read_json,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_numerics.py,40,quality_controls_from_paths,FunctionDef
@@ -933,12 +1008,12 @@ CFD_2D/scripts/ramair_2d_mesh_science.py,115,_run,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_science.py,147,_msh2_counts,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_science.py,184,_rewrite_fixture_boundary,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_science.py,192,_parse_check_mesh,FunctionDef
+CFD_2D/scripts/ramair_2d_mesh_science.py,195,_parse_check_mesh.number,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_science.py,208,_openfoam_check,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_science.py,232,run_fixture_audit,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_science.py,312,build_report,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_science.py,358,parse_args,FunctionDef
 CFD_2D/scripts/ramair_2d_mesh_science.py,369,main,FunctionDef
-CFD_2D/scripts/ramair_2d_mesh_science.py,195,number,FunctionDef
 CFD_2D/scripts/ramair_2d_open_closed_comparison.py,40,_read_json,FunctionDef
 CFD_2D/scripts/ramair_2d_open_closed_comparison.py,47,_read_csv,FunctionDef
 CFD_2D/scripts/ramair_2d_open_closed_comparison.py,60,alpha_directory,FunctionDef
@@ -970,9 +1045,14 @@ CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,219,_endpoint_tangent,Functio
 CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,237,_project_to_polyline,FunctionDef
 CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,268,_polyline_projection_distances,FunctionDef
 CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,279,_recover_open_profile_base_coordinates,FunctionDef
+CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,299,_recover_open_profile_base_coordinates.transform,FunctionDef
+CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,305,_recover_open_profile_base_coordinates.objective,FunctionDef
 CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,368,_hermite_bridge,FunctionDef
+CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,389,_hermite_bridge.bounded_handle,FunctionDef
 CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,419,_canonical_base_inlet,FunctionDef
 CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,628,load_geometry,FunctionDef
+CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,649,load_geometry.branch,FunctionDef
+CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,669,load_geometry.align_to_base,FunctionDef
 CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,801,flat_plate_first_height,FunctionDef
 CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,896,_nearest_increasing_indices,FunctionDef
 CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,909,_wall_segment_boundaries,FunctionDef
@@ -984,8 +1064,10 @@ CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,981,_split_imported_wall_spli
 CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,1004,_add_curve_segments,FunctionDef
 CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,1037,split_shared_wall_baffle_msh2,FunctionDef
 CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,1125,build_2d_mesh,FunctionDef
+CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,1940,build_2d_mesh.interface_guard_fields,FunctionDef
 CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,2321,_read_msh2_edges,FunctionDef
 CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,2344,audit_boundary_layer_mesh,FunctionDef
+CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,2426,audit_boundary_layer_mesh.stats,FunctionDef
 CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,2459,write_previews,FunctionDef
 CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,2482,declare_boundary_layer_metadata,FunctionDef
 CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,2502,confirm_measured_boundary_layer_count,FunctionDef
@@ -995,13 +1077,6 @@ CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,2652,check_existing,FunctionD
 CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,2677,run_quality_study,FunctionDef
 CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,2751,parse_args,FunctionDef
 CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,2767,main,FunctionDef
-CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,299,transform,FunctionDef
-CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,305,objective,FunctionDef
-CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,389,bounded_handle,FunctionDef
-CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,649,branch,FunctionDef
-CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,669,align_to_base,FunctionDef
-CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,2426,stats,FunctionDef
-CFD_2D/scripts/ramair_2d_open_experimental_mesh.py,1940,interface_guard_fields,FunctionDef
 CFD_2D/scripts/ramair_2d_open_light_candidate.py,57,_read_json,FunctionDef
 CFD_2D/scripts/ramair_2d_open_light_candidate.py,64,_factor_tag,FunctionDef
 CFD_2D/scripts/ramair_2d_open_light_candidate.py,68,candidate_variant,FunctionDef
@@ -1084,6 +1159,15 @@ CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,202,prepare_existing_case_dir,F
 CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,229,foam_header,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,240,vec,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,245,OpenFOAMCaseConfig,ClassDef
+CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,317,OpenFOAMCaseConfig.deltaT,FunctionDef
+CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,323,OpenFOAMCaseConfig.maxDeltaT,FunctionDef
+CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,326,OpenFOAMCaseConfig.endTime,FunctionDef
+CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,329,OpenFOAMCaseConfig.field_write_interval,FunctionDef
+CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,337,OpenFOAMCaseConfig.nu,FunctionDef
+CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,340,OpenFOAMCaseConfig.dynamic_pressure_pa,FunctionDef
+CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,343,OpenFOAMCaseConfig.mach_from_velocity,FunctionDef
+CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,346,OpenFOAMCaseConfig.spanwise_thickness_m,FunctionDef
+CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,349,OpenFOAMCaseConfig.reference_area_m2,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,353,topology_solver_config,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,397,optional_float,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,404,optional_int,FunctionDef
@@ -1102,21 +1186,12 @@ CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,1574,write_case_input_summary,F
 CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,1694,write_case,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,1787,parse_args,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,1824,main,FunctionDef
-CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,317,deltaT,FunctionDef
-CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,323,maxDeltaT,FunctionDef
-CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,326,endTime,FunctionDef
-CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,329,field_write_interval,FunctionDef
-CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,337,nu,FunctionDef
-CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,340,dynamic_pressure_pa,FunctionDef
-CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,343,mach_from_velocity,FunctionDef
-CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,346,spanwise_thickness_m,FunctionDef
-CFD_2D/scripts/ramair_2d_openfoam_case_writer.py,349,reference_area_m2,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_log_events.py,53,OpenFOAMEventClassification,ClassDef
+CFD_2D/scripts/ramair_2d_openfoam_log_events.py,68,OpenFOAMEventClassification.as_dict,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_log_events.py,75,classify_openfoam_log,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_log_events.py,148,solver_log_has_fatal_error,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_log_events.py,153,solver_log_indicates_divergence,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_log_events.py,157,solver_log_indicates_setup_error,FunctionDef
-CFD_2D/scripts/ramair_2d_openfoam_log_events.py,68,as_dict,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_runner.py,65,read_json,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_runner.py,70,write_json_atomic,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_runner.py,83,project_root_from_case_root,FunctionDef
@@ -1138,12 +1213,17 @@ CFD_2D/scripts/ramair_2d_openfoam_runner.py,206,numeric_time_dirs,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_runner.py,218,prepare_resume,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_runner.py,317,force_coeffs_available,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_runner.py,322,force_coeff_stability_report,FunctionDef
+CFD_2D/scripts/ramair_2d_openfoam_runner.py,382,force_coeff_stability_report.statistics,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_runner.py,422,monitor_force_coefficient_stability,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_runner.py,471,cleanup_reconstructed_processor_directories,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_runner.py,510,configure_decompose_subdomains,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_runner.py,517,update_control_dict_stop_at,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_runner.py,539,terminate_process_group,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_runner.py,552,run_script_with_timeout,FunctionDef
+CFD_2D/scripts/ramair_2d_openfoam_runner.py,596,run_script_with_timeout.monitor_external_stop_request,FunctionDef
+CFD_2D/scripts/ramair_2d_openfoam_runner.py,669,run_script_with_timeout.finish_monitor,FunctionDef
+CFD_2D/scripts/ramair_2d_openfoam_runner.py,696,run_script_with_timeout.completed_outcome,FunctionDef
+CFD_2D/scripts/ramair_2d_openfoam_runner.py,703,run_script_with_timeout.restore_control_dict,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_runner.py,767,write_script_if_changed,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_runner.py,809,write_run_script,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_runner.py,914,run_stage_evidence,FunctionDef
@@ -1156,11 +1236,6 @@ CFD_2D/scripts/ramair_2d_openfoam_runner.py,1072,record_solver_timing_segment,Fu
 CFD_2D/scripts/ramair_2d_openfoam_runner.py,1125,run_case,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_runner.py,1590,parse_args,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_runner.py,1705,main,FunctionDef
-CFD_2D/scripts/ramair_2d_openfoam_runner.py,382,statistics,FunctionDef
-CFD_2D/scripts/ramair_2d_openfoam_runner.py,596,monitor_external_stop_request,FunctionDef
-CFD_2D/scripts/ramair_2d_openfoam_runner.py,669,finish_monitor,FunctionDef
-CFD_2D/scripts/ramair_2d_openfoam_runner.py,696,completed_outcome,FunctionDef
-CFD_2D/scripts/ramair_2d_openfoam_runner.py,703,restore_control_dict,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_staged_runner.py,73,_hardlink_or_copy,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_staged_runner.py,83,_selected_steady_snapshots,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_staged_runner.py,97,create_steady_paraview_case,FunctionDef
@@ -1176,6 +1251,7 @@ CFD_2D/scripts/ramair_2d_openfoam_staged_runner.py,360,ensure_steady_stability_n
 CFD_2D/scripts/ramair_2d_openfoam_staged_runner.py,470,restore_transient_system,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_staged_runner.py,476,parse_last_initial_residuals,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_staged_runner.py,488,steady_force_plateau,FunctionDef
+CFD_2D/scripts/ramair_2d_openfoam_staged_runner.py,504,steady_force_plateau.coefficient_values,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_staged_runner.py,569,evaluate_steady_transition,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_staged_runner.py,628,_read_field_text,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_staged_runner.py,635,_write_field_text,FunctionDef
@@ -1196,11 +1272,10 @@ CFD_2D/scripts/ramair_2d_openfoam_staged_runner.py,1052,load_pending_state,Funct
 CFD_2D/scripts/ramair_2d_openfoam_staged_runner.py,1066,set_steady_extension,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_staged_runner.py,1107,reset_transient_time_origin,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_staged_runner.py,1128,_phase_d_steady_equivalence,FunctionDef
+CFD_2D/scripts/ramair_2d_openfoam_staged_runner.py,1169,_phase_d_steady_equivalence.values,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_staged_runner.py,1217,run_transient_phase_plan,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_staged_runner.py,1369,parse_args,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_staged_runner.py,1472,main,FunctionDef
-CFD_2D/scripts/ramair_2d_openfoam_staged_runner.py,504,coefficient_values,FunctionDef
-CFD_2D/scripts/ramair_2d_openfoam_staged_runner.py,1169,values,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_sweep.py,16,safe_alpha_dir,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_sweep.py,20,read_json,FunctionDef
 CFD_2D/scripts/ramair_2d_openfoam_sweep.py,27,write_json_atomic,FunctionDef
@@ -1233,8 +1308,8 @@ CFD_2D/scripts/ramair_2d_parallel_campaign.py,18,_read,FunctionDef
 CFD_2D/scripts/ramair_2d_parallel_campaign.py,25,_write,FunctionDef
 CFD_2D/scripts/ramair_2d_parallel_campaign.py,32,_stamp,FunctionDef
 CFD_2D/scripts/ramair_2d_parallel_campaign.py,36,run_campaign,FunctionDef
+CFD_2D/scripts/ramair_2d_parallel_campaign.py,76,run_campaign.stop_all,FunctionDef
 CFD_2D/scripts/ramair_2d_parallel_campaign.py,191,main,FunctionDef
-CFD_2D/scripts/ramair_2d_parallel_campaign.py,76,stop_all,FunctionDef
 CFD_2D/scripts/ramair_2d_parallel_throughput_benchmark.py,16,_numeric_times,FunctionDef
 CFD_2D/scripts/ramair_2d_parallel_throughput_benchmark.py,28,_replace_entry,FunctionDef
 CFD_2D/scripts/ramair_2d_parallel_throughput_benchmark.py,37,_prepare,FunctionDef
@@ -1245,12 +1320,12 @@ CFD_2D/scripts/ramair_2d_parallel_tuner.py,29,_replace_entry,FunctionDef
 CFD_2D/scripts/ramair_2d_parallel_tuner.py,35,_latest_time,FunctionDef
 CFD_2D/scripts/ramair_2d_parallel_tuner.py,46,_prepare_control,FunctionDef
 CFD_2D/scripts/ramair_2d_parallel_tuner.py,63,_copy_case,FunctionDef
+CFD_2D/scripts/ramair_2d_parallel_tuner.py,64,_copy_case.ignore,FunctionDef
 CFD_2D/scripts/ramair_2d_parallel_tuner.py,74,_run,FunctionDef
 CFD_2D/scripts/ramair_2d_parallel_tuner.py,83,_sustained_step_timing,FunctionDef
 CFD_2D/scripts/ramair_2d_parallel_tuner.py,103,tune,FunctionDef
 CFD_2D/scripts/ramair_2d_parallel_tuner.py,266,parse_args,FunctionDef
 CFD_2D/scripts/ramair_2d_parallel_tuner.py,289,main,FunctionDef
-CFD_2D/scripts/ramair_2d_parallel_tuner.py,64,ignore,FunctionDef
 CFD_2D/scripts/ramair_2d_pimple_outer_study.py,45,_safe_dt,FunctionDef
 CFD_2D/scripts/ramair_2d_pimple_outer_study.py,49,_replace_pimple_outer,FunctionDef
 CFD_2D/scripts/ramair_2d_pimple_outer_study.py,68,_foam_entry,FunctionDef
@@ -1268,9 +1343,9 @@ CFD_2D/scripts/ramair_2d_pimple_outer_study.py,338,_measurement_signature,Functi
 CFD_2D/scripts/ramair_2d_pimple_outer_study.py,395,prepare_study,FunctionDef
 CFD_2D/scripts/ramair_2d_pimple_outer_study.py,601,execute_study,FunctionDef
 CFD_2D/scripts/ramair_2d_pimple_outer_study.py,899,analyze_study,FunctionDef
+CFD_2D/scripts/ramair_2d_pimple_outer_study.py,1026,analyze_study.plot_values,FunctionDef
 CFD_2D/scripts/ramair_2d_pimple_outer_study.py,1184,parse_args,FunctionDef
 CFD_2D/scripts/ramair_2d_pimple_outer_study.py,1201,main,FunctionDef
-CFD_2D/scripts/ramair_2d_pimple_outer_study.py,1026,plot_values,FunctionDef
 CFD_2D/scripts/ramair_2d_postprocess.py,44,project_root_from_case_root,FunctionDef
 CFD_2D/scripts/ramair_2d_postprocess.py,55,cfd_root,FunctionDef
 CFD_2D/scripts/ramair_2d_postprocess.py,59,read_json,FunctionDef
@@ -1298,6 +1373,7 @@ CFD_2D/scripts/ramair_2d_postprocess.py,740,detect_simulation_mode,FunctionDef
 CFD_2D/scripts/ramair_2d_postprocess.py,789,prepare_steady_stage_results,FunctionDef
 CFD_2D/scripts/ramair_2d_postprocess.py,1016,mirror_urans_stage_results,FunctionDef
 CFD_2D/scripts/ramair_2d_postprocess.py,1074,run_openfoam_post_exports,FunctionDef
+CFD_2D/scripts/ramair_2d_postprocess.py,1093,run_openfoam_post_exports.field_path,FunctionDef
 CFD_2D/scripts/ramair_2d_postprocess.py,1140,launch_path,FunctionDef
 CFD_2D/scripts/ramair_2d_postprocess.py,1158,launch_paraview,FunctionDef
 CFD_2D/scripts/ramair_2d_postprocess.py,1165,write_visualization_guide,FunctionDef
@@ -1305,7 +1381,6 @@ CFD_2D/scripts/ramair_2d_postprocess.py,1212,ensure_ross_placeholders,FunctionDe
 CFD_2D/scripts/ramair_2d_postprocess.py,1220,postprocess,FunctionDef
 CFD_2D/scripts/ramair_2d_postprocess.py,1762,parse_args,FunctionDef
 CFD_2D/scripts/ramair_2d_postprocess.py,1839,main,FunctionDef
-CFD_2D/scripts/ramair_2d_postprocess.py,1093,field_path,FunctionDef
 CFD_2D/scripts/ramair_2d_postprocess_registry.py,40,product_group,FunctionDef
 CFD_2D/scripts/ramair_2d_postprocess_registry.py,71,field_scale,FunctionDef
 CFD_2D/scripts/ramair_2d_postprocess_registry.py,118,_real_products,FunctionDef
@@ -1370,10 +1445,10 @@ CFD_2D/scripts/ramair_2d_profile_case_builder.py,1013,export_geometry_for_mesher
 CFD_2D/scripts/ramair_2d_profile_case_builder.py,1033,export_case_package,FunctionDef
 CFD_2D/scripts/ramair_2d_profile_case_builder.py,1119,_case_package_readme,FunctionDef
 CFD_2D/scripts/ramair_2d_profile_case_builder.py,1132,run_case_package_validation,FunctionDef
+CFD_2D/scripts/ramair_2d_profile_case_builder.py,1136,run_case_package_validation.add,FunctionDef
 CFD_2D/scripts/ramair_2d_profile_case_builder.py,1169,plot_case_summary,FunctionDef
 CFD_2D/scripts/ramair_2d_profile_case_builder.py,1174,parse_args,FunctionDef
 CFD_2D/scripts/ramair_2d_profile_case_builder.py,1204,main,FunctionDef
-CFD_2D/scripts/ramair_2d_profile_case_builder.py,1136,add,FunctionDef
 CFD_2D/scripts/ramair_2d_rans_accounting.py,30,numeric_iteration_directories,FunctionDef
 CFD_2D/scripts/ramair_2d_rans_accounting.py,51,_iterations_from_log,FunctionDef
 CFD_2D/scripts/ramair_2d_rans_accounting.py,68,authoritative_simple_iteration,FunctionDef
@@ -1383,13 +1458,14 @@ CFD_2D/scripts/ramair_2d_rans_accounting.py,153,convergence_gate_is_allowed,Func
 CFD_2D/scripts/ramair_2d_rans_accounting.py,162,gate_is_due,FunctionDef
 CFD_2D/scripts/ramair_2d_rans_accounting.py,178,classify_simple_exit,FunctionDef
 CFD_2D/scripts/ramair_2d_rans_accounting.py,226,timing_summary,FunctionDef
-CFD_2D/scripts/ramair_2d_rans_accounting.py,312,percentile,FunctionDef
+CFD_2D/scripts/ramair_2d_rans_accounting.py,312,timing_summary.percentile,FunctionDef
 CFD_2D/scripts/ramair_2d_rans_checkpoint_batch.py,81,_primary_alpha,FunctionDef
 CFD_2D/scripts/ramair_2d_rans_checkpoint_batch.py,85,_alpha_token,FunctionDef
 CFD_2D/scripts/ramair_2d_rans_checkpoint_batch.py,92,mesh_angle_id,FunctionDef
 CFD_2D/scripts/ramair_2d_rans_checkpoint_batch.py,105,_base_mesh_id,FunctionDef
 CFD_2D/scripts/ramair_2d_rans_checkpoint_batch.py,109,_checkpoint_alpha,FunctionDef
 CFD_2D/scripts/ramair_2d_rans_checkpoint_batch.py,120,RansCheckpointBlocked,ClassDef
+CFD_2D/scripts/ramair_2d_rans_checkpoint_batch.py,123,RansCheckpointBlocked.__init__,FunctionDef
 CFD_2D/scripts/ramair_2d_rans_checkpoint_batch.py,137,_mesh,FunctionDef
 CFD_2D/scripts/ramair_2d_rans_checkpoint_batch.py,145,_checkpoint_root,FunctionDef
 CFD_2D/scripts/ramair_2d_rans_checkpoint_batch.py,149,migrate_legacy_checkpoint_angle_labels,FunctionDef
@@ -1445,13 +1521,12 @@ CFD_2D/scripts/ramair_2d_rans_checkpoint_batch.py,2955,checkpoint_table,Function
 CFD_2D/scripts/ramair_2d_rans_checkpoint_batch.py,2982,recover_premature_exit_metadata,FunctionDef
 CFD_2D/scripts/ramair_2d_rans_checkpoint_batch.py,3132,parse_args,FunctionDef
 CFD_2D/scripts/ramair_2d_rans_checkpoint_batch.py,3167,main,FunctionDef
-CFD_2D/scripts/ramair_2d_rans_checkpoint_batch.py,123,__init__,FunctionDef
 CFD_2D/scripts/ramair_2d_rans_full_postprocess.py,14,main,FunctionDef
 CFD_2D/scripts/ramair_2d_rans_paraview_final.py,23,_times,FunctionDef
 CFD_2D/scripts/ramair_2d_rans_paraview_final.py,39,prepare_final_state,FunctionDef
 CFD_2D/scripts/ramair_2d_rans_paraview_final.py,129,resolve_final_vtk_artifacts,FunctionDef
+CFD_2D/scripts/ramair_2d_rans_paraview_final.py,149,resolve_final_vtk_artifacts.collect,FunctionDef
 CFD_2D/scripts/ramair_2d_rans_paraview_final.py,226,main,FunctionDef
-CFD_2D/scripts/ramair_2d_rans_paraview_final.py,149,collect,FunctionDef
 CFD_2D/scripts/ramair_2d_rans_paraview_inventory.py,19,main,FunctionDef
 CFD_2D/scripts/ramair_2d_rans_plateau_gate.py,27,_finite_float,FunctionDef
 CFD_2D/scripts/ramair_2d_rans_plateau_gate.py,35,canonical_residual_field,FunctionDef
@@ -1493,27 +1568,27 @@ CFD_2D/scripts/ramair_2d_reference_extend_study.py,16,_read,FunctionDef
 CFD_2D/scripts/ramair_2d_reference_extend_study.py,20,_jsonable,FunctionDef
 CFD_2D/scripts/ramair_2d_reference_extend_study.py,30,_run_variant,FunctionDef
 CFD_2D/scripts/ramair_2d_reference_extend_study.py,75,run,FunctionDef
+CFD_2D/scripts/ramair_2d_reference_extend_study.py,79,run.configure_closed,FunctionDef
+CFD_2D/scripts/ramair_2d_reference_extend_study.py,88,run.configure_open,FunctionDef
 CFD_2D/scripts/ramair_2d_reference_extend_study.py,128,run_open_diagnostics,FunctionDef
+CFD_2D/scripts/ramair_2d_reference_extend_study.py,131,run_open_diagnostics.configure,FunctionDef
+CFD_2D/scripts/ramair_2d_reference_extend_study.py,134,run_open_diagnostics.configure.apply,FunctionDef
 CFD_2D/scripts/ramair_2d_reference_extend_study.py,181,run_open_final,FunctionDef
+CFD_2D/scripts/ramair_2d_reference_extend_study.py,185,run_open_final.configure,FunctionDef
 CFD_2D/scripts/ramair_2d_reference_extend_study.py,214,main,FunctionDef
-CFD_2D/scripts/ramair_2d_reference_extend_study.py,79,configure_closed,FunctionDef
-CFD_2D/scripts/ramair_2d_reference_extend_study.py,88,configure_open,FunctionDef
-CFD_2D/scripts/ramair_2d_reference_extend_study.py,131,configure,FunctionDef
-CFD_2D/scripts/ramair_2d_reference_extend_study.py,185,configure,FunctionDef
-CFD_2D/scripts/ramair_2d_reference_extend_study.py,134,apply,FunctionDef
 CFD_2D/scripts/ramair_2d_run_lease.py,15,_utc_stamp,FunctionDef
 CFD_2D/scripts/ramair_2d_run_lease.py,21,_atomic_json,FunctionDef
 CFD_2D/scripts/ramair_2d_run_lease.py,33,_pid_is_alive,FunctionDef
 CFD_2D/scripts/ramair_2d_run_lease.py,63,_process_command,FunctionDef
 CFD_2D/scripts/ramair_2d_run_lease.py,75,_command_hash,FunctionDef
 CFD_2D/scripts/ramair_2d_run_lease.py,80,DuplicateExecutionError,ClassDef
+CFD_2D/scripts/ramair_2d_run_lease.py,83,DuplicateExecutionError.__init__,FunctionDef
 CFD_2D/scripts/ramair_2d_run_lease.py,91,RunLease,ClassDef
+CFD_2D/scripts/ramair_2d_run_lease.py,97,RunLease.heartbeat,FunctionDef
+CFD_2D/scripts/ramair_2d_run_lease.py,109,RunLease.release,FunctionDef
+CFD_2D/scripts/ramair_2d_run_lease.py,134,RunLease.__enter__,FunctionDef
+CFD_2D/scripts/ramair_2d_run_lease.py,137,RunLease.__exit__,FunctionDef
 CFD_2D/scripts/ramair_2d_run_lease.py,144,acquire_run_lease,FunctionDef
-CFD_2D/scripts/ramair_2d_run_lease.py,83,__init__,FunctionDef
-CFD_2D/scripts/ramair_2d_run_lease.py,97,heartbeat,FunctionDef
-CFD_2D/scripts/ramair_2d_run_lease.py,109,release,FunctionDef
-CFD_2D/scripts/ramair_2d_run_lease.py,134,__enter__,FunctionDef
-CFD_2D/scripts/ramair_2d_run_lease.py,137,__exit__,FunctionDef
 CFD_2D/scripts/ramair_2d_scale_validation_geometry.py,26,read_json,FunctionDef
 CFD_2D/scripts/ramair_2d_scale_validation_geometry.py,33,write_json,FunctionDef
 CFD_2D/scripts/ramair_2d_scale_validation_geometry.py,37,scale_points,FunctionDef
@@ -1583,13 +1658,13 @@ CFD_2D/scripts/ramair_2d_study_registry.py,975,synchronize_run_matrix_solver_con
 CFD_2D/scripts/ramair_2d_study_registry.py,1008,build_run_matrix,FunctionDef
 CFD_2D/scripts/ramair_2d_study_registry.py,1105,set_run_matrix_preset,FunctionDef
 CFD_2D/scripts/ramair_2d_study_registry.py,1207,initialize_study,FunctionDef
+CFD_2D/scripts/ramair_2d_study_registry.py,1253,initialize_study.stale_campaign_angle,FunctionDef
 CFD_2D/scripts/ramair_2d_study_registry.py,1356,load_study,FunctionDef
 CFD_2D/scripts/ramair_2d_study_registry.py,1386,select_mesh,FunctionDef
 CFD_2D/scripts/ramair_2d_study_registry.py,1413,update_run_status,FunctionDef
 CFD_2D/scripts/ramair_2d_study_registry.py,1434,archive_existing,FunctionDef
 CFD_2D/scripts/ramair_2d_study_registry.py,1449,hardlink_tree,FunctionDef
-CFD_2D/scripts/ramair_2d_study_registry.py,1456,copy_function,FunctionDef
-CFD_2D/scripts/ramair_2d_study_registry.py,1253,stale_campaign_angle,FunctionDef
+CFD_2D/scripts/ramair_2d_study_registry.py,1456,hardlink_tree.copy_function,FunctionDef
 CFD_2D/scripts/ramair_2d_temporal_budget.py,34,operating_condition,FunctionDef
 CFD_2D/scripts/ramair_2d_temporal_budget.py,60,time_scales,FunctionDef
 CFD_2D/scripts/ramair_2d_temporal_budget.py,75,samples_per_cycle,FunctionDef
@@ -1610,6 +1685,8 @@ CFD_2D/scripts/ramair_2d_timestep_advisor.py,461,main,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_cases.py,36,CasePresence,ClassDef
 CFD_2D/scripts/ramair_2d_urans_cases.py,41,ExecutionOutcome,ClassDef
 CFD_2D/scripts/ramair_2d_urans_cases.py,50,CanonicalCaseError,ClassDef
+CFD_2D/scripts/ramair_2d_urans_cases.py,53,CanonicalCaseError.__init__,FunctionDef
+CFD_2D/scripts/ramair_2d_urans_cases.py,66,CanonicalCaseError.as_dict,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_cases.py,75,_finite_positive,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_cases.py,82,_decimal_token,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_cases.py,92,_alpha_token,FunctionDef
@@ -1626,6 +1703,7 @@ CFD_2D/scripts/ramair_2d_urans_cases.py,199,restart_time_evidence,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_cases.py,252,complete_time_history,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_cases.py,298,solver_started_evidence,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_cases.py,331,compatibility_hashes,FunctionDef
+CFD_2D/scripts/ramair_2d_urans_cases.py,337,compatibility_hashes.digest,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_cases.py,353,_outcome_from_status,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_cases.py,378,inspect_canonical_case,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_cases.py,439,calculated_action,FunctionDef
@@ -1645,9 +1723,6 @@ CFD_2D/scripts/ramair_2d_urans_cases.py,725,quick_check_paths,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_cases.py,734,create_quick_check_sandbox,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_cases.py,740,finalize_quick_check,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_cases.py,771,reconcile_quick_check_sandboxes,FunctionDef
-CFD_2D/scripts/ramair_2d_urans_cases.py,53,__init__,FunctionDef
-CFD_2D/scripts/ramair_2d_urans_cases.py,66,as_dict,FunctionDef
-CFD_2D/scripts/ramair_2d_urans_cases.py,337,digest,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_contract.py,78,normalize_start_mode,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_matrix_manager.py,68,is_global_queue_failure,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_matrix_manager.py,75,queue_paths,FunctionDef
@@ -1670,6 +1745,11 @@ CFD_2D/scripts/ramair_2d_urans_review.py,183,_stage_window,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_review.py,204,_select_analysis_window,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_review.py,221,longest_stationary_tail,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_review.py,256,_maximum_normal_thickness,FunctionDef
+CFD_2D/scripts/ramair_2d_urans_review.py,271,_maximum_normal_thickness.collapse,FunctionDef
+CFD_2D/scripts/ramair_2d_urans_review.py,290,_maximum_normal_thickness.upper_at,FunctionDef
+CFD_2D/scripts/ramair_2d_urans_review.py,293,_maximum_normal_thickness.lower_at,FunctionDef
+CFD_2D/scripts/ramair_2d_urans_review.py,296,_maximum_normal_thickness.crossing,FunctionDef
+CFD_2D/scripts/ramair_2d_urans_review.py,304,_maximum_normal_thickness.crossing.residual,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_review.py,339,_profile_thickness_m,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_review.py,367,_write_review_plots,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_review.py,487,executed_analysis_plan,FunctionDef
@@ -1678,11 +1758,6 @@ CFD_2D/scripts/ramair_2d_urans_review.py,537,review_run,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_review.py,714,set_review_decision,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_review.py,781,parse_args,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_review.py,793,main,FunctionDef
-CFD_2D/scripts/ramair_2d_urans_review.py,271,collapse,FunctionDef
-CFD_2D/scripts/ramair_2d_urans_review.py,290,upper_at,FunctionDef
-CFD_2D/scripts/ramair_2d_urans_review.py,293,lower_at,FunctionDef
-CFD_2D/scripts/ramair_2d_urans_review.py,296,crossing,FunctionDef
-CFD_2D/scripts/ramair_2d_urans_review.py,304,residual,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_transition_verification.py,22,_phase_scalar_metrics,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_transition_verification.py,38,_copy_definition,FunctionDef
 CFD_2D/scripts/ramair_2d_urans_transition_verification.py,50,_configure_urans_dictionaries,FunctionDef
@@ -1697,19 +1772,19 @@ CFD_2D/scripts/ramair_2d_validation.py,133,collect_ramair_points,FunctionDef
 CFD_2D/scripts/ramair_2d_validation.py,175,_series_style,FunctionDef
 CFD_2D/scripts/ramair_2d_validation.py,184,_style_reference,FunctionDef
 CFD_2D/scripts/ramair_2d_validation.py,190,validation_percentage_errors,FunctionDef
+CFD_2D/scripts/ramair_2d_validation.py,220,validation_percentage_errors.interpolate_inside,FunctionDef
+CFD_2D/scripts/ramair_2d_validation.py,225,validation_percentage_errors.percentage_error,FunctionDef
 CFD_2D/scripts/ramair_2d_validation.py,281,write_validation_error_products,FunctionDef
 CFD_2D/scripts/ramair_2d_validation.py,316,polar_reference_error_statistics,FunctionDef
+CFD_2D/scripts/ramair_2d_validation.py,342,polar_reference_error_statistics.interpolate_inside,FunctionDef
 CFD_2D/scripts/ramair_2d_validation.py,455,write_polar_reference_error_products,FunctionDef
+CFD_2D/scripts/ramair_2d_validation.py,525,write_polar_reference_error_products.grouped_bar,FunctionDef
 CFD_2D/scripts/ramair_2d_validation.py,581,generate_validation_report,FunctionDef
 CFD_2D/scripts/ramair_2d_validation.py,782,active_validation_workspace,FunctionDef
 CFD_2D/scripts/ramair_2d_validation.py,800,update_active_workspace_validation,FunctionDef
 CFD_2D/scripts/ramair_2d_validation.py,911,remove_active_workspace_validation,FunctionDef
 CFD_2D/scripts/ramair_2d_validation.py,952,parse_args,FunctionDef
 CFD_2D/scripts/ramair_2d_validation.py,965,main,FunctionDef
-CFD_2D/scripts/ramair_2d_validation.py,220,interpolate_inside,FunctionDef
-CFD_2D/scripts/ramair_2d_validation.py,225,percentage_error,FunctionDef
-CFD_2D/scripts/ramair_2d_validation.py,342,interpolate_inside,FunctionDef
-CFD_2D/scripts/ramair_2d_validation.py,525,grouped_bar,FunctionDef
 CFD_2D/scripts/ramair_2d_validation_campaigns.py,71,_sha256_json,FunctionDef
 CFD_2D/scripts/ramair_2d_validation_campaigns.py,81,_angle_token,FunctionDef
 CFD_2D/scripts/ramair_2d_validation_campaigns.py,87,campaign_id,FunctionDef
@@ -1770,11 +1845,11 @@ CFD_2D/scripts/ramair_2d_validation_report.py,826,_rans_scalar_change_records,Fu
 CFD_2D/scripts/ramair_2d_validation_report.py,902,_trend,FunctionDef
 CFD_2D/scripts/ramair_2d_validation_report.py,915,_rans_trend_records,FunctionDef
 CFD_2D/scripts/ramair_2d_validation_report.py,938,_plot_rans_spatial_suite,FunctionDef
+CFD_2D/scripts/ramair_2d_validation_report.py,958,_plot_rans_spatial_suite.save,FunctionDef
+CFD_2D/scripts/ramair_2d_validation_report.py,987,_plot_rans_spatial_suite.change_plot,FunctionDef
 CFD_2D/scripts/ramair_2d_validation_report.py,1066,_plot_rans_spatial,FunctionDef
 CFD_2D/scripts/ramair_2d_validation_report.py,1132,_plot_rans_wall_metrics,FunctionDef
 CFD_2D/scripts/ramair_2d_validation_report.py,1172,generate_study_report,FunctionDef
-CFD_2D/scripts/ramair_2d_validation_report.py,958,save,FunctionDef
-CFD_2D/scripts/ramair_2d_validation_report.py,987,change_plot,FunctionDef
 CFD_2D/scripts/ramair_2d_validation_schema9_migration.py,33,migration_paths,FunctionDef
 CFD_2D/scripts/ramair_2d_validation_schema9_migration.py,42,_tree_fingerprint,FunctionDef
 CFD_2D/scripts/ramair_2d_validation_schema9_migration.py,62,_assert_no_live_execution,FunctionDef
@@ -1852,6 +1927,7 @@ CFD_2D/scripts/ramair_cad_diagnostics.py,18,diagnostic_plots,FunctionDef
 CFD_2D/scripts/ramair_case_library.py,53,_canonical_signature,FunctionDef
 CFD_2D/scripts/ramair_case_library.py,64,_as_optional_bool,FunctionDef
 CFD_2D/scripts/ramair_case_library.py,77,geometry_identity,FunctionDef
+CFD_2D/scripts/ramair_case_library.py,95,geometry_identity.first,FunctionDef
 CFD_2D/scripts/ramair_case_library.py,118,safe_alpha_dir,FunctionDef
 CFD_2D/scripts/ramair_case_library.py,122,safe_case_name,FunctionDef
 CFD_2D/scripts/ramair_case_library.py,129,safe_package_name,FunctionDef
@@ -1884,7 +1960,6 @@ CFD_2D/scripts/ramair_case_library.py,1085,approve_stage_package,FunctionDef
 CFD_2D/scripts/ramair_case_library.py,1119,migrate_work_case_library,FunctionDef
 CFD_2D/scripts/ramair_case_library.py,1131,list_cases,FunctionDef
 CFD_2D/scripts/ramair_case_library.py,1146,main,FunctionDef
-CFD_2D/scripts/ramair_case_library.py,95,first,FunctionDef
 CFD_2D/scripts/ramair_cfd2d_workflow_tool.py,84,read_json,FunctionDef
 CFD_2D/scripts/ramair_cfd2d_workflow_tool.py,93,write_json,FunctionDef
 CFD_2D/scripts/ramair_cfd2d_workflow_tool.py,98,deep_merge,FunctionDef
@@ -1933,13 +2008,13 @@ CFD_2D/scripts/ramair_execution_control.py,536,reconcile_solver_record,FunctionD
 CFD_2D/scripts/ramair_frequency_analysis.py,8,uniform_signals,FunctionDef
 CFD_2D/scripts/ramair_frequency_analysis.py,27,peak_records,FunctionDef
 CFD_2D/scripts/ramair_frequency_analysis.py,45,analyze_frequency,FunctionDef
+CFD_2D/scripts/ramair_frequency_analysis.py,58,analyze_frequency.table,FunctionDef
 CFD_2D/scripts/ramair_frequency_analysis.py,69,export_frequency_analysis,FunctionDef
 CFD_2D/scripts/ramair_frequency_analysis.py,108,comparison_figures,FunctionDef
 CFD_2D/scripts/ramair_frequency_analysis.py,153,paired_lift_psd_figure,FunctionDef
-CFD_2D/scripts/ramair_frequency_analysis.py,58,table,FunctionDef
 CFD_2D/scripts/ramair_front_sizing.py,13,front_samples,FunctionDef
 CFD_2D/scripts/ramair_front_sizing.py,30,install_front_size_callback,FunctionDef
-CFD_2D/scripts/ramair_front_sizing.py,68,callback,FunctionDef
+CFD_2D/scripts/ramair_front_sizing.py,68,install_front_size_callback.callback,FunctionDef
 CFD_2D/scripts/ramair_geometry_workspace.py,33,_atomic_json,FunctionDef
 CFD_2D/scripts/ramair_geometry_workspace.py,40,_relative,FunctionDef
 CFD_2D/scripts/ramair_geometry_workspace.py,44,_profile_roles,FunctionDef
@@ -1951,9 +2026,9 @@ CFD_2D/scripts/ramair_geometry_workspace.py,163,crossport_specs,FunctionDef
 CFD_2D/scripts/ramair_geometry_workspace.py,191,geometry_dto,FunctionDef
 CFD_2D/scripts/ramair_geometry_workspace.py,233,preview_series,FunctionDef
 CFD_2D/scripts/ramair_hardware.py,10,hardware_snapshot,FunctionDef
+CFD_2D/scripts/ramair_hardware.py,13,hardware_snapshot.cpu_ticks,FunctionDef
+CFD_2D/scripts/ramair_hardware.py,27,hardware_snapshot.version,FunctionDef
 CFD_2D/scripts/ramair_hardware.py,54,aggregate_throughput,FunctionDef
-CFD_2D/scripts/ramair_hardware.py,13,cpu_ticks,FunctionDef
-CFD_2D/scripts/ramair_hardware.py,27,version,FunctionDef
 CFD_2D/scripts/ramair_manual_rigging.py,6,apply_manual_network,FunctionDef
 CFD_2D/scripts/ramair_manual_rigging.py,57,line_path_audit,FunctionDef
 CFD_2D/scripts/ramair_mesh_quality_atlas.py,34,native_export,FunctionDef
@@ -1961,19 +2036,19 @@ CFD_2D/scripts/ramair_mesh_quality_atlas.py,57,polygon,FunctionDef
 CFD_2D/scripts/ramair_mesh_quality_atlas.py,60,maps,FunctionDef
 CFD_2D/scripts/ramair_mesh_quality_atlas.py,129,generate,FunctionDef
 CFD_2D/scripts/ramair_mesh_runtime.py,8,gmsh_deadline,FunctionDef
+CFD_2D/scripts/ramair_mesh_runtime.py,12,gmsh_deadline.timed_out,FunctionDef
 CFD_2D/scripts/ramair_mesh_runtime.py,23,add_wake_field,FunctionDef
-CFD_2D/scripts/ramair_mesh_runtime.py,12,timed_out,FunctionDef
 CFD_2D/scripts/ramair_monitor_core.py,32,_finite,FunctionDef
 CFD_2D/scripts/ramair_monitor_core.py,40,normalized_field_name,FunctionDef
 CFD_2D/scripts/ramair_monitor_core.py,45,parse_openfoam_lines,FunctionDef
 CFD_2D/scripts/ramair_monitor_core.py,135,solver_plot_series,FunctionDef
 CFD_2D/scripts/ramair_monitor_core.py,155,SolverLogAccumulator,ClassDef
+CFD_2D/scripts/ramair_monitor_core.py,158,SolverLogAccumulator.__init__,FunctionDef
+CFD_2D/scripts/ramair_monitor_core.py,165,SolverLogAccumulator.reset,FunctionDef
+CFD_2D/scripts/ramair_monitor_core.py,171,SolverLogAccumulator.update,FunctionDef
+CFD_2D/scripts/ramair_monitor_core.py,196,SolverLogAccumulator.snapshot,FunctionDef
 CFD_2D/scripts/ramair_monitor_core.py,201,solver_plot_series_from_state,FunctionDef
 CFD_2D/scripts/ramair_monitor_core.py,219,scalar_signal_inventory,FunctionDef
-CFD_2D/scripts/ramair_monitor_core.py,158,__init__,FunctionDef
-CFD_2D/scripts/ramair_monitor_core.py,165,reset,FunctionDef
-CFD_2D/scripts/ramair_monitor_core.py,171,update,FunctionDef
-CFD_2D/scripts/ramair_monitor_core.py,196,snapshot,FunctionDef
 CFD_2D/scripts/ramair_polar_comparison.py,10,available_point,FunctionDef
 CFD_2D/scripts/ramair_polar_comparison.py,46,curate_points,FunctionDef
 CFD_2D/scripts/ramair_polar_comparison.py,71,load_polar,FunctionDef
@@ -1984,13 +2059,13 @@ CFD_2D/scripts/ramair_polar_comparison.py,128,compare_polars,FunctionDef
 CFD_2D/scripts/ramair_production_capture.py,5,capture_policy,FunctionDef
 CFD_2D/scripts/ramair_profile_library.py,14,_branches,FunctionDef
 CFD_2D/scripts/ramair_profile_library.py,54,bounded_te,FunctionDef
+CFD_2D/scripts/ramair_profile_library.py,81,bounded_te.truncate,FunctionDef
+CFD_2D/scripts/ramair_profile_library.py,92,bounded_te.bezier,FunctionDef
 CFD_2D/scripts/ramair_profile_library.py,111,profile_frame,FunctionDef
 CFD_2D/scripts/ramair_profile_library.py,120,process_profile,FunctionDef
+CFD_2D/scripts/ramair_profile_library.py,145,process_profile.retained,FunctionDef
 CFD_2D/scripts/ramair_profile_library.py,180,catalogue,FunctionDef
 CFD_2D/scripts/ramair_profile_library.py,188,import_geometry,FunctionDef
-CFD_2D/scripts/ramair_profile_library.py,81,truncate,FunctionDef
-CFD_2D/scripts/ramair_profile_library.py,92,bezier,FunctionDef
-CFD_2D/scripts/ramair_profile_library.py,145,retained,FunctionDef
 CFD_2D/scripts/ramair_profile_utils.py,31,CanonicalProfile2D,ClassDef
 CFD_2D/scripts/ramair_profile_utils.py,50,write_json,FunctionDef
 CFD_2D/scripts/ramair_profile_utils.py,56,read_json,FunctionDef
@@ -2004,17 +2079,17 @@ CFD_2D/scripts/ramair_profile_utils.py,227,_branch_monotonicity_penalty,Function
 CFD_2D/scripts/ramair_profile_utils.py,237,_score_upper_lower,FunctionDef
 CFD_2D/scripts/ramair_profile_utils.py,277,_split_remove_duplicate,FunctionDef
 CFD_2D/scripts/ramair_profile_utils.py,286,_candidate_splits,FunctionDef
+CFD_2D/scripts/ramair_profile_utils.py,290,_candidate_splits.add,FunctionDef
 CFD_2D/scripts/ramair_profile_utils.py,345,split_profile_auto,FunctionDef
 CFD_2D/scripts/ramair_profile_utils.py,406,build_te_closure,FunctionDef
 CFD_2D/scripts/ramair_profile_utils.py,439,read_and_canonicalize_profile_2d,FunctionDef
 CFD_2D/scripts/ramair_profile_utils.py,529,build_profile_points_edges,FunctionDef
+CFD_2D/scripts/ramair_profile_utils.py,555,build_profile_points_edges.add,FunctionDef
 CFD_2D/scripts/ramair_profile_utils.py,632,write_variant_outputs,FunctionDef
 CFD_2D/scripts/ramair_profile_utils.py,652,_write_simple_dxf,FunctionDef
 CFD_2D/scripts/ramair_profile_utils.py,666,plot_profile_diagnostics,FunctionDef
+CFD_2D/scripts/ramair_profile_utils.py,674,plot_profile_diagnostics.draw,FunctionDef
 CFD_2D/scripts/ramair_profile_utils.py,742,plot_all_variants_comparison,FunctionDef
-CFD_2D/scripts/ramair_profile_utils.py,290,add,FunctionDef
-CFD_2D/scripts/ramair_profile_utils.py,555,add,FunctionDef
-CFD_2D/scripts/ramair_profile_utils.py,674,draw,FunctionDef
 CFD_2D/scripts/ramair_rans_mesh_study.py,14,solver_signature,FunctionDef
 CFD_2D/scripts/ramair_rans_mesh_study.py,19,compatible_setup,FunctionDef
 CFD_2D/scripts/ramair_rans_mesh_study.py,30,create_study,FunctionDef
@@ -2030,11 +2105,11 @@ CFD_2D/scripts/ramair_remote_queue_runner.py,65,request_stop,FunctionDef
 CFD_2D/scripts/ramair_remote_queue_runner.py,94,staged_command,FunctionDef
 CFD_2D/scripts/ramair_remote_queue_runner.py,142,_stop_timed_out_process,FunctionDef
 CFD_2D/scripts/ramair_remote_queue_runner.py,172,run_queue,FunctionDef
+CFD_2D/scripts/ramair_remote_queue_runner.py,176,run_queue.rebase,FunctionDef
 CFD_2D/scripts/ramair_remote_queue_runner.py,312,postprocess_queue,FunctionDef
 CFD_2D/scripts/ramair_remote_queue_runner.py,344,_sha256,FunctionDef
 CFD_2D/scripts/ramair_remote_queue_runner.py,352,collect_results,FunctionDef
 CFD_2D/scripts/ramair_remote_queue_runner.py,405,main,FunctionDef
-CFD_2D/scripts/ramair_remote_queue_runner.py,176,rebase,FunctionDef
 CFD_2D/scripts/ramair_report_figures.py,8,rans_grid_figures,FunctionDef
 CFD_2D/scripts/ramair_scientific_plot_style.py,22,apply_scientific_style,FunctionDef
 CFD_2D/scripts/ramair_scientific_plot_style.py,47,data_limits,FunctionDef
@@ -2043,16 +2118,19 @@ CFD_2D/scripts/ramair_scientific_plot_style.py,67,save_scientific_figure,Functio
 CFD_2D/scripts/ramair_simulation_inventory.py,6,numeric_states,FunctionDef
 CFD_2D/scripts/ramair_simulation_inventory.py,17,case_progress,FunctionDef
 CFD_2D/scripts/ramair_simulation_inventory.py,45,simulation_inventory,FunctionDef
+CFD_2D/scripts/ramair_studio_defaults.py,8,catalog,FunctionDef
+CFD_2D/scripts/ramair_studio_defaults.py,13,stage_defaults,FunctionDef
+CFD_2D/scripts/ramair_studio_defaults.py,29,preferred_profile,FunctionDef
 CFD_2D/scripts/ramair_suspension_layout.py,16,validate_network,FunctionDef
+CFD_2D/scripts/ramair_suspension_layout.py,39,validate_network.visit,FunctionDef
 CFD_2D/scripts/ramair_suspension_layout.py,60,migrate,FunctionDef
 CFD_2D/scripts/ramair_suspension_layout.py,70,select_brake_cells,FunctionDef
 CFD_2D/scripts/ramair_suspension_layout.py,114,build_network,FunctionDef
-CFD_2D/scripts/ramair_suspension_layout.py,39,visit,FunctionDef
-CFD_2D/scripts/ramair_suspension_layout.py,135,join,FunctionDef
+CFD_2D/scripts/ramair_suspension_layout.py,135,build_network.join,FunctionDef
 CFD_2D/scripts/ramair_validation_gallery.py,7,preserve_figures,FunctionDef
 CFD_2D/scripts/ramair_validation_reference.py,8,load_validation_reference,FunctionDef
 CFD_2D/scripts/ramair_wall_topology.py,5,classify_connected_faces,FunctionDef
-CFD_2D/scripts/ramair_wall_topology.py,10,node,FunctionDef
+CFD_2D/scripts/ramair_wall_topology.py,10,classify_connected_faces.node,FunctionDef
 CFD_2D/scripts/ramair_workcase_schema.py,40,_stamp,FunctionDef
 CFD_2D/scripts/ramair_workcase_schema.py,44,_canonical_sha256,FunctionDef
 CFD_2D/scripts/ramair_workcase_schema.py,55,_stable_uuid,FunctionDef
@@ -2099,23 +2177,24 @@ CFD_2D/scripts/ramair_workspace.py,208,compatible_mesh,FunctionDef
 CFD_2D/scripts/ramair_workspace.py,232,parse_angles,FunctionDef
 CFD_2D/scripts/ramair_workspace.py,248,alpha_name,FunctionDef
 CFD_2D/scripts/ramair_workspace.py,252,solver_defaults,FunctionDef
-CFD_2D/scripts/ramair_workspace.py,264,create_solver_setup,FunctionDef
-CFD_2D/scripts/ramair_workspace.py,280,prepare_solver_cases,FunctionDef
-CFD_2D/scripts/ramair_workspace.py,304,all_solver_setups,FunctionDef
-CFD_2D/scripts/ramair_workspace.py,308,comparable_setups,FunctionDef
-CFD_2D/scripts/ramair_workspace.py,316,export_products,FunctionDef
+CFD_2D/scripts/ramair_workspace.py,268,create_solver_setup,FunctionDef
+CFD_2D/scripts/ramair_workspace.py,284,prepare_solver_cases,FunctionDef
+CFD_2D/scripts/ramair_workspace.py,308,all_solver_setups,FunctionDef
+CFD_2D/scripts/ramair_workspace.py,312,comparable_setups,FunctionDef
+CFD_2D/scripts/ramair_workspace.py,320,export_products,FunctionDef
 CFD_2D/scripts/ramair_workspace_jobs.py,15,mesh_job,FunctionDef
 CFD_2D/scripts/ramair_workspace_jobs.py,40,execution_command,FunctionDef
 CFD_2D/scripts/ramair_workspace_jobs.py,85,queue_manifest,FunctionDef
-CFD_2D/scripts/ramair_workspace_jobs.py,103,postprocess_cases,FunctionDef
-CFD_2D/scripts/ramair_workspace_jobs.py,135,catia_preprocess,FunctionDef
-CFD_2D/scripts/ramair_workspace_jobs.py,149,main,FunctionDef
+CFD_2D/scripts/ramair_workspace_jobs.py,103,retained_results_only,FunctionDef
+CFD_2D/scripts/ramair_workspace_jobs.py,117,postprocess_cases,FunctionDef
+CFD_2D/scripts/ramair_workspace_jobs.py,152,catia_preprocess,FunctionDef
+CFD_2D/scripts/ramair_workspace_jobs.py,166,main,FunctionDef
 CFD_2D/scripts/ramair_workspace_lifecycle.py,10,reset_angles,FunctionDef
 CFD_2D/scripts/ramair_workspace_lifecycle.py,48,review_angles,FunctionDef
+CFD_2D/scripts/ramair_workspace_lifecycle.py,81,review_angles.finite_values,FunctionDef
 CFD_2D/scripts/ramair_workspace_lifecycle.py,98,wall_comparison,FunctionDef
 CFD_2D/scripts/ramair_workspace_lifecycle.py,132,releasable_paths,FunctionDef
 CFD_2D/scripts/ramair_workspace_lifecycle.py,155,release_runtime_data,FunctionDef
-CFD_2D/scripts/ramair_workspace_lifecycle.py,81,finite_values,FunctionDef
 CFD_2D/scripts/ramair_workspace_storage.py,9,source_checkout,FunctionDef
 CFD_2D/scripts/ramair_workspace_storage.py,14,windows_workspace,FunctionDef
 CFD_2D/scripts/ramair_workspace_storage.py,22,publish_workspace_links,FunctionDef
@@ -2133,65 +2212,219 @@ CFD_2D/scripts/wall_separation_analysis.py,388,_plot_wall_signals,FunctionDef
 CFD_2D/scripts/wall_separation_analysis.py,418,_ordered_cp_branches,FunctionDef
 CFD_2D/scripts/wall_separation_analysis.py,474,write_separation_products,FunctionDef
 CFD_2D/scripts/wall_separation_analysis.py,566,summarize_urans_separation,FunctionDef
-Application Support/Tools/check_project_context.py,16,require,FunctionDef
-Application Support/Tools/check_project_context.py,22,main,FunctionDef
-Application Support/Tools/check_repository_artifacts.py,17,main,FunctionDef
-Application Support/Tools/import_ramair_remote_results.py,17,sha256,FunctionDef
-Application Support/Tools/import_ramair_remote_results.py,25,safe_extract,FunctionDef
-Application Support/Tools/import_ramair_remote_results.py,36,read_manifest,FunctionDef
-Application Support/Tools/import_ramair_remote_results.py,44,verify_files,FunctionDef
-Application Support/Tools/import_ramair_remote_results.py,58,monitor_recovery_evidence,FunctionDef
-Application Support/Tools/import_ramair_remote_results.py,100,main,FunctionDef
-Application Support/Tools/import_ramair_remote_results.py,153,rebase,FunctionDef
-Application Support/Tools/launch_catia_macro.py,21,is_wsl,FunctionDef
-Application Support/Tools/launch_catia_macro.py,28,powershell_executable,FunctionDef
-Application Support/Tools/launch_catia_macro.py,32,decode_windows_stream,FunctionDef
-Application Support/Tools/launch_catia_macro.py,41,run_powershell,FunctionDef
-Application Support/Tools/launch_catia_macro.py,65,windows_path,FunctionDef
-Application Support/Tools/launch_catia_macro.py,82,windows_detection_script,FunctionDef
-Application Support/Tools/launch_catia_macro.py,120,detect_catia,FunctionDef
-Application Support/Tools/launch_catia_macro.py,151,launch_catia,FunctionDef
-Application Support/Tools/launch_catia_macro.py,219,parse_args,FunctionDef
-Application Support/Tools/launch_catia_macro.py,229,main,FunctionDef
-Application Support/Tools/package_ramair_catia_windows.py,53,copy_file,FunctionDef
-Application Support/Tools/package_ramair_catia_windows.py,62,sha256,FunctionDef
-Application Support/Tools/package_ramair_catia_windows.py,70,package_config_file,FunctionDef
-Application Support/Tools/package_ramair_catia_windows.py,91,package_configs,FunctionDef
-Application Support/Tools/package_ramair_catia_windows.py,97,copy_last_run_config,FunctionDef
-Application Support/Tools/package_ramair_catia_windows.py,113,verify_packaged_profile_references,FunctionDef
-Application Support/Tools/package_ramair_catia_windows.py,131,prepare_stage,FunctionDef
-Application Support/Tools/package_ramair_catia_windows.py,237,main,FunctionDef
-Application Support/Tools/package_ramair_project.py,92,console_safe,FunctionDef
-Application Support/Tools/package_ramair_project.py,98,excluded,FunctionDef
-Application Support/Tools/package_ramair_project.py,114,collect_files,FunctionDef
-Application Support/Tools/package_ramair_project.py,139,sha256,FunctionDef
-Application Support/Tools/package_ramair_project.py,147,main,FunctionDef
-Application Support/Tools/package_ramair_remote_execution.py,24,sha256,FunctionDef
-Application Support/Tools/package_ramair_remote_execution.py,32,read_json,FunctionDef
-Application Support/Tools/package_ramair_remote_execution.py,40,case_identity,FunctionDef
-Application Support/Tools/package_ramair_remote_execution.py,54,copy_case,FunctionDef
-Application Support/Tools/package_ramair_remote_execution.py,70,launcher_text,FunctionDef
-Application Support/Tools/package_ramair_remote_execution.py,97,main,FunctionDef
-Application Support/Tools/project_git.py,16,run,FunctionDef
-Application Support/Tools/project_git.py,27,clean,FunctionDef
-Application Support/Tools/project_git.py,31,configured_value,FunctionDef
-Application Support/Tools/project_git.py,35,require_identity,FunctionDef
-Application Support/Tools/project_git.py,47,require_remote,FunctionDef
-Application Support/Tools/project_git.py,55,repository_identity,FunctionDef
-Application Support/Tools/project_git.py,63,invalidate_push_preview,FunctionDef
-Application Support/Tools/project_git.py,67,preview_push,FunctionDef
-Application Support/Tools/project_git.py,84,require_current_push_preview,FunctionDef
-Application Support/Tools/project_git.py,98,main,FunctionDef
-Application Support/Tools/release_identity.py,8,release_identity,FunctionDef
-Application Support/Tools/transfer_studio_workspace.py,12,is_result,FunctionDef
-Application Support/Tools/transfer_studio_workspace.py,16,export_workspace,FunctionDef
-Application Support/Tools/transfer_studio_workspace.py,42,import_workspace,FunctionDef
-Application Support/Tools/transfer_studio_workspace.py,88,main,FunctionDef
-Application Support/Tools/transfer_studio_workspace.py,70,rebase,FunctionDef
-Application Support/Tools/verify_company_delivery.py,22,main,FunctionDef
-Application Support/Tools/verify_studio_package.py,11,main,FunctionDef
-Application Support/Tools/verify_studio_ui.py,9,main,FunctionDef
-CATIA/Utilities/VERIFY_CATIA_PACKAGE.py,21,find_root,FunctionDef
-CATIA/Utilities/VERIFY_CATIA_PACKAGE.py,29,read_csv_header,FunctionDef
-CATIA/Utilities/VERIFY_CATIA_PACKAGE.py,34,verify,FunctionDef
-CATIA/Utilities/VERIFY_CATIA_PACKAGE.py,118,main,FunctionDef
+preprocess_ramair_main.py,69,np_trapezoid_compat,FunctionDef
+preprocess_ramair_main.py,77,_default_project_root,FunctionDef
+preprocess_ramair_main.py,396,mm_path_text,FunctionDef
+preprocess_ramair_main.py,402,Config,ClassDef
+preprocess_ramair_main.py,496,Config.span_effective_mm,FunctionDef
+preprocess_ramair_main.py,502,build_config_from_user_settings,FunctionDef
+preprocess_ramair_main.py,606,clamp01,FunctionDef
+preprocess_ramair_main.py,610,span_eta,FunctionDef
+preprocess_ramair_main.py,616,elliptic_shape,FunctionDef
+preprocess_ramair_main.py,624,distribution_factor,FunctionDef
+preprocess_ramair_main.py,637,chord_at_y,FunctionDef
+preprocess_ramair_main.py,645,chord_anchor_fraction,FunctionDef
+preprocess_ramair_main.py,660,planform_chordwise_offset_mm,FunctionDef
+preprocess_ramair_main.py,673,make_cell_widths,FunctionDef
+preprocess_ramair_main.py,688,write_dxf_r12,FunctionDef
+preprocess_ramair_main.py,692,write_dxf_r12.header,FunctionDef
+preprocess_ramair_main.py,695,write_dxf_r12.layer,FunctionDef
+preprocess_ramair_main.py,698,write_dxf_r12.tables_end,FunctionDef
+preprocess_ramair_main.py,701,write_dxf_r12.end,FunctionDef
+preprocess_ramair_main.py,704,write_dxf_r12.polyline,FunctionDef
+preprocess_ramair_main.py,725,split_profile,FunctionDef
+preprocess_ramair_main.py,743,read_profile_branches_for_canopy,FunctionDef
+preprocess_ramair_main.py,762,read_profile_branches_for_canopy.branch_to_legacy,FunctionDef
+preprocess_ramair_main.py,777,to_catia_points,FunctionDef
+preprocess_ramair_main.py,791,make_cell_and_rib_tables,FunctionDef
+preprocess_ramair_main.py,839,make_cell_and_rib_tables.add_station,FunctionDef
+preprocess_ramair_main.py,923,_interp_z_at_x,FunctionDef
+preprocess_ramair_main.py,934,_crossport_x_positions,FunctionDef
+preprocess_ramair_main.py,955,_base_crossport_specs,FunctionDef
+preprocess_ramair_main.py,972,_size_for_crossport,FunctionDef
+preprocess_ramair_main.py,1005,make_crossport_table,FunctionDef
+preprocess_ramair_main.py,1132,compute_crossport_cutter_extrude_mm,FunctionDef
+preprocess_ramair_main.py,1158,write_params_csv,FunctionDef
+preprocess_ramair_main.py,1247,_line_intersection_2d,FunctionDef
+preprocess_ramair_main.py,1261,_linear_extrapolate_z_at_x,FunctionDef
+preprocess_ramair_main.py,1270,apply_te_closure_mode,FunctionDef
+preprocess_ramair_main.py,1346,write_profile_used_outputs,FunctionDef
+preprocess_ramair_main.py,1363,write_summary,FunctionDef
+preprocess_ramair_main.py,1408,preprocess_profile,FunctionDef
+preprocess_ramair_main.py,1468,parse_args,FunctionDef
+preprocess_ramair_main.py,1528,_resolve_project_path,FunctionDef
+preprocess_ramair_main.py,1533,_apply_default_case_config,FunctionDef
+preprocess_ramair_main.py,1555,_apply_default_case_config.resolve_config_path,FunctionDef
+preprocess_ramair_main.py,1559,_apply_default_case_config.resolve_profile_path,FunctionDef
+preprocess_ramair_main.py,1587,_apply_default_case_config.apply_fields,FunctionDef
+preprocess_ramair_main.py,1833,config_with_cli_overrides,FunctionDef
+preprocess_ramair_main.py,1967,default_system_config,FunctionDef
+preprocess_ramair_main.py,2166,_load_system_json,FunctionDef
+preprocess_ramair_main.py,2192,_write_system_template,FunctionDef
+preprocess_ramair_main.py,2197,_deep_get,FunctionDef
+preprocess_ramair_main.py,2206,_as_vec,FunctionDef
+preprocess_ramair_main.py,2212,maybe_apply_suspension_beta_to_canopy_cfg,FunctionDef
+preprocess_ramair_main.py,2239,CanopyGeometry,ClassDef
+preprocess_ramair_main.py,2241,CanopyGeometry.__init__,FunctionDef
+preprocess_ramair_main.py,2261,CanopyGeometry._read_params,FunctionDef
+preprocess_ramair_main.py,2277,CanopyGeometry._section_interp_z,FunctionDef
+preprocess_ramair_main.py,2284,CanopyGeometry.lower_z_norm,FunctionDef
+preprocess_ramair_main.py,2287,CanopyGeometry.upper_z_norm,FunctionDef
+preprocess_ramair_main.py,2290,CanopyGeometry._te_center_norm,FunctionDef
+preprocess_ramair_main.py,2295,CanopyGeometry._estimate_planform_area_mm2,FunctionDef
+preprocess_ramair_main.py,2301,CanopyGeometry.central_rib_row,FunctionDef
+preprocess_ramair_main.py,2305,CanopyGeometry.central_reference_point,FunctionDef
+preprocess_ramair_main.py,2312,CanopyGeometry.boundary_rib_rows,FunctionDef
+preprocess_ramair_main.py,2315,CanopyGeometry._arc_radius,FunctionDef
+preprocess_ramair_main.py,2321,CanopyGeometry._arc_theta,FunctionDef
+preprocess_ramair_main.py,2326,CanopyGeometry._arc_pivot_z,FunctionDef
+preprocess_ramair_main.py,2333,CanopyGeometry.transform_local,FunctionDef
+preprocess_ramair_main.py,2353,CanopyGeometry.transform_profile_point,FunctionDef
+preprocess_ramair_main.py,2362,CanopyGeometry.lower_anchor_point,FunctionDef
+preprocess_ramair_main.py,2366,Node,ClassDef
+preprocess_ramair_main.py,2367,Node.__init__,FunctionDef
+preprocess_ramair_main.py,2376,Node.p,FunctionDef
+preprocess_ramair_main.py,2379,Node.to_dict,FunctionDef
+preprocess_ramair_main.py,2383,Segment,ClassDef
+preprocess_ramair_main.py,2384,Segment.__init__,FunctionDef
+preprocess_ramair_main.py,2407,Segment.to_dict,FunctionDef
+preprocess_ramair_main.py,2422,StabilizerGeometry,ClassDef
+preprocess_ramair_main.py,2435,StabilizerGeometry.__init__,FunctionDef
+preprocess_ramair_main.py,2442,StabilizerGeometry.active,FunctionDef
+preprocess_ramair_main.py,2446,StabilizerGeometry._unit,FunctionDef
+preprocess_ramair_main.py,2451,StabilizerGeometry.generate,FunctionDef
+preprocess_ramair_main.py,2462,StabilizerGeometry._surface_point,FunctionDef
+preprocess_ramair_main.py,2471,StabilizerGeometry._local_basis,FunctionDef
+preprocess_ramair_main.py,2493,StabilizerGeometry._make_side,FunctionDef
+preprocess_ramair_main.py,2558,StabilizerGeometry.interpolate_tip_anchor,FunctionDef
+preprocess_ramair_main.py,2610,TipSideBulgeGeometry,ClassDef
+preprocess_ramair_main.py,2625,TipSideBulgeGeometry.__init__,FunctionDef
+preprocess_ramair_main.py,2634,TipSideBulgeGeometry.active,FunctionDef
+preprocess_ramair_main.py,2638,TipSideBulgeGeometry._unit,FunctionDef
+preprocess_ramair_main.py,2643,TipSideBulgeGeometry._shape,FunctionDef
+preprocess_ramair_main.py,2661,TipSideBulgeGeometry._x_grid,FunctionDef
+preprocess_ramair_main.py,2678,TipSideBulgeGeometry._v_grid,FunctionDef
+preprocess_ramair_main.py,2684,TipSideBulgeGeometry._outward_dir,FunctionDef
+preprocess_ramair_main.py,2701,TipSideBulgeGeometry.generate,FunctionDef
+preprocess_ramair_main.py,2717,TipSideBulgeGeometry._make_side,FunctionDef
+preprocess_ramair_main.py,2771,_nodes_to_df,FunctionDef
+preprocess_ramair_main.py,2775,_segments_to_df,FunctionDef
+preprocess_ramair_main.py,2779,_surfaces_to_df,FunctionDef
+preprocess_ramair_main.py,2787,_sections_to_df,FunctionDef
+preprocess_ramair_main.py,2791,append_global_params,FunctionDef
+preprocess_ramair_main.py,2796,write_stabilizer_outputs,FunctionDef
+preprocess_ramair_main.py,2810,write_tip_side_bulge_outputs,FunctionDef
+preprocess_ramair_main.py,2827,AnchorGenerator,ClassDef
+preprocess_ramair_main.py,2829,AnchorGenerator.__init__,FunctionDef
+preprocess_ramair_main.py,2833,AnchorGenerator._enabled_banks,FunctionDef
+preprocess_ramair_main.py,2844,AnchorGenerator.selected_ribs,FunctionDef
+preprocess_ramair_main.py,2874,AnchorGenerator._pair_index,FunctionDef
+preprocess_ramair_main.py,2879,AnchorGenerator.generate,FunctionDef
+preprocess_ramair_main.py,2941,SliderPayloadSystem,ClassDef
+preprocess_ramair_main.py,2952,SliderPayloadSystem.__init__,FunctionDef
+preprocess_ramair_main.py,2964,SliderPayloadSystem._unit,FunctionDef
+preprocess_ramair_main.py,2969,SliderPayloadSystem.local_vec,FunctionDef
+preprocess_ramair_main.py,2972,SliderPayloadSystem._theta,FunctionDef
+preprocess_ramair_main.py,2985,SliderPayloadSystem.slider_dimensions,FunctionDef
+preprocess_ramair_main.py,3003,SliderPayloadSystem._add_oriented_box,FunctionDef
+preprocess_ramair_main.py,3021,SliderPayloadSystem.create_for_slider_distance,FunctionDef
+preprocess_ramair_main.py,3101,LineNetwork,ClassDef
+preprocess_ramair_main.py,3103,LineNetwork.__init__,FunctionDef
+preprocess_ramair_main.py,3116,LineNetwork._line_props,FunctionDef
+preprocess_ramair_main.py,3119,LineNetwork._add_prebuilt_segment,FunctionDef
+preprocess_ramair_main.py,3124,LineNetwork.add_segment,FunctionDef
+preprocess_ramair_main.py,3144,LineNetwork._target_for,FunctionDef
+preprocess_ramair_main.py,3153,LineNetwork._cascade_levels_for_bank,FunctionDef
+preprocess_ramair_main.py,3164,LineNetwork.build_for_distance,FunctionDef
+preprocess_ramair_main.py,3248,LineNetwork._anchor_nodes_for_R,FunctionDef
+preprocess_ramair_main.py,3259,LineNetwork._mean_straight_R_to_confluence,FunctionDef
+preprocess_ramair_main.py,3266,LineNetwork._mean_path_length,FunctionDef
+preprocess_ramair_main.py,3285,LineNetwork.solve_geometry_for_R_and_angles,FunctionDef
+preprocess_ramair_main.py,3311,LineNetwork.solve_geometry_for_R_and_angles.mean_for,FunctionDef
+preprocess_ramair_main.py,3337,LineNetwork.compute_unique_exposed_length,FunctionDef
+preprocess_ramair_main.py,3353,LineNetwork.compute_sum_of_all_path_lengths,FunctionDef
+preprocess_ramair_main.py,3356,LineNetwork._velocity_unit,FunctionDef
+preprocess_ramair_main.py,3371,LineNetwork._compute_segment_drag,FunctionDef
+preprocess_ramair_main.py,3418,LineNetwork.CD_lines_simple,FunctionDef
+preprocess_ramair_main.py,3422,LineNetwork.CD_lines_segmented,FunctionDef
+preprocess_ramair_main.py,3425,LineNetwork.max_bifurcation_angle_deg,FunctionDef
+preprocess_ramair_main.py,3447,LineNetwork.check_left_right_symmetry,FunctionDef
+preprocess_ramair_main.py,3472,LineNetwork._bank_xc,FunctionDef
+preprocess_ramair_main.py,3478,LineNetwork._trace_final_target,FunctionDef
+preprocess_ramair_main.py,3486,LineNetwork._line_diagnostic_nearest_xc,FunctionDef
+preprocess_ramair_main.py,3518,LineNetwork._theta_measured_from_system,FunctionDef
+preprocess_ramair_main.py,3555,LineNetwork.rigging_reference_line_metrics,FunctionDef
+preprocess_ramair_main.py,3586,LineNetwork.rigging_mu_measured_deg,FunctionDef
+preprocess_ramair_main.py,3590,ValidationReport,ClassDef
+preprocess_ramair_main.py,3591,ValidationReport.__init__,FunctionDef
+preprocess_ramair_main.py,3602,ValidationReport._checks,FunctionDef
+preprocess_ramair_main.py,3624,ValidationReport.rows,FunctionDef
+preprocess_ramair_main.py,3686,SuspensionVisualizer,ClassDef
+preprocess_ramair_main.py,3688,SuspensionVisualizer.write_png,FunctionDef
+preprocess_ramair_main.py,3737,write_suspension_outputs,FunctionDef
+preprocess_ramair_main.py,3780,write_fabric_property_outputs,FunctionDef
+preprocess_ramair_main.py,3822,write_suspension_disabled_params,FunctionDef
+preprocess_ramair_main.py,3826,_generate_stabilizers_after_canopy,FunctionDef
+preprocess_ramair_main.py,3833,_generate_tip_side_bulge_after_canopy,FunctionDef
+preprocess_ramair_main.py,3840,_format_bool,FunctionDef
+preprocess_ramair_main.py,3844,write_full_design_summary,FunctionDef
+preprocess_ramair_main.py,3889,_generate_suspension_after_canopy,FunctionDef
+preprocess_ramair_main.py,3920,_move_if_exists,FunctionDef
+preprocess_ramair_main.py,3928,_rewrite_global_file_paths,FunctionDef
+preprocess_ramair_main.py,3964,write_chord_distribution_plot,FunctionDef
+preprocess_ramair_main.py,3994,_replace_directory_from_generated,FunctionDef
+preprocess_ramair_main.py,4017,organize_output_folders,FunctionDef
+preprocess_ramair_main.py,4059,append_json_control_params,FunctionDef
+preprocess_ramair_main.py,4096,write_cad_export_manifest,FunctionDef
+preprocess_ramair_main.py,4123,_json_write_2d,FunctionDef
+preprocess_ramair_main.py,4129,_cfd2d_root_for_cfg,FunctionDef
+preprocess_ramair_main.py,4136,_cfd2d_reference_root_for_inputs,FunctionDef
+preprocess_ramair_main.py,4143,_csv_relpath,FunctionDef
+preprocess_ramair_main.py,4150,_profile_used_source_path,FunctionDef
+preprocess_ramair_main.py,4163,_read_profile_used_for_2d,FunctionDef
+preprocess_ramair_main.py,4179,_split_profile_used_for_2d,FunctionDef
+preprocess_ramair_main.py,4190,_read_profile_dat_for_2d,FunctionDef
+preprocess_ramair_main.py,4225,_edge_length_2d,FunctionDef
+preprocess_ramair_main.py,4231,_append_edge_2d,FunctionDef
+preprocess_ramair_main.py,4259,_unit_vec_2d,FunctionDef
+preprocess_ramair_main.py,4267,_te_tangent_cap_internal_points,FunctionDef
+preprocess_ramair_main.py,4311,_make_te_arc_points,FunctionDef
+preprocess_ramair_main.py,4331,_write_profile_used_cfd_contour,FunctionDef
+preprocess_ramair_main.py,4383,_build_points_edges_from_branches,FunctionDef
+preprocess_ramair_main.py,4448,_add_te_arc_to_variant,FunctionDef
+preprocess_ramair_main.py,4513,_build_2d_variant,FunctionDef
+preprocess_ramair_main.py,4528,_build_external_profile_variant,FunctionDef
+preprocess_ramair_main.py,4536,_write_dat_2d,FunctionDef
+preprocess_ramair_main.py,4554,_write_dxf_2d_edges,FunctionDef
+preprocess_ramair_main.py,4567,_segments_intersect_basic,FunctionDef
+preprocess_ramair_main.py,4568,_segments_intersect_basic.orient,FunctionDef
+preprocess_ramair_main.py,4570,_segments_intersect_basic.on_seg,FunctionDef
+preprocess_ramair_main.py,4582,run_profile_quality_checks,FunctionDef
+preprocess_ramair_main.py,4636,_plot_profile_2d,FunctionDef
+preprocess_ramair_main.py,4660,_plot_2d_comparison,FunctionDef
+preprocess_ramair_main.py,4681,_write_2d_variant_outputs,FunctionDef
+preprocess_ramair_main.py,4698,_resolve_optional_profile_path,FunctionDef
+preprocess_ramair_main.py,4733,_ross_manifest,FunctionDef
+preprocess_ramair_main.py,4746,_write_ross_reference_placeholders,FunctionDef
+preprocess_ramair_main.py,4770,write_2d_cae_exports,FunctionDef
+preprocess_ramair_main.py,5280,_apply_2d_reference_cli_overrides,FunctionDef
+preprocess_ramair_main.py,5299,record_last_successful_preprocessor_config,FunctionDef
+preprocess_ramair_main.py,5316,main,FunctionDef
+run_ramair_cfd2d_app.py,23,parse_args,FunctionDef
+run_ramair_cfd2d_app.py,65,wait_for_port,FunctionDef
+run_ramair_cfd2d_app.py,83,ask_yes_no,FunctionDef
+run_ramair_cfd2d_app.py,101,ensure_windows_wsl,FunctionDef
+run_ramair_cfd2d_app.py,133,wsl_path_exists,FunctionDef
+run_ramair_cfd2d_app.py,145,windows_to_wsl,FunctionDef
+run_ramair_cfd2d_app.py,157,bash_path,FunctionDef
+run_ramair_cfd2d_app.py,165,encoded_wsl_bash_command,FunctionDef
+run_ramair_cfd2d_app.py,171,migrate_legacy_wsl_root,FunctionDef
+run_ramair_cfd2d_app.py,237,wsl_code_sync,FunctionDef
+run_ramair_cfd2d_app.py,548,initialize_native_runtime,FunctionDef
+run_ramair_cfd2d_app.py,565,wsl_command,FunctionDef
+run_ramair_cfd2d_app.py,623,linux_command,FunctionDef
+run_ramair_cfd2d_app.py,640,consume_shutdown_request,FunctionDef
+run_ramair_cfd2d_app.py,649,write_windows_results_pointer,FunctionDef
+run_ramair_cfd2d_app.py,682,configure_first_run,FunctionDef
+run_ramair_cfd2d_app.py,708,launch_once,FunctionDef
+run_ramair_cfd2d_app.py,758,main,FunctionDef

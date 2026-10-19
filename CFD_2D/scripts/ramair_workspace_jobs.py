@@ -100,12 +100,29 @@ def queue_manifest(root: Path, setup: Path, angles: list[float], cores: int, con
                      "total_core_budget": budget, "max_concurrent_cases": concurrent, "execution_controls": options or {}, "cases": cases})
 
 
+def retained_results_only(case: Path) -> bool:
+    if not (case / "retained_results_snapshot.json").is_file():
+        return False
+    parents = [case, *case.glob("processor[0-9]*")]
+    for parent in parents:
+        for path in parent.iterdir():
+            try:
+                if path.is_dir() and float(path.name) > 0 and any((path / name).is_file() for name in ("U", "U.gz")):
+                    return False
+            except ValueError:
+                pass
+    return True
+
+
 def postprocess_cases(root: Path, setup: Path, angles: list[float], options: dict) -> list[dict]:
     from ramair_2d_postprocess import postprocess
     manifest = read_json(setup / "solver_setup.json")
     results = []
     for alpha in angles:
         case = setup / "Angles" / alpha_name(alpha)
+        if retained_results_only(case):
+            results.append({"alpha": alpha, "status": "RETAINED_RESULTS_ONLY", "message": "Las tablas y figuras conservadas pueden consultarse. Ejecute una simulación nueva antes de recalcular campos; no se incluyen checkpoints volumétricos."})
+            continue
         try:
             result = postprocess(root, manifest["context"]["topology"], alpha,
                 float(read_json(setup / "phase_plan.json").get("average_from_fraction", 14/64)),

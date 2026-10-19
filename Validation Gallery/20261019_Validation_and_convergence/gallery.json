@@ -1,0 +1,86 @@
+{
+  "name": "20261019 Validation and convergence",
+  "scope": "Figuras del estudio conservadas sin campos volum\u00e9tricos. Comparaciones RANS y verificaci\u00f3n de origen; consultar hip\u00f3tesis y estado antes de reutilizar datos cient\u00edficos.",
+  "figures": [
+    {
+      "file": "paired_lift_psd_a3a98fbe1f.png",
+      "title": "paired lift psd",
+      "source": "CFD_2D/validation_studies/closed_open_M0p15_Re1p9e6_alpha8/postprocess/frequency/combined/paired_lift_psd.png",
+      "sha256": "a3a98fbe1f5dbe8b6969efdb5f8afc87a5d378472a67af67fdb9e84113a9261d",
+      "source_status": "RETAINED_STUDY_FIGURE",
+      "scope": "Original source status retained; no new convergence or scientific acceptance claimed."
+    },
+    {
+      "file": "open_closed_strouhal_vs_dt_9f2d18cebd.png",
+      "title": "open closed strouhal vs dt",
+      "source": "CFD_2D/validation_studies/closed_open_M0p15_Re1p9e6_alpha8/postprocess/frequency/combined/open_closed_strouhal_vs_dt.png",
+      "sha256": "9f2d18cebd237ab8d736549b5c519d121ea2d18ce87b81804b00983c4e273d04",
+      "source_status": "RETAINED_STUDY_FIGURE",
+      "scope": "Original source status retained; no new convergence or scientific acceptance claimed."
+    },
+    {
+      "file": "open_closed_wave_number_vs_dt_2ef7908f0a.png",
+      "title": "open closed wave number vs dt",
+      "source": "CFD_2D/validation_studies/closed_open_M0p15_Re1p9e6_alpha8/postprocess/frequency/combined/open_closed_wave_number_vs_dt.png",
+      "sha256": "2ef7908f0aa557636962014b856cb3b6fbec5a3b4913d0474ba9b3238311cb51",
+      "source_status": "RETAINED_STUDY_FIGURE",
+      "scope": "Original source status retained; no new convergence or scientific acceptance claimed."
+    },
+    {
+      "file": "spatial_rans_comparison_2eced8be3d.png",
+      "title": "spatial rans comparison",
+      "source": "CFD_2D/validation_studies/closed_open_M0p15_Re1p9e6_alpha8/postprocess/spatial_rans/open/spatial_rans_comparison.png",
+      "sha256": "2eced8be3d67b7399cebd60550611a7d978ea375d91611af7b65d04f06023995",
+      "source_status": "RETAINED_STUDY_FIGURE",
+      "scope": "Original source status retained; no new convergence or scientific acceptance claimed."
+    },
+    {
+      "file": "spatial_rans_comparison_2ae8fe3612.png",
+      "title": "spatial rans comparison",
+      "source": "CFD_2D/validation_studies/closed_open_M0p15_Re1p9e6_alpha8/postprocess/spatial_rans/closed/spatial_rans_comparison.png",
+      "sha256": "2ae8fe3612793591abde2095256edc056f2a55a3cbfc08636e81828e25ea8b99",
+      "source_status": "RETAINED_STUDY_FIGURE",
+      "scope": "Original source status retained; no new convergence or scientific acceptance claimed."
+    },
+    {
+      "file": "bubble_length_vs_refinement_c7cd7ef856.png",
+      "title": "bubble length vs refinement",
+      "source": "CFD_2D/validation_studies/closed_open_M0p15_Re1p9e6_alpha8/postprocess/spatial_rans/bubble_length_vs_refinement.png",
+      "sha256": "c7cd7ef85669ae631096e59a3f37e802c73ed7d3a939a048571d441b1d08ab48",
+      "source_status": "RETAINED_STUDY_FIGURE",
+      "scope": "Original source status retained; no new convergence or scientific acceptance claimed."
+    },
+    {
+      "file": "yplus_max_vs_mesh_refinement_89321187f9.png",
+      "title": "yplus max vs mesh refinement",
+      "source": "CFD_2D/validation_studies/closed_open_M0p15_Re1p9e6_alpha8/postprocess/spatial_rans/yplus_max_vs_mesh_refinement.png",
+      "sha256": "89321187f973d5d6ea4afc03f02fb67bdce84a964c65e2c2f9d5c86445a899a4",
+      "source_status": "RETAINED_STUDY_FIGURE",
+      "scope": "Original source status retained; no new convergence or scientific acceptance claimed."
+    },
+    {
+      "file": "11_gci_observed_order_5d0dc20fbe.png",
+      "title": "11 gci observed order",
+      "source": "CFD_2D/validation_studies/closed_open_M0p15_Re1p9e6_alpha8/postprocess/spatial_rans/11_gci_observed_order.png",
+      "sha256": "5d0dc20fbec44d6023a19614a1c83f91c402d517df606d386d4da4fb440ad35c",
+      "source_status": "RETAINED_STUDY_FIGURE",
+      "scope": "Original source status retained; no new convergence or scientific acceptance claimed."
+    },
+    {
+      "file": "05_accuracy_cost_tradeoff_116c750f59.png",
+      "title": "05 accuracy cost tradeoff",
+      "source": "CFD_2D/validation_studies/closed_open_M0p15_Re1p9e6_alpha8/postprocess/spatial_rans/05_accuracy_cost_tradeoff.png",
+      "sha256": "116c750f59c3938a88b9aaf048b9dd3926ecb4b91cea2d43db8446815bbfa40f",
+      "source_status": "RETAINED_STUDY_FIGURE",
+      "scope": "Original source status retained; no new convergence or scientific acceptance claimed."
+    },
+    {
+      "file": "04_absolute_difference_relative_to_medium_88d5748b31.png",
+      "title": "04 absolute difference relative to medium",
+      "source": "CFD_2D/validation_studies/closed_open_M0p15_Re1p9e6_alpha8/postprocess/spatial_rans/04_absolute_difference_relative_to_medium.png",
+      "sha256": "88d5748b31da439e59c88eb1f9e1df1a466067d78d11a0e16495a262aa81a10b",
+      "source_status": "RETAINED_STUDY_FIGURE",
+      "scope": "Original source status retained; no new convergence or scientific acceptance claimed."
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "reynolds": 1900000.0,
+  "mach": 0.15,
+  "pressure_ref_pa": 101325.0,
+  "temperature_K": 288.15,
+  "chord_m": 1.0,
+  "rho": 1.2250122659906946,
+  "mu": 3.291017569199909e-05,
+  "nu": 2.6865180541995553e-05,
+  "speed_of_sound_m_s": 340.29228686527705,
+  "velocity_m_s": 51.04384302979155,
+  "velocity_source": "mach",
+  "viscosity_policy": "match_Re_at_Mach_with_unit_chord",
+  "gas_constant_J_kg_K": 287.05,
+  "gamma": 1.4
+}

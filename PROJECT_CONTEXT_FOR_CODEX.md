@@ -1,8 +1,8 @@
 # Contexto vigente de RamAir Studio
 
-Context version: 2026-09-30
+Context version: 2026-10-19
 Application backend API: 28
-Release: 2026.09.30 · studio-delivery-20260930
+Release: 2026.10.19 · studio-delivery-20261019
 
 ## Propiedad y despliegue
 
@@ -17,7 +17,7 @@ Bibliotecas de perfiles y Mesh Presets son compartidas; las condiciones físicas
 
 ## Contratos actuales
 
-API UI/backend/lanzador/bootstrap: 28. Solver general schema: 15; suspensión schema: 2; registro independiente de laboratorio schema: 10.
+API UI/backend/lanzador/bootstrap: 28. Solver de estudio schema: 16; suspensión schema: 2; registro independiente de laboratorio schema: 10.
 La migración de suspensión conserva selecciones y cascadas antiguas. Nuevos modelos: frenos exteriores 33% de cada b/2, A–B/C–D longitudinales y una confluencia BRK por lado; cobertura calculada con las posiciones desarrolladas reales. R/b mantiene su distancia de referencia.
 La aprobación de malla requiere evidencia real, hashes y contexto geométrico/físico. La importación invalida aprobaciones anteriores hasta repetir la comprobación. No fabricar polyMesh ni PASS.
 RANS mide iteraciones; URANS segundos. RANS-only conserva checkpoints e historial; la continuación mantiene numeración y no vuelve a inicializar potencial. Renumerar después de guardar campos rompe correspondencia y está deshabilitado para continuaciones.
@@ -26,8 +26,16 @@ Los estudios RANS copian ajustes, comparan firmas, usan ángulos comunes, detect
 ## Software y aceptación
 
 Windows + WSL2 Ubuntu 22.04; Python 3.10 probado en Linux; OpenFOAM Foundation 14; Gmsh 4.15.2. Dependencias Python fijadas en `CFD_2D/app/requirements-cfd2d-app.txt`; pytest separado.
-La entrega ha ejercitado el recorrido vacío, dos mallas cerradas aprobadas (108104/155824 celdas), dos ángulos (0°/8°), pausa/continuación y postproceso RANS. Son pruebas acotadas, no polares convergidas ni independencia de malla. Evidencia en `Documents and Manuals/Current/Evidence/delivery_20260930`.
+La evidencia histórica de septiembre ejercitó el recorrido vacío, dos mallas cerradas (108104/155824), dos ángulos y pausa/continuación RANS; no son los defaults de estudio actuales. En octubre se regeneraron y comprobaron los presets de 215058/248180 celdas, se instaló un entorno nuevo en otra ruta WSL y se verificaron las once páginas y el ejemplo de polar. Evidencia actual en `Documents and Manuals/Current/Evidence/delivery_20261019`; la histórica permanece en delivery_20260930. No presentar la revisión visual nativa actual como completada: la herramienta no pudo verificar la URL del navegador. Las pruebas automatizadas de interfaz sí finalizaron sin errores.
 El paquete remoto se verifica en WSL aislado; CATIA y el servidor real de la empresa requieren aceptación allí. No proclamar validación científica universal, estabilidad de todos los inlets ni duraciones de ejecución garantizadas.
+
+## Entrega completa y presets de estudio
+
+`Application Support/Configurations/studio_defaults.json` selecciona los JSON de `Study Presets` y los presets de malla paramétricos. Se aplican a configuraciones nuevas; nunca sobrescribir borradores ni setups existentes. Cerrada: estudio de 215058 celdas; abierta estándar 265520, optimizada 248180. Las métricas son de las mallas originales, no una aprobación heredable por otro perfil. La ejecución inicial es RANS-only; URANS se elige explícitamente.
+
+`package_studio_delivery.py` reúne código, manuales, instalador y workspace exportado en un solo ZIP. `install_studio_bundle.py` verifica todo, utiliza el lanzador oficial, importa Example_Open_Polar sin colisiones ni sobreescritura y repite checkMesh si OpenFOAM está disponible. `verify_studio_delivery.py` comprueba todos los archivos y objetos del ejemplo. Los campos volumétricos de la campaña original no se incluyen: se conservan campos iniciales, 26 ángulos preparados y 9 puntos de polar RANS con sus productos. `retained_results_snapshot.json` impide recalcular campos desde 0 y confundirlos con resultados. Tras una ejecución propia con campos guardados, se permite nuevo postproceso.
+
+La galería conserva figuras de comparación/validación con procedencia relativa y no requiere campañas locales. El instalador y el ejemplo no ejecutan solver ni CATIA por sí mismos. El paquete remoto se genera desde la aplicación cuando se necesita; la entrega principal es un solo archivo descargable. Manuales 15–17 explican primer uso, operaciones y parámetros efectivos.
 
 ## Mantenimiento
 

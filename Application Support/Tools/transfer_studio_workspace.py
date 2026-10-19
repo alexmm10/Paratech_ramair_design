@@ -52,17 +52,25 @@ def import_workspace(root: Path, archive: Path, name: str):
         manifest=read_json(temp/"workspace_package.json")
         if manifest.get("kind")!="studio_workspace_package":raise ValueError("El paquete no pertenece a Studio.")
         source=temp/"workspace"
+        verified_objects=set()
         if manifest.get("storage")=="sha256_objects":
             source.mkdir()
             for rel,expected in manifest["files"].items():
                 dest=(source/rel).resolve()
                 if not dest.is_relative_to(source):raise ValueError("Ruta no válida en el manifiesto.")
                 obj=temp/"objects"/expected["sha256"]
-                if not obj.resolve().is_relative_to(temp/"objects") or not obj.is_file() or file_digest(obj)!=expected["sha256"]:raise ValueError("Objeto del paquete alterado.")
-                dest.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(obj,dest)
+                if not obj.resolve().is_relative_to(temp/"objects") or not obj.is_file() or obj.stat().st_size!=expected.get("bytes",obj.stat().st_size):raise ValueError("Objeto del paquete alterado.")
+                if expected["sha256"] not in verified_objects:
+                    if file_digest(obj)!=expected["sha256"]:raise ValueError("Objeto del paquete alterado.")
+                    verified_objects.add(expected["sha256"])
+                dest.parent.mkdir(parents=True,exist_ok=True)
+                # Deduplicate only the disposable staging tree. The final copytree
+                # still creates independent case files: editing one cannot change another.
+                try:os.link(obj,dest)
+                except OSError:shutil.copy2(obj,dest)
         for rel,expected in manifest["files"].items():
             path=(source/rel).resolve()
-            if not path.is_relative_to(source) or not path.is_file() or file_digest(path)!=expected["sha256"]:raise ValueError("Paquete incompleto o modificado: "+rel)
+            if not path.is_relative_to(source) or not path.is_file() or path.stat().st_size!=expected.get("bytes",path.stat().st_size) or (expected["sha256"] not in verified_objects and file_digest(path)!=expected["sha256"]):raise ValueError("Paquete incompleto o modificado: "+rel)
         target.parent.mkdir(parents=True,exist_ok=True)
         shutil.copytree(source,target)
         old_workspace=manifest["original_workspace"]

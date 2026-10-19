@@ -249,7 +249,11 @@ def alpha_name(alpha: float) -> str:
     return f"alpha_{alpha:+.3f}".replace("+", "p").replace("-", "m").replace(".", "p")
 
 
-def solver_defaults(root: Path) -> tuple[dict, dict]:
+def solver_defaults(root: Path, topology: str = "closed") -> tuple[dict, dict]:
+    from ramair_studio_defaults import stage_defaults
+    shipped = stage_defaults(root, "solver", topology)
+    if shipped:
+        return shipped, stage_defaults(root, "phase_plan", topology, fallback={})
     from ramair_2d_ls1_validation_study import validation_solver_profile, validation_phase_plan, STUDY_NAME
     base = read_json(root / "CFD_2D/CFD_2D_inputs/config/cfd2d_solver_config.json")
     base.update(read_json(root / "CFD_2D/validation_studies" / STUDY_NAME / "configurations/cfd2d_solver_config.json"))

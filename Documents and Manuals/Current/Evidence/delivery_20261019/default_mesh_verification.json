@@ -1,0 +1,69 @@
+{
+  "status": "PASS",
+  "meshes": [
+    {
+      "topology": "closed",
+      "returncode": 0,
+      "duration_s": 58.3,
+      "quality": {
+        "checkMesh_wall_time_s": 6.333560057,
+        "checkMesh_command": "/home/alejm/.local/opt/openfoam14/platforms/linux64GccDPInt32Opt/bin/checkMesh -allTopology -allGeometry",
+        "checkMesh_exit_code": 0,
+        "checkMesh_cell_count": 215058,
+        "checkMesh_hexahedra": 135000,
+        "checkMesh_prisms": 80058,
+        "checkMesh_wedges": 0,
+        "checkMesh_pyramids": 0,
+        "checkMesh_tetrahedra": 0,
+        "checkMesh_polyhedra": 0,
+        "checkMesh_max_non_orthogonality_deg": 42.22858122805622,
+        "checkMesh_average_non_orthogonality_deg": 2.279102320088815,
+        "checkMesh_max_skewness": 0.651769326962912,
+        "checkMesh_max_aspect_ratio": 88.12463236726522,
+        "checkMesh_min_volume": 2.477044241161148e-11,
+        "checkMesh_max_volume": 0.1538029809863806,
+        "checkMesh_min_cell_determinant": 0.008814788656129516,
+        "checkMesh_average_cell_determinant": 1.84313452461983,
+        "checkMesh_min_face_interpolation_weight": 0.1217685426614448,
+        "checkMesh_average_face_interpolation_weight": 0.4874208277341168,
+        "checkMesh_min_face_volume_ratio": 0.1386519938948075,
+        "checkMesh_average_face_volume_ratio": 0.9524311453088897,
+        "checkMesh_failed_text_detected": false,
+        "checkMesh_status": "OK"
+      },
+      "solver_run": false
+    },
+    {
+      "topology": "open",
+      "returncode": 0,
+      "duration_s": 90.3,
+      "quality": {
+        "checkMesh_wall_time_s": 8.042179704000006,
+        "checkMesh_command": "/home/alejm/.local/opt/openfoam14/platforms/linux64GccDPInt32Opt/bin/checkMesh -allTopology -allGeometry",
+        "checkMesh_exit_code": 0,
+        "checkMesh_cell_count": 248180,
+        "checkMesh_hexahedra": 136500,
+        "checkMesh_prisms": 111680,
+        "checkMesh_wedges": 0,
+        "checkMesh_pyramids": 0,
+        "checkMesh_tetrahedra": 0,
+        "checkMesh_polyhedra": 0,
+        "checkMesh_max_non_orthogonality_deg": 51.84833480304187,
+        "checkMesh_average_non_orthogonality_deg": 1.546538540580353,
+        "checkMesh_max_skewness": 0.6670725479247662,
+        "checkMesh_max_aspect_ratio": 77.1593306390028,
+        "checkMesh_min_volume": 5.855567647386645e-11,
+        "checkMesh_max_volume": 0.1369377475378466,
+        "checkMesh_min_cell_determinant": 0.01135533964335267,
+        "checkMesh_average_cell_determinant": 1.870165891880859,
+        "checkMesh_min_face_interpolation_weight": 0.08579319896892132,
+        "checkMesh_average_face_interpolation_weight": 0.4848304480194376,
+        "checkMesh_min_face_volume_ratio": 0.08708892420535529,
+        "checkMesh_average_face_volume_ratio": 0.9435252316197678,
+        "checkMesh_failed_text_detected": false,
+        "checkMesh_status": "OK"
+      },
+      "solver_run": false
+    }
+  ]
+}
